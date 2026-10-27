@@ -19,6 +19,7 @@ import shutil
 import signal
 import socket
 import ssl
+import stat
 import subprocess
 import sys
 import tarfile
@@ -147,6 +148,24 @@ def worker(binary):
                 archive.addfile(info, io.BytesIO(raw))
         bundle_sha = hashlib.sha256(bundle.read_bytes()).hexdigest()
         PHASE = 'install'
+        # Diagnose hosted-runner ancestry WITHOUT weakening the real installer
+        # or chmod/chown of a foreign parent. Labels and metadata are bounded;
+        # no secret paths, file contents or arbitrary stderr leave the fixture.
+        paths = {'systemctl': Path('/usr/bin/systemctl'), 'bundle': bundle,
+                 'approval': case / 'approval.json', 'source_config': case / 'config.json',
+                 'destination_config': config_dir / 'config.json', 'unit': unit,
+                 'versions': installed / 'versions', 'install_state': install_state}
+        for key in ('tls_cert_file', 'tls_key_file', 'dsn_file', 'billing_token_file', 'admin_read_token_file', 'admin_write_token_file'):
+            paths[key] = Path(config[key])
+        for label, path in paths.items():
+            for index, parent in enumerate([*reversed(path.parents), path]):
+                try:
+                    info = parent.lstat()
+                except FileNotFoundError:
+                    continue
+                require(info.st_uid == 0 and not stat.S_ISLNK(info.st_mode) and not info.st_mode & 0o022,
+                        'HOSTED_PATH_UNSAFE_' + label + '_' + str(index) + '_uid' + str(info.st_uid) +
+                        '_mode' + oct(stat.S_IMODE(info.st_mode)) + '_link' + str(int(stat.S_ISLNK(info.st_mode))))
         # The explicit development channel is a test trust boundary, not a
         # publisher signature claim. Exercise the real installer, not receipts.
         owned += [state, install_state, installed]
