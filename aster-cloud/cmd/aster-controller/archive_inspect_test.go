@@ -32,6 +32,7 @@ func TestControllerArchiveInspection(t *testing.T) {
 	key := "ASTER-CONTROLLER-RECOVERY-1:" + strings.Repeat("71", 32)
 	files := map[string][]byte{
 		"controller/materials.json": []byte("[]\n"),
+		"database/schema.json":      []byte(`{"schema":1,"charset":"utf8mb4","collation":"utf8mb4_bin"}`),
 		"controller/config.json":    []byte("{}\n"), "source/installation.json": []byte("{}\n"),
 		"source/plan.json": []byte("{}\n"), "source/isolated.json": []byte("{}\n"),
 	}
@@ -124,7 +125,7 @@ controller_public_ingress_versions controller_public_ingress_operations controll
 	}
 	var report map[string]any
 	if json.Unmarshal(out, &report) != nil || report["authenticated"] != true || report["content_integrity_verified"] != true ||
-		report["controller_id"] != "source-one" || report["entries"] != float64(39) || report["data_semantics_verified"] != false ||
+		report["controller_id"] != "source-one" || report["entries"] != float64(40) || report["data_semantics_verified"] != false ||
 		report["target_restore_approved"] != false || report["migration_ready"] != false {
 		t.Fatalf("container proof must not claim restore approval: %s", out)
 	}

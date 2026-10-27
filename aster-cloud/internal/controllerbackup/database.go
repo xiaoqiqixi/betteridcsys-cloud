@@ -3,6 +3,7 @@ package controllerbackup
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"io"
 	"regexp"
@@ -20,12 +21,22 @@ type Column struct {
 	Collation *string `json:"collation"`
 	Extra     string  `json:"extra"`
 	Key       string  `json:"key"`
+	Default   *string `json:"default"`
 }
 type Table struct {
-	Schema  int      `json:"schema"`
-	Name    string   `json:"table"`
-	Columns []Column `json:"columns"`
-	NextID  *string  `json:"next_id"`
+	Schema    int      `json:"schema"`
+	Name      string   `json:"table"`
+	Columns   []Column `json:"columns"`
+	NextID    *string  `json:"next_id"`
+	Collation string   `json:"collation"`
+}
+
+// The target database name is deliberately NOT inherited from a backup.
+// Encoding and comparison defaults are part of the data contract, however.
+type DatabaseSchema struct {
+	Schema    int    `json:"schema"`
+	Charset   string `json:"charset"`
+	Collation string `json:"collation"`
 }
 
 var sqlName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
@@ -33,7 +44,7 @@ var sqlName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 func tableNames() []string {
 	var names []string
 	for name := range requiredFiles() {
-		if strings.HasPrefix(name, "database/") {
+		if strings.HasPrefix(name, "database/") && strings.HasSuffix(name, ".jsonl") {
 			names = append(names, strings.TrimSuffix(strings.TrimPrefix(name, "database/"), ".jsonl"))
 		}
 	}
@@ -50,6 +61,11 @@ func SnapshotDatabase(ctx context.Context, db *sql.DB, write func(string, func(i
 		return 0, ErrInvalid
 	}
 	defer conn.Close()
+	defer discardConnection(conn)
+	// AUTO_INCREMENT is restore state, not a cached capacity statistic.
+	if _, err = conn.ExecContext(ctx, "SET SESSION information_schema_stats_expiry=0"); err != nil {
+		return 0, ErrInvalid
+	}
 	var locked int
 	if conn.QueryRowContext(ctx, "SELECT GET_LOCK('aster_controller_schema_v1',5)").Scan(&locked) != nil || locked != 1 {
 		return 0, ErrInvalid
@@ -102,63 +118,23 @@ func SnapshotDatabase(ctx context.Context, db *sql.DB, write func(string, func(i
 		}
 		r.Close()
 	}
+	schema := DatabaseSchema{Schema: 1}
+	if tx.QueryRowContext(ctx, "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=DATABASE()").Scan(&schema.Charset, &schema.Collation) != nil || !sqlName.MatchString(schema.Charset) || !sqlName.MatchString(schema.Collation) {
+		return 0, ErrInvalid
+	}
+	if write("database/schema.json", func(w io.Writer) error { return json.NewEncoder(w).Encode(schema) }) != nil {
+		return 0, ErrInvalid
+	}
 	var count int64
 	for _, name := range names {
-		table := Table{Schema: 1, Name: name}
-		r, e := tx.QueryContext(ctx, "SELECT COLUMN_NAME,COLUMN_TYPE,IS_NULLABLE,CHARACTER_SET_NAME,COLLATION_NAME,EXTRA,COLUMN_KEY FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? ORDER BY ORDINAL_POSITION", name)
+		table, e := describeTable(ctx, tx, name)
 		if e != nil {
 			return 0, ErrInvalid
 		}
-		var selectColumns, primary []string
-		for r.Next() {
-			var c Column
-			if r.Scan(&c.Name, &c.Type, &c.Nullable, &c.Charset, &c.Collation, &c.Extra, &c.Key) != nil || !sqlName.MatchString(c.Name) || len(table.Columns) >= 128 || (c.Extra != "" && c.Extra != "auto_increment") {
-				r.Close()
-				return 0, ErrInvalid
-			}
-			table.Columns = append(table.Columns, c)
-			selectColumns = append(selectColumns, "CAST(`"+c.Name+"` AS BINARY)")
-			if c.Key == "PRI" {
-				primary = append(primary, "`"+c.Name+"`")
-			}
-		}
-		e = r.Err()
-		r.Close()
-		if e != nil || len(table.Columns) == 0 || len(primary) == 0 {
-			return 0, ErrInvalid
-		}
-		if tx.QueryRowContext(ctx, "SELECT CAST(AUTO_INCREMENT AS CHAR) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?", name).Scan(&table.NextID) != nil {
-			return 0, ErrInvalid
-		}
 		e = write("database/"+name+".jsonl", func(w io.Writer) error {
-			enc := json.NewEncoder(w)
-			if enc.Encode(table) != nil {
-				return ErrInvalid
-			}
-			data, e := tx.QueryContext(ctx, "SELECT "+strings.Join(selectColumns, ",")+" FROM `"+name+"` ORDER BY "+strings.Join(primary, ","))
-			if e != nil {
-				return ErrInvalid
-			}
-			defer data.Close()
-			values := make([][]byte, len(table.Columns))
-			destinations := make([]any, len(values))
-			for i := range values {
-				destinations[i] = &values[i]
-			}
-			for data.Next() {
-				if data.Scan(destinations...) != nil {
-					return ErrInvalid
-				}
-				var bytes int64
-				for _, value := range values {
-					bytes += int64(len(value))
-				}
-				if bytes > 48<<20 || enc.Encode(values) != nil {
-					return ErrInvalid
-				}
-				count++
-			}
-			return data.Err()
+			n, e := streamTable(ctx, tx, table, w)
+			count += n
+			return e
 		})
 		if e != nil {
 			return 0, ErrInvalid
@@ -168,4 +144,81 @@ func SnapshotDatabase(ctx context.Context, db *sql.DB, write func(string, func(i
 		return 0, ErrInvalid
 	}
 	return count, nil
+}
+
+type sqlReader interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// Restore/snapshot session settings and named locks must not leak to a later
+// borrower of the caller's connection pool. The driver closes this connection;
+// it is not returned as an idle application connection.
+func discardConnection(conn *sql.Conn) { _ = conn.Raw(func(any) error { return driver.ErrBadConn }) }
+
+func describeTable(ctx context.Context, q sqlReader, name string) (Table, error) {
+	table := Table{Schema: 1, Name: name}
+	r, e := q.QueryContext(ctx, "SELECT COLUMN_NAME,COLUMN_TYPE,IS_NULLABLE,CHARACTER_SET_NAME,COLLATION_NAME,EXTRA,COLUMN_KEY,COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? ORDER BY ORDINAL_POSITION", name)
+	if e != nil {
+		return Table{}, ErrInvalid
+	}
+	for r.Next() {
+		var c Column
+		if r.Scan(&c.Name, &c.Type, &c.Nullable, &c.Charset, &c.Collation, &c.Extra, &c.Key, &c.Default) != nil || !sqlName.MatchString(c.Name) || len(table.Columns) >= 128 || (c.Extra != "" && c.Extra != "auto_increment") {
+			r.Close()
+			return Table{}, ErrInvalid
+		}
+		table.Columns = append(table.Columns, c)
+	}
+	e = r.Err()
+	r.Close()
+	if e != nil || len(table.Columns) == 0 {
+		return Table{}, ErrInvalid
+	}
+	if q.QueryRowContext(ctx, "SELECT CAST(AUTO_INCREMENT AS CHAR),TABLE_COLLATION FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?", name).Scan(&table.NextID, &table.Collation) != nil || !sqlName.MatchString(table.Collation) {
+		return Table{}, ErrInvalid
+	}
+	return table, nil
+}
+
+func streamTable(ctx context.Context, q sqlReader, table Table, w io.Writer) (int64, error) {
+	var columns, primary []string
+	for _, c := range table.Columns {
+		columns = append(columns, "CAST(`"+c.Name+"` AS BINARY)")
+		if c.Key == "PRI" {
+			primary = append(primary, "`"+c.Name+"`")
+		}
+	}
+	if len(primary) == 0 {
+		return 0, ErrInvalid
+	}
+	enc := json.NewEncoder(w)
+	if enc.Encode(table) != nil {
+		return 0, ErrInvalid
+	}
+	rows, e := q.QueryContext(ctx, "SELECT "+strings.Join(columns, ",")+" FROM `"+table.Name+"` ORDER BY "+strings.Join(primary, ","))
+	if e != nil {
+		return 0, ErrInvalid
+	}
+	defer rows.Close()
+	values := make([][]byte, len(table.Columns))
+	destinations := make([]any, len(values))
+	for i := range values {
+		destinations[i] = &values[i]
+	}
+	var count int64
+	for rows.Next() {
+		if rows.Scan(destinations...) != nil {
+			return 0, ErrInvalid
+		}
+		var size int64
+		for _, value := range values {
+			size += int64(len(value))
+		}
+		if size > 48<<20 || enc.Encode(values) != nil {
+			return 0, ErrInvalid
+		}
+		count++
+	}
+	return count, rows.Err()
 }

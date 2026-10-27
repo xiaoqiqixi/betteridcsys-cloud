@@ -67,7 +67,7 @@ type Report struct {
 // never from the archive. This inventory does not authorize executing SQL from
 // a backup, nor establish row/foreign-key correctness for a target database.
 func requiredFiles() map[string]bool {
-	names := map[string]bool{"controller/config.json": true, "controller/materials.json": true, "source/installation.json": true,
+	names := map[string]bool{"controller/config.json": true, "controller/materials.json": true, "database/schema.json": true, "source/installation.json": true,
 		"source/plan.json": true, "source/isolated.json": true}
 	pattern := regexp.MustCompile(`(?i)CREATE TABLE (?:IF NOT EXISTS )?(controller_[a-z0-9_]+)\s*\(`)
 	for _, migration := range migrations.All() {
@@ -213,7 +213,7 @@ func (r *countedReader) padAfter(size int64) { r.padding = int((512 - size%512) 
 
 func tarSpan(size int64) int64 { return 512 + ((size+511)/512)*512 }
 
-func inspect(reader io.Reader, key, expectedController, expectedOperation string) (Report, error) {
+func inspect(reader io.Reader, key, expectedController, expectedOperation string, stage func(Entry) (io.WriteCloser, error), authenticated func(Manifest)) (Report, error) {
 	identity, err := age.NewScryptIdentity(key)
 	if err != nil {
 		return Report{}, ErrInvalid
@@ -250,7 +250,21 @@ func inspect(reader io.Reader, key, expectedController, expectedOperation string
 			return Report{}, ErrInvalid
 		}
 		hash := sha256.New()
-		n, err := io.Copy(hash, tr)
+		var output io.WriteCloser
+		var writer io.Writer = hash
+		if stage != nil {
+			output, err = stage(entry)
+			if err != nil {
+				return Report{}, ErrInvalid
+			}
+			writer = io.MultiWriter(hash, output)
+		}
+		n, err := io.Copy(writer, tr)
+		if output != nil {
+			if e := output.Close(); e != nil {
+				return Report{}, ErrInvalid
+			}
+		}
 		if err != nil || n != entry.Size || hex.EncodeToString(hash.Sum(nil)) != entry.SHA256 {
 			return Report{}, ErrInvalid
 		}
@@ -267,6 +281,9 @@ func inspect(reader io.Reader, key, expectedController, expectedOperation string
 	var probe [1]byte
 	if n, err := clear.Read(probe[:]); n != 0 || err != io.EOF {
 		return Report{}, ErrInvalid
+	}
+	if authenticated != nil {
+		authenticated(manifest)
 	}
 	return Report{Schema: 1, Protocol: Protocol, ControllerID: manifest.ControllerID, OperationID: manifest.OperationID,
 		SourceCommit: manifest.SourceCommit, Entries: len(manifest.Files), DataBytes: total,
@@ -311,6 +328,10 @@ func ownedInput(path string, maximum int64) (*os.File, os.FileInfo, error) {
 // InspectFiles is read-only and may run offline as the owner of both private
 // inputs. It never opens a database, extracts archive paths or activates a host.
 func InspectFiles(archive, keyFile, expectedController, expectedOperation string) (Report, error) {
+	return inspectFiles(archive, keyFile, expectedController, expectedOperation, nil, nil)
+}
+
+func inspectFiles(archive, keyFile, expectedController, expectedOperation string, stage func(Entry) (io.WriteCloser, error), authenticated func(Manifest)) (Report, error) {
 	if !controllerID.MatchString(expectedController) || !operationID.MatchString(expectedOperation) {
 		return Report{}, ErrInvalid
 	}
@@ -329,7 +350,7 @@ func InspectFiles(archive, keyFile, expectedController, expectedOperation string
 		return Report{}, ErrInvalid
 	}
 	defer f.Close()
-	result, err := inspect(io.LimitReader(f, before.Size()+1), key, expectedController, expectedOperation)
+	result, err := inspect(io.LimitReader(f, before.Size()+1), key, expectedController, expectedOperation, stage, authenticated)
 	if err != nil {
 		return Report{}, ErrInvalid
 	}
