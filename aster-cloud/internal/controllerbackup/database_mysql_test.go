@@ -328,6 +328,130 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 			t.Fatal("failed restore retained plaintext staging")
 		}
 	})
+
+	t.Run("explicitly marked empty target retains provisioning evidence", func(t *testing.T) {
+		op := make([]byte, 16)
+		if _, e := rand.Read(op); e != nil {
+			t.Fatal(e)
+		}
+		operation := hex.EncodeToString(op)
+		database := "aster_cloud_restore_" + operation
+		if _, e := admin.ExecContext(ctx, "CREATE DATABASE `"+database+"` CHARACTER SET utf8mb4 COLLATE utf8mb4_bin"); e != nil {
+			t.Fatal(e)
+		}
+		defer func() {
+			if _, e := admin.Exec("DROP DATABASE `" + database + "`"); e != nil {
+				t.Error("marked target fixture cleanup failed")
+			}
+		}()
+		cfg := *c
+		cfg.DBName = database
+		target, e := control.OpenDSN(cfg.FormatDSN())
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer target.DB.Close()
+		var server string
+		if target.DB.QueryRowContext(ctx, "SELECT @@server_uuid").Scan(&server) != nil {
+			t.Fatal("fixture UUID unavailable")
+		}
+		nonce := strings.Repeat("9", 64)
+		if _, e = target.DB.ExecContext(ctx, "CREATE TABLE aster_installer_ownership (id INT PRIMARY KEY,nonce CHAR(64) NOT NULL,server_uuid CHAR(36) NOT NULL) ENGINE=InnoDB"); e != nil {
+			t.Fatal(e)
+		}
+		if _, e = target.DB.ExecContext(ctx, "INSERT INTO aster_installer_ownership VALUES(1,?,?)", nonce, server); e != nil {
+			t.Fatal(e)
+		}
+		runtime := cfg
+		runtime.User = "aster_restore_runtime"
+		owner := map[string]any{"schema": 1, "database": database, "runtime_user": runtime.User, "migration_user": cfg.User, "server_uuid": server, "nonce": nonce, "steps": []string{"database-created", "runtime-created", "runtime-granted", "migration-created", "migration-granted"}, "status": "dedicated-database-provisioned"}
+		dir, archive, key := encryptedSQLFixture(t, files, operation)
+		restore := func(marked bool) (controllerbackup.DatabaseRestoreReport, error) {
+			var result controllerbackup.DatabaseRestoreReport
+			e := controllerbackup.WithVerifiedArchive(archive, key, "source-sql-test", operation, dir, func(a *controllerbackup.Archive) error {
+				var e error
+				if marked {
+					raw, e := json.Marshal(owner)
+					if e != nil {
+						return e
+					}
+					result, e = a.RestoreMarkedEmptyDatabase(ctx, target.DB, raw, runtime.FormatDSN()+"\n")
+					return e
+				}
+				result, e = a.RestoreEmptyDatabase(ctx, target.DB)
+				return e
+			})
+			return result, e
+		}
+		unchanged := func() {
+			t.Helper()
+			var tables int
+			var gotNonce, gotServer string
+			if target.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()").Scan(&tables) != nil || tables != 1 || target.DB.QueryRowContext(ctx, "SELECT nonce,server_uuid FROM aster_installer_ownership WHERE id=1").Scan(&gotNonce, &gotServer) != nil || gotNonce != nonce || gotServer != server {
+				t.Fatal("refused marker check reached DDL or changed ownership")
+			}
+		}
+		if _, e = restore(false); e != controllerbackup.ErrInvalid {
+			t.Fatal("ordinary empty-database API silently ignored ownership table", e)
+		}
+		unchanged()
+		for key, bad := range map[string]string{"nonce": strings.Repeat("8", 64), "server_uuid": "00000000-0000-0000-0000-000000000000", "database": "aster_cloud_foreign", "migration_user": "aster_other"} {
+			old := owner[key]
+			owner[key] = bad
+			if _, e = restore(true); e != controllerbackup.ErrInvalid {
+				t.Fatal("mismatched target ownership accepted", key, e)
+			}
+			owner[key] = old
+			unchanged()
+		}
+		// A correctly named table is not a schema exclusion: extra objects and an
+		// altered marker definition must both fail before the first business DDL.
+		if _, e = target.DB.ExecContext(ctx, "CREATE TABLE foreign_target(id INT PRIMARY KEY)"); e != nil {
+			t.Fatal(e)
+		}
+		if _, e = restore(true); e != controllerbackup.ErrInvalid {
+			t.Fatal("foreign target table ignored", e)
+		}
+		if _, e = target.DB.ExecContext(ctx, "DROP TABLE foreign_target"); e != nil {
+			t.Fatal(e)
+		}
+		unchanged()
+		if _, e = target.DB.ExecContext(ctx, "ALTER TABLE aster_installer_ownership ADD COLUMN unapproved INT"); e != nil {
+			t.Fatal(e)
+		}
+		if _, e = restore(true); e != controllerbackup.ErrInvalid {
+			t.Fatal("altered marker schema accepted", e)
+		}
+		if _, e = target.DB.ExecContext(ctx, "ALTER TABLE aster_installer_ownership DROP COLUMN unapproved"); e != nil {
+			t.Fatal(e)
+		}
+		unchanged()
+		report, e := restore(true)
+		if e != nil || report.Tables != 34 || report.Rows != count || !report.ExactRowsVerified || !report.ProvisioningMarkerPreserved || report.TargetActivationApproved || report.MigrationReady {
+			t.Fatal("marked empty target restore not verified", e, report)
+		}
+		var gotNonce, gotServer string
+		var tables int
+		if target.DB.QueryRowContext(ctx, "SELECT nonce,server_uuid FROM aster_installer_ownership WHERE id=1").Scan(&gotNonce, &gotServer) != nil || gotNonce != nonce || gotServer != server || target.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()").Scan(&tables) != nil || tables != 35 {
+			t.Fatal("restore lost or replaced its own marker")
+		}
+		var raw []byte
+		var datacenter string
+		var high string
+		if target.DB.QueryRowContext(ctx, "SELECT capabilities,datacenter_id FROM controller_nodes WHERE id='node-a'").Scan(&raw, &datacenter) != nil || !bytes.Equal(raw, []byte{0, 255, 0, 10, 34, 92, 128}) || datacenter != "香港" || target.DB.QueryRowContext(ctx, "SELECT CAST(revision AS CHAR) FROM controller_console_users WHERE id=?", userID).Scan(&high) != nil || high != "18446744073709551614" {
+			t.Fatal("marked restore damaged source values")
+		}
+		if _, e = restore(true); e != controllerbackup.ErrInvalid {
+			t.Fatal("marked restore replay overwrote populated target", e)
+		}
+		if e = target.Check(ctx); e != nil {
+			t.Fatal("marked target schema failed", e)
+		}
+		entries, e := os.ReadDir(dir)
+		if e != nil || len(entries) != 2 {
+			t.Fatal("marked restore left plaintext")
+		}
+	})
 	// A foreign table must not be silently omitted or included in the backup.
 	if _, e = store.DB.ExecContext(ctx, "CREATE TABLE foreign_table(id INT PRIMARY KEY) ENGINE=InnoDB"); e != nil {
 		t.Fatal(e)

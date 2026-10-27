@@ -23,6 +23,7 @@ type DatabaseRestoreReport struct {
 	Rows                        int64 `json:"rows"`
 	ExactRowsVerified           bool  `json:"exact_rows_verified"`
 	DeclaredConstraintsVerified bool  `json:"declared_constraints_verified"`
+	ProvisioningMarkerPreserved bool  `json:"provisioning_marker_preserved"`
 	TargetActivationApproved    bool  `json:"target_activation_approved"`
 	MigrationReady              bool  `json:"migration_ready"`
 }
@@ -146,6 +147,34 @@ func (a *Archive) tableRecords(ctx context.Context, name string, header func(Tab
 // never writes config, starts a process, contacts a node or edits source data.
 // A rejected/partial new schema is retained; never silently deleted/reused.
 func (a *Archive) RestoreEmptyDatabase(ctx context.Context, target *sql.DB) (DatabaseRestoreReport, error) {
+	return a.restoreDatabase(ctx, target, nil)
+}
+
+// RestoreMarkedEmptyDatabase is the data-stage variant for the native
+// installer's retained marker. Receipt/DSN bytes must come from the protected
+// TARGET provisioning journal, never from the backup's source receipt. This
+// verifies the live marker and account binding; it does NOT establish fresh
+// database creation, grants, metadata visibility or absence of other writers.
+// The root coordinator must prove those properties and keep the target sealed.
+// Ordinary RestoreEmptyDatabase retains its strict zero-object requirement.
+func (a *Archive) RestoreMarkedEmptyDatabase(ctx context.Context, target *sql.DB, receipt []byte, runtimeDSN string) (DatabaseRestoreReport, error) {
+	if len(receipt) > 65536 || len(runtimeDSN) > 4096 {
+		return DatabaseRestoreReport{}, ErrInvalid
+	}
+	runtimeDSN = strings.TrimSpace(runtimeDSN)
+	owner, err := decodeDatabaseOwnership(receipt, runtimeDSN)
+	if err != nil {
+		return DatabaseRestoreReport{}, ErrInvalid
+	}
+	parsed, err := control.OpenDSN(runtimeDSN) // lazy parser, never connected
+	if err != nil {
+		return DatabaseRestoreReport{}, ErrInvalid
+	}
+	parsed.DB.Close()
+	return a.restoreDatabase(ctx, target, owner)
+}
+
+func (a *Archive) restoreDatabase(ctx context.Context, target *sql.DB, owner *databaseOwnership) (DatabaseRestoreReport, error) {
 	if a == nil || !a.valid || target == nil {
 		return DatabaseRestoreReport{}, ErrInvalid
 	}
@@ -189,20 +218,32 @@ func (a *Archive) RestoreEmptyDatabase(ctx context.Context, target *sql.DB) (Dat
 		defer cancel()
 		_, _ = conn.ExecContext(c, "DO RELEASE_LOCK(?)", lock)
 	}()
-	for _, q := range []string{
+	for index, q := range []string{
 		"SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()",
 		"SELECT COUNT(*) FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA=DATABASE()",
 		"SELECT COUNT(*) FROM information_schema.EVENTS WHERE EVENT_SCHEMA=DATABASE()",
 		"SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA=DATABASE()",
 	} {
 		var n int
-		if conn.QueryRowContext(ctx, q).Scan(&n) != nil || n != 0 {
+		want := 0
+		if index == 0 && owner != nil {
+			want = 1 // only the exact, independently checked marker below
+		}
+		if conn.QueryRowContext(ctx, q).Scan(&n) != nil || n != want {
 			return DatabaseRestoreReport{}, ErrInvalid
 		}
 	}
 	var charset, collation string
 	if conn.QueryRowContext(ctx, "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=DATABASE()").Scan(&charset, &collation) != nil || charset != schema.Charset || collation != schema.Collation {
 		return DatabaseRestoreReport{}, ErrInvalid
+	}
+	if owner != nil {
+		var account, engine, kind string
+		if conn.QueryRowContext(ctx, "SELECT CURRENT_USER()").Scan(&account) != nil || account != owner.MigrationUser+"@localhost" ||
+			conn.QueryRowContext(ctx, "SELECT ENGINE,TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='aster_installer_ownership'").Scan(&engine, &kind) != nil || engine != "InnoDB" || kind != "BASE TABLE" ||
+			verifyDatabaseOwnership(ctx, conn, owner, schema) != nil {
+			return DatabaseRestoreReport{}, ErrInvalid
+		}
 	}
 	for _, q := range []string{
 		"SET SESSION information_schema_stats_expiry=0",
@@ -242,6 +283,11 @@ func (a *Archive) RestoreEmptyDatabase(ctx context.Context, target *sql.DB) (Dat
 		return DatabaseRestoreReport{}, ErrInvalid
 	}
 	defer tx.Rollback()
+	// SERIALIZABLE locks the retained marker through the entire data commit.
+	// If it drifted during DDL, retain the unactivated schema and refuse rows.
+	if owner != nil && verifyDatabaseOwnership(ctx, tx, owner, schema) != nil {
+		return DatabaseRestoreReport{}, ErrInvalid
+	}
 	// Only the known migration seeds may be replaced. No broad deletion of
 	// foreign rows, INSERT IGNORE, REPLACE, disabled FKs or ignored constraints.
 	for _, name := range names {
@@ -318,10 +364,13 @@ func (a *Archive) RestoreEmptyDatabase(ctx context.Context, target *sql.DB) (Dat
 			return DatabaseRestoreReport{}, ErrInvalid
 		}
 	}
+	if owner != nil && verifyDatabaseOwnership(ctx, tx, owner, schema) != nil {
+		return DatabaseRestoreReport{}, ErrInvalid
+	}
 	if tx.Commit() != nil {
 		return DatabaseRestoreReport{}, ErrInvalid
 	}
-	return DatabaseRestoreReport{Tables: len(names), Rows: total, ExactRowsVerified: true, DeclaredConstraintsVerified: true}, nil
+	return DatabaseRestoreReport{Tables: len(names), Rows: total, ExactRowsVerified: true, DeclaredConstraintsVerified: true, ProvisioningMarkerPreserved: owner != nil}, nil
 }
 
 func (a *Archive) schemaRowsMatch(ctx context.Context) bool {
