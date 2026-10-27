@@ -45,7 +45,7 @@ jobs:
           python3 -B aster-cloud/deploy/ci/test_unified_install.py
           python3 -B aster-cloud/deploy/ci/test_install_entrypoints.py
           python3 -B aster-cloud/deploy/ci/test_public_cloud_evidence.py
-          python3 -B aster-cloud/deploy/ci/check_install_entrypoints.py --readme README.md --bootstrap aster-cloud/deploy/install/release_verify.py
+          python3 -B aster-cloud/deploy/ci/check_install_entrypoints.py --readme README.md --entry aster-cloud/deploy/install/cloud.py --bootstrap aster-cloud/deploy/install/release_verify.py
       - name: Native installer and disposable fixture safety contracts (no host apply)
         run: |
           bash -n aster-cloud/deploy/install/controller.sh aster-cloud/deploy/install/node.sh aster-cloud/deploy/ci/native-mysql/mysql-native.sh

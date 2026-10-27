@@ -33,8 +33,11 @@ jobs:
             https://api.github.com/repos/xiaoqiqixi/betteridcsys/releases/tags/cloud-v0.1.0-rc.1 > "$RUNNER_TEMP/release.json"
           curl --fail --silent --show-error --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 \
             https://raw.githubusercontent.com/xiaoqiqixi/betteridcsys/8092c3cc0517c69562e8a5cdd94bc5e389e1bc8e/aster-cloud/deploy/install/release_verify.py > "$RUNNER_TEMP/published-bootstrap.py"
+          curl --fail --silent --show-error --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 \
+            https://raw.githubusercontent.com/xiaoqiqixi/betteridcsys-cloud/92e484389a84312ab5b5f8d25688a93d7047926f/aster-cloud/deploy/install/cloud.py > "$RUNNER_TEMP/unified-entry.py"
           python3 -I aster-cloud/deploy/ci/check_install_entrypoints.py --readme README.md \
-            --bootstrap "$RUNNER_TEMP/published-bootstrap.py" --release-metadata "$RUNNER_TEMP/release.json"
+            --entry "$RUNNER_TEMP/unified-entry.py" --bootstrap "$RUNNER_TEMP/published-bootstrap.py" --release-metadata "$RUNNER_TEMP/release.json"
+          cmp "$RUNNER_TEMP/unified-entry.py" aster-cloud/deploy/install/cloud.py
           cmp "$RUNNER_TEMP/published-bootstrap.py" aster-cloud/deploy/install/release_verify.py
       - name: Anonymous real signatures and authenticated installer plan, never host apply
         env:

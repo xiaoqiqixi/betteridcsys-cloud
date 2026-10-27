@@ -28,27 +28,25 @@
 
 ## 一键安装
 
-主控和被控各运行一条命令，进入交互安装向导。程序自动下载并核验安装文件；按提示填写配置，确认后准备依赖、安装和启动服务。**无需下载源码，不需要 Git、Go 或 Node.js。**
+主控和被控使用**同一条命令**，运行后选择安装角色。程序自动下载并核验安装文件；按提示填写配置，确认后准备依赖、安装和启动服务。**无需下载源码，不需要 Git、Go 或 Node.js。**
 
 以下命令安装已发布的 **0.1.0-rc.1 预发布版**，适用于 Ubuntu 22.04 / 24.04 amd64。请分别在主控服务器和专用 KVM 宿主机运行，不要在财务数据库主机上安装被控。
 
-### 安装主控
-
 ```sh
-bash -o pipefail -c 'curl --fail --silent --show-error --proto "=https" --tlsv1.2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 https://raw.githubusercontent.com/xiaoqiqixi/betteridcsys/8092c3cc0517c69562e8a5cdd94bc5e389e1bc8e/aster-cloud/deploy/install/release_verify.py | sudo /usr/bin/python3 -I - controller'
+bash -o pipefail -c 'curl --fail --silent --show-error --proto "=https" --tlsv1.2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 https://raw.githubusercontent.com/xiaoqiqixi/betteridcsys-cloud/92e484389a84312ab5b5f8d25688a93d7047926f/aster-cloud/deploy/install/cloud.py | sudo /usr/bin/python3 -I -'
 ```
 
-向导配置管理地址、TLS、独立 MySQL 和首个管理员。可选择自动准备新的专用数据库，不复用财务库。
-
-### 安装 KVM 被控
-
-```sh
-bash -o pipefail -c 'curl --fail --silent --show-error --proto "=https" --tlsv1.2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 https://raw.githubusercontent.com/xiaoqiqixi/betteridcsys/8092c3cc0517c69562e8a5cdd94bc5e389e1bc8e/aster-cloud/deploy/install/release_verify.py | sudo /usr/bin/python3 -I - node'
+```text
+1  安装云主控（管理台）
+2  安装 KVM 被控（专用计算宿主）
+0  退出，不作任何修改
 ```
 
-向导可自动准备 libvirt/QEMU；需提供节点身份、证书、已批准镜像和资源预算。被控不会接管已有虚拟机或自动修改物理上联。
+- **选择 1**：配置管理地址、TLS、独立 MySQL 和首个管理员。可自动准备新的专用数据库，不复用财务库。
+- **选择 2**：可自动准备 libvirt/QEMU；填写节点身份、证书、已批准镜像和资源预算。不会接管已有虚拟机或自动修改物理上联。
+- **选择 0 或取消**：退出，不默认安装任何角色。主控和被控仍建议分机部署。
 
-两条命令都固定到已发布源码，不跟随可变 main。初始脚本依赖 HTTPS 和你对该固定版本的信任，后续安装器与资源包独立验签。向导要求明确确认安装/启动，不自动接受空输入。
+入口固定到已核验源码，不跟随可变 main。初始脚本依赖 HTTPS 和你对该固定版本的信任；它先校验发布引导器的精确摘要，后续安装器与资源包独立验签。向导要求明确确认安装/启动，不自动接受空输入。
 
 [安装指南](docs/INSTALL.md) · [首次使用](aster-cloud/docs/GETTING_STARTED.md) · [版本说明与完整文件](https://github.com/xiaoqiqixi/betteridcsys/releases/tag/cloud-v0.1.0-rc.1)
 
