@@ -1,52 +1,52 @@
-# 星屿云 · 主控与 KVM 被控
+# 星屿云 · 云主控与 KVM 被控
 
-独立云主控、Vue 管理台及 Linux KVM 计算节点。主控负责权限、资源任务和状态；被控通过 libvirt/QEMU 管理虚拟机、存储和受限网络动作。
+面向自建云平台的虚拟机管理系统。主控提供管理台、权限、资源任务和审计；被控部署在计算宿主机上，通过 libvirt / QEMU / KVM 管理虚拟机，无需在客户虚拟机内安装代理。
 
-[财务前端](https://github.com/xiaoqiqixi/betteridcsys-frontend) · [财务后端](https://github.com/xiaoqiqixi/betteridcsys-backend) · [主控与被控](https://github.com/xiaoqiqixi/betteridcsys-cloud)
+采用 Go、MySQL、Vue 3 / TypeScript 和原生 systemd。可独立管理计算资源，也可通过资源插件与[财务系统](https://github.com/xiaoqiqixi/betteridcsys-backend)连接。
 
-## 目录
+[使用文档](docs/README.md) · [管理 API](aster-cloud/docs/CONSOLE_API.md) · [发行版本](https://github.com/xiaoqiqixi/betteridcsys-cloud/releases) · [问题反馈](https://github.com/xiaoqiqixi/betteridcsys-cloud/issues)
 
-| 目录 | 内容 |
+## 主要功能
+
+| 模块 | 功能 |
 | --- | --- |
-| `aster-cloud/cmd/` | 主控、被控、网络工具和显式财务连接器 |
-| `aster-cloud/internal/` | 实例/节点、任务、权限、快照备份、冷迁移、VPC/OVS/NAT/公网 IP |
-| `aster-cloud/frontend/` | 主控管理 UI，不复用财务门户的布局 |
-| `aster-cloud/deploy/` | 原生安装器、systemd、运维和验收工具 |
-| `contracts/billing/` | 最小财务↔主控协议 SDK；没有财务账本、数据库或支付实现 |
+| 管理台 | 管理员/操作员/只读/自定义权限、成员与会话、任务、审计 |
+| 节点与实例 | 节点准入、维护、预设配置创建实例、电源操作、删除与运行样本 |
+| 存储 | 停止态单系统盘快照和备份、普通网络实例的四阶段冷迁移 |
+| VPC 与网络 | OVS、IPAM、VXLAN peer、跨节点配置、批准路由与显式恢复 |
+| 公网管理 | IPv4 地址池、分配回收、SNAT/DNAT、普通网络直绑与 VPC 浮动 IP |
+| 财务连接 | 商品资源配置、独立连接身份与资源任务；不共享财务数据库或客户会话 |
 
-版本代码基线 0.1.0-rc.1，主控 schema12。目标 Ubuntu22.04 / 24.04 amd64，不使用 Docker。热迁移、HA、完整安全组、IPv6 和受控 VNC 等仍有缺口；真实 KVM、跨节点物理网络与生产容量验收后置，不能宣称生产可用。
+**当前为预发布软件。** 真实 KVM、跨节点物理网络和生产容量尚未验收；热迁移、HA、IPv6、完整安全组及受控 VNC 尚不支持。存储与迁移对网络模式有限制，使用前阅读[功能范围](aster-cloud/docs/ARCHITECTURE.md)。
 
-## 构建
+## 运行环境
 
-```sh
-python3 scripts/verify-billing-contract.py
-cd aster-cloud
-go mod download
-go test -mod=readonly -race -count=1 ./...
-go vet -mod=readonly ./...
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -trimpath -buildvcs=false ./cmd/aster-controller ./cmd/aster-node ./cmd/aster-network ./cmd/aster-billing-plugin
-cd frontend
-npm ci
-npm run typecheck
-npm test
-npm run build
-npm run format:check
-```
+- Ubuntu 22.04 / 24.04 amd64，原生 systemd；暂不支持 Ubuntu26。
+- 主控使用专用 MySQL 和可信 TLS；自带 HTTPS 服务与管理页面。
+- 被控需要可用的 `/dev/kvm`、libvirt/QEMU、足够的内存和存储，以及已规划的宿主网络。
+- 主控、财务和计算节点分别部署，不在财务数据库主机上试运行客户虚拟机。
 
-没有显式隔离 MySQL、分发版 OVS/libvirt 工具或宿主权限时，相关测试会跳过；只算对应 unit/build，不算真机或全链验收。当前 CI 名称区分这些范围，不用绿色构建替代真实 KVM。
+## 一键安装
 
-SDK按原提交的文件摘要校验，Go依赖在本仓库内闭合，不需要原仓库或财务服务端源码才能编译。接口变化需要显式更新 SDK 与兼容测试，不改金融金额、支付或历史快照。
+主控、被控分别提供独立安装入口。新仓库首版命令尚未发布；发布后在本节提供固定版本的一键安装命令。
 
-[完整能力与限制](aster-cloud/docs/ARCHITECTURE.md) · [主控使用](aster-cloud/docs/GETTING_STARTED.md) · [节点操作](aster-cloud/NODE_README.md)
+1. 选择“主控”或“被控”，安装程序自动下载并核验对应文件。
+2. 主控向导配置域名、TLS、数据库和管理员；被控向导配置宿主资源、证书、镜像和预算。
+3. 审查安装计划后确认执行，按[首次使用](aster-cloud/docs/GETTING_STARTED.md)完成节点准入和权限配置。
 
-## 下载与安装
+[安装手册](aster-cloud/deploy/install/README.md)说明依赖准备、输入、启动与失败恢复。未发布的源码不是可执行的一键安装通道。被控安装不接管已有虚拟机、不自动修改物理上联，也不以软件安装成功代替虚拟机验收。
 
-复制的旧安装器仍固定原发行者身份；新仓库首版通道须独立绑定新仓库 ID、工作流身份、签名与产物。源码存在不等于本仓库已有可执行的一键安装入口。迁移验收前不改弱来源保护，也不移除原下载通道。
+## 使用与运维
 
-## 拆分与交付状态
+- [主控入门](aster-cloud/docs/GETTING_STARTED.md) · [主控运维](aster-cloud/deploy/controller-OPERATIONS.md) · [被控运维](aster-cloud/NODE_README.md)
+- [VPC、路由与恢复](aster-cloud/docs/NETWORK_MANAGEMENT.md) · [公网地址池](aster-cloud/docs/PUBLIC_IP_MANAGEMENT.md)
+- [公网出口](aster-cloud/docs/PUBLIC_NAT_EGRESS.md) · [直绑与浮动 IP](aster-cloud/docs/VM_PUBLIC_IP_MANAGEMENT.md) · [入站规则](aster-cloud/docs/PUBLIC_INGRESS.md)
+- [日志与审计](aster-cloud/docs/LOGGING.md) · [财务连接](aster-cloud/plugins/billingconnector/README.md)
 
-本仓库从已提交、通过原项目 CI 的 main `fa4d2139ff5ecfc2802c0825e839134ca488d138` 拆出，不包含原工作区未完成的 schema14/员工权限改动。保留 Apache-2.0 许可证；初始来源见 [SOURCE_ORIGIN.json](SOURCE_ORIGIN.json)。它是来源清单，不是发行签名或本仓库的验收证明。
+## 开发与集成
 
-只使用 `main` 分支，不导入旧 Git 历史、贡献者署名或旧标签。原仓库 CI 结果不自动继承；本仓库构建与验收以自己的提交和运行记录为准。
+[管理 API](aster-cloud/docs/CONSOLE_API.md) · [网络 API](aster-cloud/docs/NETWORK_API.md) · [开发文档](docs/development/README.md)
 
-三个新仓库均完成构建、首版 Release、匿名产物下载/校验和安装更新来源迁移后，才删除原仓库及其 Releases。未完成迁移门禁时不得删除；具体门禁见 [仓库迁移清单](MIGRATION.md)。
+## 许可证
+
+[Apache License 2.0](LICENSE)。
