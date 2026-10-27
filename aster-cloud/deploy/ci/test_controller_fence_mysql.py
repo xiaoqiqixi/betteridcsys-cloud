@@ -314,6 +314,17 @@ def supervisor(binary, systemd=False):
             send(child.stdin, request)
             ready = receive(child.stdout)
             require(ready == {'phase': 'ready', 'controller_id': 'aster-fence-test-' + nonce}, 'SERVER_READY_PROTOCOL')
+            # Until bootstrap succeeds the private marker table proves DB
+            # ownership for failed-start cleanup. Once the real schema exists,
+            # transfer that same nonce/UUID to a fixture audit record before
+            # taking ANY acceptance snapshot. An unknown helper table must not
+            # make the production exporter accept a mixed/foreign schema.
+            admin.run('INSERT INTO `' + database + "`.controller_audit(actor,action,target,created_at) VALUES('" + nonce +
+                      "','fixture.ownership','" + server_uuid + "','2026-01-01');")
+            audit_owner = admin.json("SELECT JSON_OBJECT('nonce',actor,'uuid',target) FROM `" + database +
+                                     "`.controller_audit WHERE action='fixture.ownership';")
+            require(audit_owner == {'nonce': nonce, 'uuid': server_uuid}, 'BOOTSTRAPPED_OWNERSHIP_UNCONFIRMED')
+            admin.run('DROP TABLE `' + database + '`.contract_ownership;')
             # Seed two durable, synthetic unresolved receipts. No network member
             # is attached, and neither is eligible for automatic create dispatch.
             for index, state in enumerate(('sending', 'uncertain'), 1):
@@ -390,7 +401,14 @@ def supervisor(binary, systemd=False):
                         pass
                 require(root_cleanup, 'ROOT_SERVICE_CLEANUP_UNCONFIRMED_DATABASE_RETAINED')
             if created:
-                owner = admin.json("SELECT JSON_OBJECT('nonce',nonce,'uuid',server_uuid) FROM `" + database + "`.contract_ownership;")
+                temporary_marker = admin.run("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='" +
+                                             database + "' AND TABLE_NAME='contract_ownership';").strip()
+                require(temporary_marker in (b'0', b'1'), 'CLEANUP_MARKER_STATE_INVALID')
+                if temporary_marker == b'1':
+                    owner = admin.json("SELECT JSON_OBJECT('nonce',nonce,'uuid',server_uuid) FROM `" + database + "`.contract_ownership;")
+                else:
+                    owner = admin.json("SELECT JSON_OBJECT('nonce',actor,'uuid',target) FROM `" + database +
+                                       "`.controller_audit WHERE action='fixture.ownership';")
                 require(owner == {'nonce': nonce, 'uuid': server_uuid}, 'CLEANUP_OWNERSHIP_UNCONFIRMED')
                 admin.run('DROP DATABASE `' + database + '`;')
                 clean = admin.run("SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='" + database + "';").strip() == b'0'

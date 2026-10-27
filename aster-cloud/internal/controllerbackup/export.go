@@ -261,6 +261,21 @@ func ExportSealedSource(ctx context.Context, config control.Config, operation st
 	if e = publishNew(output.Name(), filepath.Join(dir, "backup.age")); e != nil {
 		return ExportReport{}, ErrInvalid
 	}
+	// Do not announce success if removing our private plaintext scratch failed.
+	// A crash can still leave this owned directory for explicit recovery; the
+	// durable export-started seal remains in place in that case too.
+	if output.Close() != nil || os.RemoveAll(scratch) != nil {
+		return ExportReport{}, ErrInvalid
+	}
+	parent, e := os.Open(dir)
+	if e != nil {
+		return ExportReport{}, ErrInvalid
+	}
+	e = parent.Sync()
+	parent.Close()
+	if e != nil {
+		return ExportReport{}, ErrInvalid
+	}
 	return ExportReport{Schema: 1, ControllerID: config.ControllerID, OperationID: operation, ArchiveSHA256: hex.EncodeToString(h.Sum(nil)), ArchiveBytes: info.Size(), DatabaseRows: rows, SourceReadOnly: true}, nil
 }
 
