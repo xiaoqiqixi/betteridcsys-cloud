@@ -385,6 +385,19 @@ def worker(binary):
                                     '-controller-id', controller, '-operation', exported_operation]).stdout)
         require(inspected['authenticated'] and inspected['content_integrity_verified'] and
                 not inspected['target_restore_approved'] and not inspected['migration_ready'], 'ACTUAL_ARCHIVE_NOT_AUTHENTICATED')
+        PHASE = 'offline-source-validation'
+        validation_args = [exe, 'migration-validate-source', '-archive', archive, '-key-file', recovery,
+                           '-controller-id', controller, '-operation', exported_operation, '-staging-dir', directory]
+        validated = json.loads(run([*validation_args, '-source-commit', source]).stdout)
+        require(validated['source_bindings_verified'] and validated['runtime_materials_verified'] and
+                validated['material_references'] == 9 and not validated['database_semantics_verified'] and
+                not validated['publisher_provenance_verified'] and not validated['target_restore_approved'] and
+                not validated['migration_ready'], 'ACTUAL_SOURCE_MATERIALS_UNCONFIRMED')
+        wrong_source = ('0' if source[0] != '0' else '1') + source[1:]
+        rejected = run([*validation_args, '-source-commit', wrong_source], denied=True)
+        require(rejected.returncode == 1 and not rejected.stdout and
+                json.loads(rejected.stderr).get('code') == 'COMMAND_FAILED', 'SOURCE_IDENTITY_NOT_REFUSED')
+        require(not any(directory.glob('.restore-verify-*')), 'SOURCE_VALIDATION_LEFT_PLAINTEXT')
         require(not any(directory.glob('.export-*')), 'EXPORT_LEFT_PLAINTEXT_SCRATCH')
         require(migrate('resume-source', exported_operation, denied=True).get('error') ==
                 'EXPORTED_SOURCE_CANNOT_BE_RESUMED_LOCALLY', 'EXPORTED_SOURCE_RESUMED')
@@ -393,7 +406,8 @@ def worker(binary):
         require(migrate('status', exported_operation)['source_isolated'], 'EXPORT_UNSEALED_SOURCE')
         send(sys.stdout.buffer, {'phase': 'complete', 'strict_tls': True, 'same_identity_restart': True,
                                 'hosted_opt_parent_hardened': opt_hardened,
-                                'encrypted_export_verified': True, 'exported_source_local_resume_denied': True})
+                                'encrypted_export_verified': True, 'exported_source_local_resume_denied': True,
+                                'archived_source_bindings_verified': True})
     finally:
         # Fresh-path checks above establish ownership before any installation;
         # only this fixture's role files and exact operation stages are removed.

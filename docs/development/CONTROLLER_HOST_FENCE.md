@@ -67,6 +67,6 @@
 
 运行时实库用例增加真实在途 HTTPS 请求：用 `Expect: 100-continue` 得到处理器开始读取请求体的明确证据，再执行停写；请求尚未结束时必须仍报告 `draining`，实际服务进程存活，且新 CLI 准入被拒绝。随后只发送一字节非法 JSON，要求完整 HTTP400 和既定错误码，才等待源服务自行退出。没有发送有效开通请求，没有重试，断网不能算拒绝成功；前后全库快照仍必须一致。这仅补充运行时请求排空，不把它写成系统重启证明。
 
-仍需本轮实际 systemd/MySQL 结果、更完整的并发与在途请求、原生 OS 重启复核及故障窗口验证。daemon-reload **不是**操作系统重启。完成这些才可关闭 M01。M02加密导出、M03空目标恢复、M04双活防护/接管回退、M05后台、M06跨主控实例迁移仍未交付；没有“导出后直接导入运行库”的捷径。
+`5c0aee3cb8b6bc1876cfd5d027b0d538413d95e4` 的 [CI 40557028613](https://github.com/xiaoqiqixi/betteridcsys-cloud/actions/runs/40557028613) 已验证 Ubuntu22/24 的在途 HTTPS 请求排空、真实 systemd/MySQL 隔离、保留安装器所有权标记的加密导出，以及空专用库的类型化数据往返。仍需原生 OS 重启复核、实际在途节点操作与故障窗口恢复；daemon-reload **不是**操作系统重启。M03 目标主机恢复、M04 双活防护/接管回退、M05 后台、M06 跨主控实例迁移未完成；数据库往返或离线来源校验均不提供“导出后直接导入运行库”的捷径。
 
 实现语义参考：[Linux renameat2](https://man7.org/linux/man-pages/man2/rename.2.html)、[systemd 单元加载与 mask](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html)。Ubuntu22/24 的实际行为仍由分发版测试确认，不以最新版手册替代验收。

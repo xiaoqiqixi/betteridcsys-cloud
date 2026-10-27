@@ -190,10 +190,21 @@ func readProtected(path string, private bool, maximum int64, owner uint32) ([]by
 	}
 	return raw, nil
 }
+
+// ParseConfig validates configuration bytes without following any file reference
+// or opening a database/node connection. Restore inspection must stay offline.
+func ParseConfig(raw []byte) (Config, error) {
+	var c Config
+	if !strict(raw, &c) || !c.Valid() {
+		return Config{}, ErrInput
+	}
+	return c, nil
+}
+
 func LoadConfig(path string) (Config, Secrets, error) {
 	raw, err := ReadProtected(path, true, 65536)
-	var c Config
-	if err != nil || !strict(raw, &c) || !c.Valid() {
+	c, parseErr := ParseConfig(raw)
+	if err != nil || parseErr != nil {
 		return Config{}, Secrets{}, ErrInput
 	}
 	token := func(path string) (string, error) {

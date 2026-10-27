@@ -50,6 +50,9 @@ func run(args []string) error {
 	if command == "migration-inspect" {
 		return inspectArchive(args[1:])
 	}
+	if command == "migration-validate-source" {
+		return validateArchiveSource(args[1:])
+	}
 	if command == "migration-capabilities" && len(args) == 1 {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
 			"schema": 1, "protocol": "aster.controller-host/1", "runtime_fence": runtime.GOOS == "linux",

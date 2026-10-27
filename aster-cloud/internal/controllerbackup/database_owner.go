@@ -37,18 +37,28 @@ func sourceDatabaseOwnership(dsn string) (*databaseOwnership, []byte, error) {
 	if e != nil {
 		return nil, nil, ErrInvalid
 	}
+	owner, e := decodeDatabaseOwnership(raw, dsn)
+	if e != nil {
+		return nil, nil, ErrInvalid
+	}
+	return owner, raw, nil
+}
+
+// Parsing an archived receipt verifies its binding to archived DSN bytes, not
+// ownership of the target server. Live source verification stays separate.
+func decodeDatabaseOwnership(raw []byte, dsn string) (*databaseOwnership, error) {
 	var owner databaseOwnership
 	account := regexp.MustCompile(`^aster_[a-z0-9_]{1,25}$`)
 	uuid := regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`)
 	config, e := mysql.ParseDSN(dsn)
 	steps := []string{"database-created", "runtime-created", "runtime-granted", "migration-created", "migration-granted"}
-	if e != nil || !strictRecord(raw, &owner) || owner.Schema != 1 || owner.Status != "dedicated-database-provisioned" ||
+	if e != nil || !exactSourceRecord(raw, &owner) || owner.Schema != 1 || owner.Status != "dedicated-database-provisioned" ||
 		!reflect.DeepEqual(owner.Steps, steps) || !sqlName.MatchString(owner.Database) || owner.Database != config.DBName ||
 		!account.MatchString(owner.RuntimeUser) || !account.MatchString(owner.MigrationUser) || owner.RuntimeUser == owner.MigrationUser ||
 		owner.RuntimeUser != config.User || !uuid.MatchString(owner.ServerUUID) || !shaPattern.MatchString(owner.Nonce) {
-		return nil, nil, ErrInvalid
+		return nil, ErrInvalid
 	}
-	return &owner, raw, nil
+	return &owner, nil
 }
 
 // Called inside the same read-only snapshot transaction after metadata locks
