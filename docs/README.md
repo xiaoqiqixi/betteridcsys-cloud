@@ -4,7 +4,7 @@
 
 ## 安装与开始使用
 
-- [安装主控与被控](../aster-cloud/deploy/install/README.md)：运行环境、角色、安装向导和失败恢复。
+- [安装主控与被控](INSTALL.md)：运行环境、角色、安装向导和失败恢复。
 - [首次使用](../aster-cloud/docs/GETTING_STARTED.md)：管理台登录、权限、节点准入与实例任务。
 - [功能范围](../aster-cloud/docs/ARCHITECTURE.md)：能力与适用条件。
 

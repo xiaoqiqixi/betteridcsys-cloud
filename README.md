@@ -4,7 +4,7 @@
 
 采用 Go、MySQL、Vue 3 / TypeScript 和原生 systemd。可独立管理计算资源，也可通过资源插件与[财务系统](https://github.com/xiaoqiqixi/betteridcsys-backend)连接。
 
-[使用文档](docs/README.md) · [管理 API](aster-cloud/docs/CONSOLE_API.md) · [发行版本](https://github.com/xiaoqiqixi/betteridcsys-cloud/releases) · [问题反馈](https://github.com/xiaoqiqixi/betteridcsys-cloud/issues)
+[使用文档](docs/README.md) · [管理 API](aster-cloud/docs/CONSOLE_API.md) · [下载预发布版](https://github.com/xiaoqiqixi/betteridcsys/releases/tag/cloud-v0.1.0-rc.1) · [问题反馈](https://github.com/xiaoqiqixi/betteridcsys-cloud/issues)
 
 ## 主要功能
 
@@ -28,13 +28,29 @@
 
 ## 一键安装
 
-主控、被控分别提供独立安装入口。新仓库首版命令尚未发布；发布后在本节提供固定版本的一键安装命令。
+主控和被控各运行一条命令，进入交互安装向导。程序自动下载并核验安装文件；按提示填写配置，确认后准备依赖、安装和启动服务。**无需下载源码，不需要 Git、Go 或 Node.js。**
 
-1. 选择“主控”或“被控”，安装程序自动下载并核验对应文件。
-2. 主控向导配置域名、TLS、数据库和管理员；被控向导配置宿主资源、证书、镜像和预算。
-3. 审查安装计划后确认执行，按[首次使用](aster-cloud/docs/GETTING_STARTED.md)完成节点准入和权限配置。
+以下命令安装已发布的 **0.1.0-rc.1 预发布版**，适用于 Ubuntu 22.04 / 24.04 amd64。请分别在主控服务器和专用 KVM 宿主机运行，不要在财务数据库主机上安装被控。
 
-[安装手册](aster-cloud/deploy/install/README.md)说明依赖准备、输入、启动与失败恢复。未发布的源码不是可执行的一键安装通道。被控安装不接管已有虚拟机、不自动修改物理上联，也不以软件安装成功代替虚拟机验收。
+### 安装主控
+
+```sh
+bash -o pipefail -c 'curl --fail --silent --show-error --proto "=https" --tlsv1.2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 https://raw.githubusercontent.com/xiaoqiqixi/betteridcsys/8092c3cc0517c69562e8a5cdd94bc5e389e1bc8e/aster-cloud/deploy/install/release_verify.py | sudo /usr/bin/python3 -I - controller'
+```
+
+向导配置管理地址、TLS、独立 MySQL 和首个管理员。可选择自动准备新的专用数据库，不复用财务库。
+
+### 安装 KVM 被控
+
+```sh
+bash -o pipefail -c 'curl --fail --silent --show-error --proto "=https" --tlsv1.2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 https://raw.githubusercontent.com/xiaoqiqixi/betteridcsys/8092c3cc0517c69562e8a5cdd94bc5e389e1bc8e/aster-cloud/deploy/install/release_verify.py | sudo /usr/bin/python3 -I - node'
+```
+
+向导可自动准备 libvirt/QEMU；需提供节点身份、证书、已批准镜像和资源预算。被控不会接管已有虚拟机或自动修改物理上联。
+
+两条命令都固定到已发布源码，不跟随可变 main。初始脚本依赖 HTTPS 和你对该固定版本的信任，后续安装器与资源包独立验签。向导要求明确确认安装/启动，不自动接受空输入。
+
+[安装指南](docs/INSTALL.md) · [首次使用](aster-cloud/docs/GETTING_STARTED.md) · [版本说明与完整文件](https://github.com/xiaoqiqixi/betteridcsys/releases/tag/cloud-v0.1.0-rc.1)
 
 ## 使用与运维
 

@@ -1,0 +1,64 @@
+name: Published installer download checks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-install-download-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  download-plan:
+    name: Published ${{ matrix.role }} download and plan (${{ matrix.os }})
+    if: github.repository == 'xiaoqiqixi/betteridcsys-cloud' && github.repository_id == '1435344151' && github.ref == 'refs/heads/main' && github.event.repository.private == false
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        role: [controller, node]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify README commands against anonymous published body and actual bootstrap bytes
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 \
+            https://api.github.com/repos/xiaoqiqixi/betteridcsys/releases/tags/cloud-v0.1.0-rc.1 > "$RUNNER_TEMP/release.json"
+          curl --fail --silent --show-error --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 \
+            https://raw.githubusercontent.com/xiaoqiqixi/betteridcsys/8092c3cc0517c69562e8a5cdd94bc5e389e1bc8e/aster-cloud/deploy/install/release_verify.py > "$RUNNER_TEMP/published-bootstrap.py"
+          python3 -I aster-cloud/deploy/ci/check_install_entrypoints.py --readme README.md \
+            --bootstrap "$RUNNER_TEMP/published-bootstrap.py" --release-metadata "$RUNNER_TEMP/release.json"
+          cmp "$RUNNER_TEMP/published-bootstrap.py" aster-cloud/deploy/install/release_verify.py
+      - name: Anonymous real signatures and authenticated installer plan, never host apply
+        env:
+          ROLE: ${{ matrix.role }}
+          TARGET_OS: ${{ matrix.os }}
+        run: |
+          set -euo pipefail
+          # Execute reviewed main bytes proven identical to the public bootstrap.
+          # No credential/environment inheritance, package install or service start.
+          sudo -n /usr/bin/env -i PATH=/usr/bin:/bin LANG=C.UTF-8 /usr/bin/python3 -I - "$ROLE" \
+            --download-only --evidence "$RUNNER_TEMP/cloud-public-proof.json" \
+            < aster-cloud/deploy/install/release_verify.py
+          sudo -n chmod 0644 "$RUNNER_TEMP/cloud-public-proof.json"
+          python3 -I aster-cloud/deploy/ci/public_cloud_evidence.py \
+            --evidence "$RUNNER_TEMP/cloud-public-proof.json" --role "$ROLE" --runner-os "$TARGET_OS" \
+            > "$RUNNER_TEMP/cloud-public-verification.json"
+      - name: Retain bounded nonsecret actual-platform evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: public-install-${{ matrix.os }}-${{ matrix.role }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/cloud-public-proof.json
+            ${{ runner.temp }}/cloud-public-verification.json
+          if-no-files-found: warn
+          overwrite: false
+          retention-days: 7

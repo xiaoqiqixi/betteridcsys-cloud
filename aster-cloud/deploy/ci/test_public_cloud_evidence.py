@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Offline proof-boundary negatives; real root bootstrap runs in its own gate."""
 import copy
+import contextlib
+import io
 import importlib.util
 import json
 import stat
@@ -99,6 +101,27 @@ class PublishedCloudEvidence(unittest.TestCase):
                 changed = dict(fields); changed[field] += 1
                 with self.subTest(field=field), mock.patch.object(P.os, "fstat", side_effect=[types.SimpleNamespace(**fields), types.SimpleNamespace(**changed)]), self.assertRaises(P.EvidenceError):
                     P.read_root_proof(path)
+
+    def test_new_repository_controls_check_without_rewriting_old_publisher_identity(self):
+        env = {"GITHUB_REPOSITORY": "xiaoqiqixi/betteridcsys-cloud", "GITHUB_REPOSITORY_ID": "1435344151",
+               "GITHUB_REF": "refs/heads/main", "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_SHA": "c" * 40}
+        facts = {"system": "Linux", "architecture": "x86_64", "distribution": "ubuntu", "version": "22.04"}
+        with mock.patch.dict(P.os.environ, env, clear=True), mock.patch.object(P, "read_root_proof", return_value=json.dumps(proof()).encode()), mock.patch.object(P.C.I, "target_info", return_value=facts), contextlib.redirect_stdout(io.StringIO()) as output:
+            code = P.main(["--evidence", "/synthetic/proof.json", "--role", "controller", "--runner-os", "ubuntu-22.04"])
+        self.assertEqual(code, 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["control_repository"], "xiaoqiqixi/betteridcsys-cloud")
+        self.assertEqual(result["control_repository_id"], 1435344151)
+        self.assertEqual(result["proof"]["source_commit"], "8092c3cc0517c69562e8a5cdd94bc5e389e1bc8e")
+        self.assertEqual(P.C.V.REPOSITORY, "xiaoqiqixi/betteridcsys")
+
+    def test_wrong_control_repository_id_event_or_branch_denied_before_proof_read(self):
+        env = {"GITHUB_REPOSITORY": "xiaoqiqixi/betteridcsys-cloud", "GITHUB_REPOSITORY_ID": "1435344151",
+               "GITHUB_REF": "refs/heads/main", "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_SHA": "c" * 40}
+        for key, value in (("GITHUB_REPOSITORY", "xiaoqiqixi/betteridcsys"), ("GITHUB_REPOSITORY_ID", "1418618420"),
+                           ("GITHUB_EVENT_NAME", "pull_request_target"), ("GITHUB_REF", "refs/heads/topic"), ("GITHUB_SHA", "main")):
+            with self.subTest(key=key), mock.patch.dict(P.os.environ, dict(env, **{key: value}), clear=True), mock.patch.object(P, "read_root_proof", side_effect=AssertionError("must reject context first")), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(P.main(["--evidence", "/synthetic/proof.json", "--role", "controller", "--runner-os", "ubuntu-22.04"]), 1)
 
 
 if __name__ == "__main__":

@@ -40,6 +40,11 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -trimpath -buildvcs=false ./cmd/aster-controller ./cmd/aster-node ./cmd/aster-network ./cmd/aster-billing-plugin
       - name: Offline package and SDK-layout safety contracts (not host installation)
         run: python3 -B aster-cloud/deploy/scripts/test_cloud_package.py
+      - name: Published installer commands and proof boundaries
+        run: |
+          python3 -B aster-cloud/deploy/ci/test_install_entrypoints.py
+          python3 -B aster-cloud/deploy/ci/test_public_cloud_evidence.py
+          python3 -B aster-cloud/deploy/ci/check_install_entrypoints.py --readme README.md --bootstrap aster-cloud/deploy/install/release_verify.py
   frontend:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

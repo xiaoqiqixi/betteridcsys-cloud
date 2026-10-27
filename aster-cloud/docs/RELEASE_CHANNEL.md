@@ -6,11 +6,11 @@ Cloud 的第一条官方候选通道是 **`cloud-v0.1.0-rc.1` / linux-amd64**。
 [Cloud Release](https://github.com/xiaoqiqixi/betteridcsys/releases/tag/cloud-v0.1.0-rc.1) 为准，
 未发布、缺资产或 gate 失败时不能声称通道可用。
 
-2026-10-27，首个RC已完成实际双构建、独立签名、公开九资产与Ubuntu24两角色真实验签/生产plan；见[公开验收](https://github.com/xiaoqiqixi/betteridcsys-backend/blob/main/docs/CLOUD_PUBLIC_ACCEPTANCE.md)。后续main新增22/24×两角色的[独立公开复验入口](../../.github/workflows/cloud-public-prepare.yml)，实际结果须单独记录，不能预填通过。
+2026-10-27，首个RC已完成实际双构建、独立签名、公开九资产与Ubuntu24两角色真实验签/生产plan；见[公开验收](https://github.com/xiaoqiqixi/betteridcsys-backend/blob/main/docs/CLOUD_PUBLIC_ACCEPTANCE.md)。22/24×两角色的[独立公开复验入口](../../.github/workflows/install-download-check.yml)现在位于云仓库，实际结果须单独记录，不能预填通过。
 
 ## 每个角色一条安装命令
 
-Release 正文提供 controller 和 node 各一条命令，HTTPS URL 固定到**完整 40 位源码 SHA**，
+[项目首页](../../README.md#一键安装)和 Release 正文均提供 controller 和 node 各一条命令，HTTPS URL 固定到**完整 40 位源码 SHA**，
 不是可变的 `/main`、`latest` 或任意输入 URL。初始 Python 脚本是操作者审核并信任的入口；
 第一次取得它依赖 GitHub HTTPS 与所批准的精确提交，不声称它能自证自身。
 

@@ -22,6 +22,10 @@ PACKAGE_DIGESTS = {
     "node": "cf92656ba8daf210815dfe8fa8d04d36ef46a9cd27c5f488c52780f511ff5544",
 }
 TARGETS = {"ubuntu-22.04": "22.04", "ubuntu-24.04": "24.04"}
+# The checker now lives in the split Cloud repository. This does NOT change the
+# cryptographic publisher identity of the already released, immutable RC.
+CONTROL_REPOSITORY = "xiaoqiqixi/betteridcsys-cloud"
+CONTROL_REPOSITORY_ID = 1435344151
 
 
 class EvidenceError(Exception):
@@ -82,11 +86,16 @@ def main(argv=None):
     parser.add_argument("--runner-os", required=True, choices=tuple(TARGETS))
     args = parser.parse_args(argv)
     try:
-        if (os.environ.get("GITHUB_REPOSITORY") != C.V.REPOSITORY or
-                os.environ.get("GITHUB_REF") != "refs/heads/main"):
+        if (os.environ.get("GITHUB_REPOSITORY") != CONTROL_REPOSITORY or
+                os.environ.get("GITHUB_REPOSITORY_ID") != str(CONTROL_REPOSITORY_ID) or
+                os.environ.get("GITHUB_REF") != "refs/heads/main" or
+                os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch" or
+                not C.V.COMMIT.fullmatch(os.environ.get("GITHUB_SHA", ""))):
             raise EvidenceError("Only reviewed main CI may report this acceptance")
         report = validate(read_root_proof(args.evidence), args.role, args.runner_os,
                           C.I.target_info(), os.environ.get("GITHUB_SHA", ""))
+        report["control_repository"] = CONTROL_REPOSITORY
+        report["control_repository_id"] = CONTROL_REPOSITORY_ID
         print(json.dumps(report, sort_keys=True))
     except EvidenceError as error:
         print("Published Cloud verification refused: " + str(error), file=sys.stderr)
