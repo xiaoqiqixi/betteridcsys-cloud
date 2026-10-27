@@ -131,3 +131,24 @@ func (h *Host) TargetStatus(operation, planSHA string) (Status, error) {
 	}
 	return h.targetStatus(v)
 }
+
+// WithSealedTarget holds local admission exclusion through a target data step.
+// It grants neither service activation nor remote node ownership.
+func (h *Host) WithSealedTarget(operation, planSHA string, action func() error) error {
+	if !operationName.MatchString(operation) || !digestName.MatchString(planSHA) || action == nil {
+		return ErrInvalid
+	}
+	if e := h.lock(); e != nil {
+		return e
+	}
+	defer h.unlock()
+	v, e := h.readTarget()
+	if e != nil || v.OperationID != operation || v.ConfigSHA != h.configSHA || v.PlanSHA != planSHA {
+		return ErrInvalid
+	}
+	drained, e := h.drained()
+	if e != nil || !drained {
+		return ErrBusy
+	}
+	return action()
+}

@@ -80,3 +80,19 @@
 目前仍需完成：目标独占 MySQL 创建及最小授权、带标记空库恢复的宿主机编排、配置/材料安全落盘、旧会话撤销、重启恢复、节点单活接管、迁移 UI 和双主机整链验收。不得据此启动新主控或宣称可以完成主控迁移。当前根权限 CI 使用真实安装器/ELF/systemd 查询与独立加密的合成源包，明确**不是**真实源导出、SQL 导入或双主机验收；对应既有原生 MySQL 源导出检查单独保留。
 
 目标准备的 systemd 查询需要区分“没有匹配单元”和“查询失败”。systemd [v249](https://github.com/systemd/systemd/blob/v249/src/systemctl/systemctl-list-unit-files.c) 与 [v255](https://github.com/systemd/systemd/blob/v255/src/systemctl/systemctl-list-unit-files.c) 的 `list-unit-files` 在零匹配时返回 `-ENOENT`。因此查询同时包含标准 `systemd-journald.service` 作为正向对照，仍要求命令退出 0，结果只能含该精确名称；出现控制器单元、空响应或执行失败均拒绝。不会把任意非零退出、超时或系统总线错误当作“目标为空”。已加载单元另以 `list-units --all` 检查，覆盖不活跃但仍已加载的服务。
+
+## 固定目标专用库准备（开发期，尚不等于恢复）
+
+已封存目标新增两个只接受 `--operation` 的 root 入口：`target-database-plan` 和 `target-provision`。只能执行本次受检安装包内的协调器；不接受任意 SQL、库名、用户、凭据、路径或脚本参数。普通安装器的数据库命名限制保持原样。
+
+数据计划在任何 APT、账号或数据库创建前完成整包认证、34 张表全部记录格式/计数、当前 12 项嵌入迁移摘要检查。它保留源字符集与排序规则，绑定已有目标计划摘要，并将目标库固定派生为 `aster_cloud_restore_<32位操作ID>`。两个账号在 31 字符合同内派生，完整操作绑定独立持久记录；前缀碰撞必须拒绝接管。**记录格式通过不等于实际列定义或外键语义通过**；实际数据库导入仍须建立内置结构并比对，这一阶段不执行导入。
+
+显式 `target-provision` 持有安装锁和操作锁，在目标持续封存下使用官方 Ubuntu APT 准备全新专用 MySQL，只监听 Unix socket。已有财务库、数据库服务/数据目录、第三方账号、匿名或远程 root、额外角色等均拒绝，不删除或自动收编。目标数据库按认证计划的编码创建，保留独立 nonce 标记；运行账号只有本库 DML，迁移账号只有既定本库 DDL/DML，无全局权限。创建记录、凭据和数据库计划只保存在该操作的 root 私有目录。
+
+同一操作显式重入须匹配原始不可变计划、MySQL UUID、账号归属、最小 grants、root 可见的对象清单以及真实的运行/迁移账号连接。创建响应丢失、口令文件丢失、外来对象或未知暂存文件都保留现场并拒绝，不重置账号、不重建数据库。数据库准备成功也不写运行配置、不启动主控、不解除封印、不接管节点。
+
+### 新验收门槛
+
+新增两个固定 `controller-provision` 场景，在独立签名的 Ubuntu22/24 TCG guest 内执行真实安装器、APT、systemd、MySQL 和实际主控 ELF。与原有 libvirt 场景共用原镜像来源验证、宿主网络前后不变校验、进程沙箱和仅官方 APT 出口；不接受任意 guest 脚本或模拟 KVM。
+
+此场景的源身份及表记录为**合成夹具**，用于验证专用库准备，不是源主机导出或完整数据库迁移。输出明确保留 `source_fixture_synthetic=true`，`database_restored/source_host_export_verified/node_takeover_verified/migration_ready=false`；发布不得挪用该门槛为完整迁移证明。真实数据恢复核心的 MySQL 往返测试仍单独执行。最终 root 导入、提交响应丢失后的只读核验、材料落盘、会话撤销、双机重启隔离与节点单活接管尚需接齐。

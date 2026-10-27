@@ -54,8 +54,28 @@ class NativeFixtureContract(unittest.TestCase):
     def metadata(self):
         return {"source_sha": "a" * 40, "ubuntu": "22.04", "image_sha256": h.IMAGES["22.04"][2]}
 
+    def test_controller_provision_report_never_claims_restore_or_takeover(self):
+        metadata = {**self.metadata(), 'scenario': 'controller-provision'}
+        result = {**self.metadata(), 'schema': 1, 'scenario': 'controller-provision',
+                  'passed': True, 'real_apt': True, 'real_systemd': True, 'real_mysql': True,
+                  'actual_installer': True, 'actual_controller': True, 'target_sealed': True,
+                  'exact_encoding_preserved': True, 'credentials_verified': True,
+                  'runtime_ddl_denied': True, 'foreign_account_refused': True,
+                  'lost_credential_refused_without_reset': True, 'same_operation_preserved': True,
+                  'source_fixture_synthetic': True, 'database_restored': False,
+                  'source_host_export_verified': False, 'node_takeover_verified': False,
+                  'migration_ready': False, 'kvm_ready': False}
+        self.assertEqual(h.public_result(result, metadata), result)
+        for key in ('database_restored', 'source_host_export_verified', 'node_takeover_verified', 'migration_ready', 'kvm_ready'):
+            with self.subTest(key=key), self.assertRaises(h.Refused):
+                h.public_result({**result, key: True}, metadata)
+        with self.assertRaises(h.Refused):
+            h.public_result({**result, 'unreviewed': 'PRIVATE'}, metadata)
+        with self.assertRaises(h.Refused):
+            h.public_result(result, self.metadata())
+
     def test_python_310_syntax(self):
-        for name in ("libvirt-native.py", "libvirt-native-guest.py", "test_libvirt_native.py"):
+        for name in ("libvirt-native.py", "libvirt-native-guest.py", "controller-provision-native-guest.py", "test_libvirt_native.py"):
             ast.parse((HERE / name).read_text(), feature_version=(3, 10))
 
     def test_only_fixed_signed_dated_official_images(self):
@@ -81,7 +101,9 @@ class NativeFixtureContract(unittest.TestCase):
         provision = load("libvirt_native_supported_provision", "../install/provision.py")
         self.assertEqual(provision.CODENAMES, {"22.04": "jammy", "24.04": "noble"})
         workflow = (repo / ".github/workflows/ci.yml").read_text()
-        self.assertEqual(re.findall(r"ubuntu: '([^']+)'", workflow), ["22.04", "24.04"])
+        for job in ('native-libvirt', 'native-controller-provision'):
+            section = re.search(r'^  ' + job + r':\n(.*?)(?=^  [a-z][a-z-]*:|\Z)', workflow, re.M | re.S).group(1)
+            self.assertEqual(re.findall(r"ubuntu: '([^']+)'", section), ["22.04", "24.04"])
         sandbox = (HERE / "libvirt-native-sandbox.c").read_text()
         self.assertEqual(re.findall(r'"ubuntu-([0-9.]+)-server-cloudimg-amd64.img"', sandbox), ["22.04", "24.04"])
 
@@ -96,6 +118,7 @@ class NativeFixtureContract(unittest.TestCase):
         workflow = (HERE.parents[2] / '.github/workflows/ci.yml').read_text()
         expected = (
             'name: cloud-libvirt-native-ubuntu-${{ matrix.ubuntu }}-${{ github.run_id }}-${{ github.run_attempt }}',
+            'name: cloud-controller-provision-ubuntu-${{ matrix.ubuntu }}-${{ github.run_id }}-${{ github.run_attempt }}',
             'name: network-management-browser-${{ github.run_id }}-${{ github.run_attempt }}',
         )
         for name in expected:

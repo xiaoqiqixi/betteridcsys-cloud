@@ -2,7 +2,10 @@ package main
 
 import (
 	"archive/tar"
+	"aster/cloud/internal/controllerbackup"
+	"aster/cloud/migrations"
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -16,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -401,6 +405,36 @@ func emitSourceFixture(t *testing.T) {
 	t.Helper()
 	dir, controller, operation, source := os.Getenv("ASTER_FIXTURE_DIR"), os.Getenv("ASTER_FIXTURE_CONTROLLER"), os.Getenv("ASTER_FIXTURE_OPERATION"), os.Getenv("ASTER_FIXTURE_SOURCE")
 	files := sourceFixture(t)
+	if os.Getenv("ASTER_FIXTURE_DATA_PLAN") == "1" {
+		// Synthetic typed records ONLY. This native fixture tests target DB
+		// provisioning; these headers deliberately are not a full SQL snapshot
+		// and cannot establish restore, source export, activation or takeover.
+		files["database/schema.json"] = []byte(`{"schema":1,"charset":"utf8mb4","collation":"utf8mb4_bin"}` + "\n")
+		for name := range files {
+			if !strings.HasPrefix(name, "database/") || !strings.HasSuffix(name, ".jsonl") {
+				continue
+			}
+			table := strings.TrimSuffix(strings.TrimPrefix(name, "database/"), ".jsonl")
+			columns := []controllerbackup.Column{{Name: "id", Type: "int", Nullable: "NO", Key: "PRI"}}
+			if table == "controller_schema" {
+				columns = []controllerbackup.Column{{Name: "version", Type: "int", Nullable: "NO", Key: "PRI"},
+					{Name: "sha256", Type: "char(64)", Nullable: "NO"}, {Name: "applied_at", Type: "datetime(6)", Nullable: "NO"}}
+			}
+			var raw bytes.Buffer
+			enc := json.NewEncoder(&raw)
+			if enc.Encode(controllerbackup.Table{Schema: 1, Name: table, Columns: columns, Collation: "utf8mb4_bin"}) != nil {
+				t.Fatal("record header")
+			}
+			if table == "controller_schema" {
+				for _, m := range migrations.All() {
+					if enc.Encode([][]byte{[]byte(strconv.Itoa(m.Version)), []byte(sourceHash([]byte(m.SQL))), []byte("2026-10-28 01:02:03.123456")}) != nil {
+						t.Fatal("record row")
+					}
+				}
+			}
+			files[name] = raw.Bytes()
+		}
+	}
 	var config, installation, plan, receipt map[string]any
 	for name, value := range map[string]*map[string]any{"controller/config.json": &config, "source/installation.json": &installation, "source/plan.json": &plan, "source/isolated.json": &receipt} {
 		if json.Unmarshal(files[name], value) != nil {
@@ -436,5 +470,53 @@ func emitSourceFixture(t *testing.T) {
 		if e = f.Close(); e != nil {
 			t.Fatal(e)
 		}
+	}
+}
+
+func TestAuthenticatedDatabasePlanBeforeProvision(t *testing.T) {
+	dir, e := filepath.EvalSymlinks(t.TempDir())
+	if e != nil || os.Chmod(dir, 0700) != nil {
+		t.Fatal("private fixture directory")
+	}
+	operation := strings.Repeat("a", 32)
+	for name, value := range map[string]string{"ASTER_FIXTURE_DIR": dir, "ASTER_FIXTURE_CONTROLLER": "source-one",
+		"ASTER_FIXTURE_OPERATION": operation, "ASTER_FIXTURE_SOURCE": strings.Repeat("b", 40), "ASTER_FIXTURE_DATA_PLAN": "1"} {
+		t.Setenv(name, value)
+	}
+	emitSourceFixture(t)
+	var plan controllerbackup.DatabasePlan
+	err := controllerbackup.WithVerifiedArchive(filepath.Join(dir, "backup.age"), filepath.Join(dir, "recovery.key"), "source-one", operation, dir, func(a *controllerbackup.Archive) error {
+		var err error
+		plan, err = a.PlanDatabase(context.Background())
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, e := a.PlanDatabase(ctx); e != controllerbackup.ErrInvalid {
+			t.Fatal("cancelled plan was accepted")
+		}
+		return nil
+	})
+	if err != nil || plan.Schema != 1 || plan.Charset != "utf8mb4" || plan.Collation != "utf8mb4_bin" || plan.Rows != 12 || len(plan.Tables) != 34 {
+		t.Fatal("synthetic complete-record plan rejected or encoding/count changed", err, plan)
+	}
+	last := ""
+	for _, table := range plan.Tables {
+		if table.Name <= last {
+			t.Fatal("table plan order/identity")
+		}
+		last = table.Name
+		want := int64(0)
+		if table.Name == "controller_schema" {
+			want = 12
+		}
+		if table.Rows != want {
+			t.Fatal("table row inventory")
+		}
+	}
+	entries, e := os.ReadDir(dir)
+	if e != nil || len(entries) != 3 {
+		t.Fatal("data plan wrote outside its cleaned staging")
 	}
 }

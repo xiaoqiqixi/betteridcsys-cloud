@@ -2,10 +2,12 @@ package main
 
 import (
 	"aster/cloud/internal/controllerbackup"
+	"context"
 	"encoding/json"
 	"flag"
 	"io"
 	"os"
+	"time"
 )
 
 func inspectArchive(args []string) error {
@@ -62,6 +64,14 @@ func targetArchive(command string, args []string) error {
 	var err error
 	if command == "migration-target-plan" {
 		report, err = controllerbackup.PlanTarget(*operation)
+	} else if command == "migration-target-database-plan" || command == "migration-target-provision-check" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		if command == "migration-target-database-plan" {
+			report, err = controllerbackup.PlanTargetDatabase(ctx, *operation)
+		} else {
+			report, err = controllerbackup.CheckTargetProvision(ctx, *operation)
+		}
 	} else {
 		report, err = controllerbackup.SealTarget(*operation, command == "migration-target-status")
 	}

@@ -47,7 +47,7 @@ func run(args []string) error {
 		return control.ErrInput
 	}
 	command := args[0]
-	if command == "migration-target-plan" || command == "migration-target-seal" || command == "migration-target-status" {
+	if command == "migration-target-plan" || command == "migration-target-seal" || command == "migration-target-status" || command == "migration-target-database-plan" || command == "migration-target-provision-check" {
 		return targetArchive(command, args[1:])
 	}
 	if command == "migration-inspect" {

@@ -50,7 +50,7 @@ RELAY_PROOF = {}
 SANDBOX_PROOF = {}
 RELAY_EVENTS = {"spawned", "dns-ok", "dns-failed", "dns-nonpublic", "connect-ok", "connect-failed", "guest-first-bytes", "server-first-bytes", "guest-eof", "server-eof", "timeout", "io-failed"}
 BOOT_STAGES = {"bootcmd", "boot-mask:start", "boot-mask:done", "boot-hosts:start", "boot-hosts:done", "runcmd-enter"}
-GUEST_PHASES = {"preflight", "prepare", "inspect", "resume", "image-and-config", "doctor"}
+GUEST_PHASES = {"preflight", "prepare", "inspect", "resume", "image-and-config", "doctor", "controller-install", "target-plan", "target-provision", "target-credentials", "target-grants", "target-refusals"}
 DIAGNOSTIC_COMMANDS = {"apt-update", "apt-simulate", "apt-install", "network-rules-readonly", "other-fixed-command"} | {
     "systemd-" + name for name in ("start", "stop", "enable", "disable", "daemon-reload", "show", "is-active")} | {
     "virsh-" + name for name in ("net-list", "list", "capabilities")}
@@ -97,6 +97,9 @@ PROVISION_PREPARE_REFUSED NATIVE_GUEST_REFUSED_DETAILS_WITHHELD APT_DNS_FAILURE 
 
 class Refused(Exception):
     """Only bounded fixed diagnostic codes may leave the private VM harness."""
+
+
+GUEST_ERROR_CODES |= set("TARGET_NATIVE_COMMAND_FAILED TARGET_NATIVE_OUTPUT_BOUND TARGET_NATIVE_ASSERTION_FAILED TARGET_NATIVE_REFUSAL_UNCONFIRMED TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING".split())
 
 
 def require(condition, code):
@@ -645,20 +648,31 @@ def seed_commands(nonce):
             "runcmd": [checkpoint("runcmd-enter"), ["sh", "-c", "/usr/bin/python3 -I /root/aster-native/guest.py; /sbin/poweroff -f"]]}
 
 
-def make_seed(work, root, source_sha, image_provenance):
+def make_seed(work, root, source_sha, image_provenance, scenario="libvirt"):
     go = shutil.which("go")
     require(go is not None, "GO_TOOLCHAIN_REQUIRED")
     env = dict(SAFE_ENV, PATH=os.environ.get("PATH", SAFE_ENV["PATH"]), HOME=str(work), GOTOOLCHAIN="local", CGO_ENABLED="0", GOOS="linux", GOARCH="amd64")
     require(run([go, "version"], env=env).decode().startswith("go version go1.27.3 "), "PINNED_GO_TOOLCHAIN_REQUIRED")
-    binary = work / "aster-node"
-    run([go, "build", "-mod=readonly", "-trimpath", "-buildvcs=false", "-ldflags=-s -w", "-o", str(binary), "./cmd/aster-node"], cwd=root / "aster-cloud", env=env, timeout=300)
+    require(scenario in ('libvirt', 'controller-provision'), 'FIXED_GUEST_SCENARIO_REQUIRED')
+    name = 'aster-node' if scenario == 'libvirt' else 'aster-controller'
+    binary = work / name
+    run([go, "build", "-mod=readonly", "-trimpath", "-buildvcs=false", "-ldflags=-s -w", "-o", str(binary), "./cmd/" + name], cwd=root / "aster-cloud", env=env, timeout=300)
     nonce = os.urandom(16).hex()
-    metadata = {"schema": 1, "nonce": nonce, "source_sha": source_sha, **image_provenance,
-                "node_binary_sha256": digest(binary)}
-    content = {"provision.py": (root / "aster-cloud/deploy/install/provision.py").read_bytes(),
-               "guest.py": (HERE / "libvirt-native-guest.py").read_bytes(), "aster-node": binary.read_bytes(),
-               "metadata.json": json.dumps(metadata).encode()}
-    files = [{"path": "/root/aster-native/" + name, "owner": "root:root", "permissions": "0700" if name == "aster-node" else "0600",
+    metadata = {"schema": 1, "nonce": nonce, "source_sha": source_sha, **image_provenance}
+    if scenario == 'libvirt':
+        metadata['node_binary_sha256'] = digest(binary)
+        content = {"provision.py": (root / "aster-cloud/deploy/install/provision.py").read_bytes(),
+                   "guest.py": (HERE / "libvirt-native-guest.py").read_bytes(), name: binary.read_bytes()}
+    else:
+        fixture = work / 'controller-fixture.test'
+        run([go, 'test', '-mod=readonly', '-c', '-o', str(fixture), './cmd/aster-controller'], cwd=root / 'aster-cloud', env=env, timeout=300)
+        metadata.update(scenario=scenario, controller_binary_sha256=digest(binary), fixture_binary_sha256=digest(fixture))
+        content = {'guest.py': (HERE / 'controller-provision-native-guest.py').read_bytes(),
+                   name: binary.read_bytes(), 'controller-fixture.test': fixture.read_bytes()}
+        for filename in ('install.py', 'controller-migration.py', 'provision.py'):
+            content[filename] = (root / 'aster-cloud/deploy/install' / filename).read_bytes()
+    content['metadata.json'] = json.dumps(metadata).encode()
+    files = [{"path": "/root/aster-native/" + name, "owner": "root:root", "permissions": "0700" if name in ("aster-node", "aster-controller", "controller-fixture.test") else "0600",
               "encoding": "gz+b64", "content": base64.b64encode(gzip.compress(raw, mtime=0)).decode()} for name, raw in content.items()]
     config = {"users": [], "disable_root": True, "ssh_pwauth": False, "manage_etc_hosts": False, "write_files": files,
               "package_update": False, "package_upgrade": False,
@@ -725,7 +739,19 @@ def run_vm(arguments, work, metadata):
         RELAY_PROOF["lifecycle"] = cleanup_relays(work, metadata)
 
 
+PROVISION_TRUE = set("passed real_apt real_systemd real_mysql actual_installer actual_controller target_sealed exact_encoding_preserved credentials_verified runtime_ddl_denied foreign_account_refused lost_credential_refused_without_reset same_operation_preserved source_fixture_synthetic".split())
+PROVISION_FALSE = set("database_restored source_host_export_verified node_takeover_verified migration_ready kvm_ready".split())
+
+
 def validate_result(result, metadata):
+    if metadata.get('scenario') == 'controller-provision':
+        require(isinstance(result, dict) and set(result) == PROVISION_TRUE | PROVISION_FALSE |
+                {'schema', 'scenario', 'source_sha', 'ubuntu', 'image_sha256'}, 'GUEST_RESULT_SCHEMA_REJECTED')
+        require(result['schema'] == 1 and result['scenario'] == 'controller-provision' and
+                all(result[k] == metadata[k] for k in ('source_sha', 'ubuntu', 'image_sha256')), 'GUEST_RESULT_BINDING_MISMATCH')
+        require(all(result[k] is True for k in PROVISION_TRUE) and all(result[k] is False for k in PROVISION_FALSE),
+                'GUEST_PROVISION_ACCEPTANCE_FAILED')
+        return
     allowed = {"schema", "passed", "real_apt", "real_systemd", "libvirt_prepared", "kvm_ready", "explicit_kvm_denial",
                "non_kvm_doctor_checks_passed", "source_sha", "ubuntu", "image_sha256", "real_approved_image_validated",
                "doctor_checks", "owned_units_active", "vendor_masks_persistent", "empty_network_mount_verified",
@@ -805,7 +831,7 @@ def execute(args):
             prepare_sandbox(work)
             image, provenance = obtain_image(args.ubuntu, work)
             (output / "image-provenance.json").write_text(json.dumps({"source_sha": args.source_sha, **provenance}, indent=2) + "\n")
-            seed, metadata = make_seed(work, root, args.source_sha, provenance)
+            seed, metadata = make_seed(work, root, args.source_sha, provenance, getattr(args, "scenario", "libvirt"))
             overlay = work / "root.qcow2"
             run(["/usr/bin/qemu-img", "create", "-f", "qcow2", "-F", "qcow2", "-b", str(image), str(overlay), "16G"])
             verify_host_network_checkpoint(before, phase="before_vm")
@@ -827,14 +853,19 @@ def execute(args):
     require(SANDBOX_PROOF.get("passed") is True and SANDBOX_PROOF.get("qemu_process_verified") is True and
             RELAY_PROOF.get("spawned_seen") is True and RELAY_PROOF.get("lifecycle", {}).get("cleanup_complete") is True,
             "NATIVE_PROCESS_ISOLATION_OR_RELAY_CLEANUP_UNVERIFIED")
-    summary = {k: result[k] for k in ("passed", "real_apt", "real_systemd", "libvirt_prepared", "kvm_ready", "image_sha256", "ubuntu", "source_sha")}
+    scenario = getattr(args, "scenario", "libvirt")
+    summary = {k: result[k] for k in ("passed", "real_apt", "real_systemd", "kvm_ready", "image_sha256", "ubuntu", "source_sha")}
+    if scenario == "libvirt":
+        summary.update(libvirt_prepared=result["libvirt_prepared"], doctor_protocol=result["doctor_protocol"],
+                       explicit_kvm_denial=result["explicit_kvm_denial"], non_kvm_doctor_checks_passed=result["non_kvm_doctor_checks_passed"],
+                       scope="Software preparation and explicit no-KVM doctor denial only; not a real KVM guest or production deployment acceptance.")
+    else:
+        summary.update({k: result[k] for k in PROVISION_TRUE | PROVISION_FALSE})
+        summary.update(scenario=scenario, scope="Actual target-only APT/MySQL provisioning with synthetic source records; no data restore, source-host export, activation, reboot or node takeover.")
     summary.update(schema=1, host_network_unchanged=True, tcg_only=True,
                    host_network_proof=HOST_PROOF, host_network_pre_vm_proof=HOST_PRE_VM_PROOF,
                    host_process_isolation_verified=True, sandbox_selftests_passed=True, relay_cleanup_verified=True,
-                   sandbox_proof=SANDBOX_PROOF, relay_proof=RELAY_PROOF,
-                   doctor_protocol=result["doctor_protocol"], explicit_kvm_denial=result["explicit_kvm_denial"],
-                   non_kvm_doctor_checks_passed=result["non_kvm_doctor_checks_passed"],
-                   scope="Software preparation and explicit no-KVM doctor denial only; not a real KVM guest or production deployment acceptance.")
+                   sandbox_proof=SANDBOX_PROOF, relay_proof=RELAY_PROOF)
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     return summary
 
@@ -843,6 +874,7 @@ def main(argv=None):
     global OUTPUT_CREATED, VM_PROGRESS, HOST_PROOF, HOST_PRE_VM_PROOF, GUEST_RESULT_SEEN, RELAY_PROOF, SANDBOX_PROOF
     OUTPUT_CREATED, VM_PROGRESS, HOST_PROOF, HOST_PRE_VM_PROOF, GUEST_RESULT_SEEN, RELAY_PROOF, SANDBOX_PROOF = None, [], {}, {}, False, {}, {}
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--scenario", choices=("libvirt", "controller-provision"), default="libvirt")
     parser.add_argument("--ubuntu", choices=sorted(IMAGES), required=True)
     parser.add_argument("--source-root", required=True)
     parser.add_argument("--source-sha", required=True)

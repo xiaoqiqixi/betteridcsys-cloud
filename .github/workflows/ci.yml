@@ -164,6 +164,72 @@ jobs:
           retention-days: 7
           overwrite: false
 
+  native-controller-provision:
+    name: Native controller target provisioning (ubuntu-${{ matrix.ubuntu }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # All emulator hosts use reviewed libslirp 4.7.x (loopback-only command
+        # socketpair). The independently signed guests run supported 22/24.
+        # Ubuntu 26 is deferred, not a failed result reclassified as passing.
+        include:
+          - os: ubuntu-24.04
+            ubuntu: '22.04'
+          - os: ubuntu-24.04
+            ubuntu: '24.04'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Install emulator and image-verification tools, not a host MySQL service
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y qemu-system-x86 qemu-utils cloud-image-utils gnupg
+      - name: Actual signed Ubuntu controller target APT and MySQL; no data import
+        env:
+          TEST_UBUNTU: ${{ matrix.ubuntu }}
+        run: |
+          set -euo pipefail
+          python3 -I aster-cloud/deploy/ci/libvirt-native.py --scenario controller-provision \
+            --ubuntu "$TEST_UBUNTU" --source-root "$GITHUB_WORKSPACE" \
+            --source-sha "$GITHUB_SHA" --output "$RUNNER_TEMP/cloud-controller-provision"
+      - name: Independently reject migration and real-source overclaims
+        env:
+          TEST_UBUNTU: ${{ matrix.ubuntu }}
+        run: |
+          python3 -I - <<'PYTEST'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'cloud-controller-provision'
+          for name in ('summary.json', 'guest-report.json'):
+              value = json.loads((root / name).read_text())
+              assert value['schema'] == 1 and value['source_sha'] == os.environ['GITHUB_SHA']
+              assert value['ubuntu'] == os.environ['TEST_UBUNTU'] and value['scenario'] == 'controller-provision'
+              assert all(value[k] is True for k in ('passed', 'real_apt', 'real_systemd', 'real_mysql', 'actual_installer', 'actual_controller', 'target_sealed', 'exact_encoding_preserved', 'credentials_verified', 'runtime_ddl_denied', 'foreign_account_refused', 'lost_credential_refused_without_reset', 'same_operation_preserved', 'source_fixture_synthetic'))
+              assert all(value[k] is False for k in ('database_restored', 'source_host_export_verified', 'node_takeover_verified', 'migration_ready', 'kvm_ready'))
+          summary = json.loads((root / 'summary.json').read_text())
+          assert all(summary[k] is True for k in ('host_network_unchanged', 'tcg_only', 'host_process_isolation_verified', 'sandbox_selftests_passed', 'relay_cleanup_verified'))
+          assert summary['host_network_proof']['unchanged'] is True and summary['host_network_pre_vm_proof']['unchanged'] is True
+          PYTEST
+      - name: Retain only sanitized native preparation evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cloud-controller-provision-ubuntu-${{ matrix.ubuntu }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/cloud-controller-provision/summary.json
+            ${{ runner.temp }}/cloud-controller-provision/guest-report.json
+            ${{ runner.temp }}/cloud-controller-provision/image-provenance.json
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: false
+
   native-ovs-parser:
     name: Native OVS parser and encoder (${{ matrix.os }})
     strategy:

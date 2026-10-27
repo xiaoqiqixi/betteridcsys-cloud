@@ -800,6 +800,13 @@ def verify_grants(state_dir, user, database, privileges):
 def provision_mysql(state_dir, database, runtime_user, migration_user, *, resume=False):
     root_target()
     validate_names(database, runtime_user, migration_user)
+    return _provision_mysql(state_dir, database, runtime_user, migration_user, resume=resume)
+
+
+def _provision_mysql(state_dir, database, runtime_user, migration_user, *, resume=False,
+                     charset="utf8mb4", collation="utf8mb4_unicode_ci"):
+    # Only callers above this boundary validate/derive identifiers. No CLI or
+    # HTTP input can select raw SQL, a target path, root credentials or grants.
     state_dir = ensure_dir(Path(state_dir))
     receipt_path = state_dir / "mysql-provision.json"
     request = {"database": database, "runtime_user": runtime_user, "migration_user": migration_user}
@@ -841,8 +848,8 @@ def provision_mysql(state_dir, database, runtime_user, migration_user, *, resume
         else:
             if "database-created" in receipt["steps"]:
                 fail("Previously owned DB disappeared; never recreated automatically")
-            mysql_sql(state_dir, "CREATE DATABASE `" + database + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n"
-                "CREATE TABLE `" + database + "`.aster_installer_ownership (id INT PRIMARY KEY,nonce CHAR(64) NOT NULL,server_uuid CHAR(36) NOT NULL);\n"
+            mysql_sql(state_dir, "CREATE DATABASE `" + database + "` CHARACTER SET " + charset + " COLLATE " + collation + ";\n"
+                "CREATE TABLE `" + database + "`.aster_installer_ownership (id INT PRIMARY KEY,nonce CHAR(64) NOT NULL,server_uuid CHAR(36) NOT NULL) ENGINE=InnoDB;\n"
                 "INSERT INTO `" + database + "`.aster_installer_ownership VALUES (1,'" + nonce + "','" + receipt["server_uuid"] + "');\n")
         persist("database-created")
         result = {"database_name": database}
@@ -883,3 +890,92 @@ def provision_mysql(state_dir, database, runtime_user, migration_user, *, resume
         receipt["status"] = "failed-preserved-no-drop-no-reset"
         save_receipt(receipt_path, receipt)
         raise
+
+
+def restore_database_names(operation):
+    if not isinstance(operation, str) or not re.fullmatch(r"[a-f0-9]{32}", operation):
+        fail("Exact lowercase restoration operation required")
+    return "aster_cloud_restore_" + operation, "aster_r_" + operation[:23], "aster_m_" + operation[:23]
+
+
+def _restore_server_inventory(state_dir, runtime_user, migration_user):
+    # Root-visible account/role inventory, not a migrator's filtered metadata.
+    # Unknown accounts (including anonymous/remote root) are never revoked or
+    # adopted. Socket-only MySQL is checked again even on exact-operation resume.
+    info = _query(state_dir,
+        "SELECT JSON_OBJECT('root',CURRENT_USER(),'tcp_disabled',@@skip_networking,"
+        "'mysqlx',(SELECT COUNT(*) FROM information_schema.PLUGINS WHERE PLUGIN_NAME='mysqlx' AND PLUGIN_STATUS='ACTIVE'),"
+        "'roles',(SELECT COUNT(*) FROM mysql.role_edges),'default_roles',(SELECT COUNT(*) FROM mysql.default_roles),"
+        "'accounts',(SELECT COUNT(*) FROM mysql.user WHERE NOT (Host='localhost' AND ("
+        "(User='root' AND plugin='auth_socket') OR (User IN ('mysql.infoschema','mysql.session','mysql.sys') AND account_locked='Y') OR "
+        "(User IN ('" + runtime_user + "','" + migration_user + "') AND plugin='caching_sha2_password')))));\n")
+    if info != {'root': 'root@localhost', 'tcp_disabled': 1, 'mysqlx': 0, 'roles': 0, 'default_roles': 0, 'accounts': 0}:
+        fail("Restore requires a dedicated socket-only server and exact local account inventory")
+
+
+def provision_restore_mysql(operation, charset, collation, *, resume=False):
+    """Restore-only fixed destination; ordinary provision_mysql names unchanged.
+
+    The coordinator has already authenticated every archive row and persisted
+    its complete source/target-bound data plan under the target admission seal.
+    Existing/ambiguous data or accounts are retained, never reset or dropped.
+    """
+    root_target()
+    database, runtime_user, migration_user = restore_database_names(operation)
+    if any(not isinstance(x, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", x) for x in (charset, collation)):
+        fail("Authenticated source database encoding identifiers required")
+    state_dir = Path('/var/lib/aster-controller-restore') / operation / 'database'
+    protected_path(str(state_dir), directory=True, private=True)
+    binding = {'schema': 1, 'operation_id': operation, 'database': database, 'runtime_user': runtime_user,
+               'migration_user': migration_user, 'charset': charset, 'collation': collation}
+    binding_path = state_dir / 'restore-provision.json'
+    if binding_path.exists() or binding_path.is_symlink():
+        if not resume or _json(read_private(str(binding_path))) != binding:
+            fail("Restore provisioning binding changed; original operation retained")
+    else:
+        if (state_dir / 'mysql-provision.json').exists() or (state_dir / 'mysql-provision.pending').exists():
+            fail("Unbound provisioning history cannot be adopted")
+        write_new(binding_path, (json.dumps(binding, sort_keys=True) + "\n").encode())
+        fd = os.open(state_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    _restore_server_inventory(state_dir, runtime_user, migration_user)
+    # Validate actual encoding support without interpreting arbitrary SQL.
+    encoding = _query(state_dir, "SELECT JSON_OBJECT('matches',COUNT(*)) FROM information_schema.COLLATIONS WHERE COLLATION_NAME='" +
+                      collation + "' AND CHARACTER_SET_NAME='" + charset + "';\n")
+    if encoding != {'matches': 1}:
+        fail("Authenticated source encoding is unavailable on this server")
+    result = _provision_mysql(state_dir, database, runtime_user, migration_user, resume=resume,
+                              charset=charset, collation=collation)
+    verify_restore_mysql(operation, charset, collation)
+    return result
+
+
+def verify_restore_mysql(operation, charset, collation):
+    """Root-visible empty-target check; never permission to activate a service."""
+    database, runtime_user, migration_user = restore_database_names(operation)
+    state_dir = Path('/var/lib/aster-controller-restore') / operation / 'database'
+    protected_path(str(state_dir), directory=True, private=True)
+    _restore_server_inventory(state_dir, runtime_user, migration_user)
+    verify_grants(state_dir, runtime_user, database, RUNTIME_PRIVILEGES)
+    verify_grants(state_dir, migration_user, database, MIGRATION_PRIVILEGES)
+    info = _query(state_dir,
+        "SELECT JSON_OBJECT('charset',DEFAULT_CHARACTER_SET_NAME,'collation',DEFAULT_COLLATION_NAME,"
+        "'tables',(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='" + database + "'),"
+        "'marker',(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='" + database + "' AND TABLE_NAME='aster_installer_ownership' AND ENGINE='InnoDB' AND TABLE_TYPE='BASE TABLE'),"
+        "'routines',(SELECT COUNT(*) FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA='" + database + "'),"
+        "'events',(SELECT COUNT(*) FROM information_schema.EVENTS WHERE EVENT_SCHEMA='" + database + "'),"
+        "'triggers',(SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='" + database + "')) "
+        "FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='" + database + "';\n")
+    if info != {'charset': charset, 'collation': collation, 'tables': 1, 'marker': 1, 'routines': 0, 'events': 0, 'triggers': 0}:
+        fail("Restore target must retain only its own marker and exact source encoding")
+    owner = _json(read_private(str(state_dir / 'mysql-provision.json')))
+    if not isinstance(owner.get('nonce'), str) or not re.fullmatch(r'[a-f0-9]{64}', owner['nonce']):
+        fail("Malformed target ownership receipt")
+    actual = _query(state_dir, "SELECT JSON_OBJECT('rows',COUNT(*),'owned',COALESCE(SUM(id=1 AND nonce='" + owner['nonce'] +
+                    "' AND server_uuid=@@server_uuid),0)) FROM `" + database + "`.aster_installer_ownership;\n")
+    if actual != {'rows': 1, 'owned': 1}:
+        fail("Target ownership marker changed; never adopted or repaired")
+    return {'database_provisioned': True, 'database_restored': False, 'target_restore_approved': False, 'migration_ready': False}

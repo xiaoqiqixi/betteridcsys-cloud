@@ -91,7 +91,7 @@ def main():
         files = {'bin/aster-controller': args.binary.resolve(strict=True).read_bytes(),
                  'ui/index.html': b'<!doctype html><title>Target installer fixture, not UI acceptance</title>',
                  'ui/empty.txt': b''}
-        for name in ('install.py', 'controller-migration.py'):
+        for name in ('install.py', 'controller-migration.py', 'provision.py'):
             files['templates/host-management/' + name] = (HERE.parent / 'install' / name).read_bytes()
         manifest = {'schema': 1, 'component': 'aster-cloud-controller', 'platform': 'linux-amd64',
                     'version': '0.1.0-dev.1', 'release_kind': 'development', 'source_commit': args.source,
@@ -240,6 +240,13 @@ def main():
                 seal.read_bytes() == seal_raw, 'TARGET_SEAL_NOT_IDEMPOTENT')
         require(install_state.read_bytes() == original_installation and not config_dir.exists() and not unit.exists(), 'TARGET_SEAL_STARTED_OR_CONFIGURED')
         checks.append('durable_same_operation_seal_without_configuration_or_activation')
+        PHASE = 'malformed-data-before-provision'
+        entry('target-database-plan', True)
+        entry('target-provision', True)
+        require(not (inputs / 'database').exists() and not (inputs / 'database-plan.json').exists() and
+                install_state.read_bytes() == original_installation and seal.read_bytes() == seal_raw,
+                'TARGET_INVALID_RECORDS_REACHED_PROVISION')
+        checks.append('authenticated_but_invalid_records_refused_before_provision')
         PHASE = 'runtime-admission'
         listener = socket.socket()
         listener.bind(('127.0.0.1', 0))

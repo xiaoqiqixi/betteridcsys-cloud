@@ -34,6 +34,7 @@ ROLE_FILES = {
         "templates/controller-heartbeat@.timer": "deploy/controller-heartbeat@.timer",
         "templates/host-management/controller-migration.py": "deploy/install/controller-migration.py",
         "templates/host-management/install.py": "deploy/install/install.py",
+        "templates/host-management/provision.py": "deploy/install/provision.py",
         "docs/CONTROLLER_MIGRATION.md": "docs/CONTROLLER_MIGRATION.md",
         "templates/controller-ovs.example.json": "deploy/controller-ovs.example.json",
         "docs/CONTROLLER_OPERATIONS.md": "deploy/controller-OPERATIONS.md",

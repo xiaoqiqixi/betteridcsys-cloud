@@ -174,9 +174,29 @@ func (a *Archive) RestoreMarkedEmptyDatabase(ctx context.Context, target *sql.DB
 	return a.restoreDatabase(ctx, target, owner)
 }
 
-func (a *Archive) restoreDatabase(ctx context.Context, target *sql.DB, owner *databaseOwnership) (DatabaseRestoreReport, error) {
-	if a == nil || !a.valid || target == nil {
-		return DatabaseRestoreReport{}, ErrInvalid
+// DatabasePlan is an authenticated, completely parsed data inventory. It is
+// not permission to create a database or proof of live schema compatibility.
+// Names/encoding remain data; no SQL program is accepted from the archive.
+type DatabasePlan struct {
+	Schema    int                 `json:"schema"`
+	Charset   string              `json:"charset"`
+	Collation string              `json:"collation"`
+	Tables    []DatabaseTablePlan `json:"tables"`
+	Rows      int64               `json:"rows"`
+}
+type DatabaseTablePlan struct {
+	Name string `json:"name"`
+	Rows int64  `json:"rows"`
+}
+
+func (a *Archive) PlanDatabase(ctx context.Context) (DatabasePlan, error) {
+	plan, _, _, err := a.parseDatabase(ctx)
+	return plan, err
+}
+
+func (a *Archive) parseDatabase(ctx context.Context) (DatabasePlan, map[string]Table, map[string]int64, error) {
+	if a == nil || !a.valid || ctx == nil || ctx.Err() != nil {
+		return DatabasePlan{}, nil, nil, ErrInvalid
 	}
 	names := tableNames()
 	definitions := map[string]Table{}
@@ -184,20 +204,38 @@ func (a *Archive) restoreDatabase(ctx context.Context, target *sql.DB, owner *da
 	var schema DatabaseSchema
 	raw, e := a.readSmall("database/schema.json", 4096)
 	if e != nil || !bytes.HasSuffix(raw, []byte("\n")) || !canonicalRecord(bytes.TrimSuffix(raw, []byte("\n")), &schema) || schema.Schema != 1 || !sqlName.MatchString(schema.Charset) || !sqlName.MatchString(schema.Collation) {
-		return DatabaseRestoreReport{}, ErrInvalid
+		return DatabasePlan{}, nil, nil, ErrInvalid
 	}
 	// Authentication and complete bounded record-format validation precede all target
 	// schema/data writes. Only current embedded migrations can create structure.
 	for _, name := range names {
 		count, e := a.tableRecords(ctx, name, func(t Table) error { definitions[name] = t; return nil }, nil)
 		if e != nil {
-			return DatabaseRestoreReport{}, ErrInvalid
+			return DatabasePlan{}, nil, nil, ErrInvalid
 		}
 		counts[name] = count
 	}
 	if !a.schemaRowsMatch(ctx) {
+		return DatabasePlan{}, nil, nil, ErrInvalid
+	}
+	plan := DatabasePlan{Schema: 1, Charset: schema.Charset, Collation: schema.Collation}
+	for _, name := range names {
+		plan.Tables = append(plan.Tables, DatabaseTablePlan{name, counts[name]})
+		plan.Rows += counts[name]
+	}
+	return plan, definitions, counts, nil
+}
+
+func (a *Archive) restoreDatabase(ctx context.Context, target *sql.DB, owner *databaseOwnership) (DatabaseRestoreReport, error) {
+	if a == nil || !a.valid || target == nil {
 		return DatabaseRestoreReport{}, ErrInvalid
 	}
+	names := tableNames()
+	plan, definitions, counts, e := a.parseDatabase(ctx)
+	if e != nil {
+		return DatabaseRestoreReport{}, ErrInvalid
+	}
+	schema := DatabaseSchema{1, plan.Charset, plan.Collation}
 	conn, e := target.Conn(ctx)
 	if e != nil {
 		return DatabaseRestoreReport{}, ErrInvalid

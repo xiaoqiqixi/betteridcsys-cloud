@@ -188,3 +188,21 @@ dab0167的22来宾在启动前已被拒绝：原baseline有3个接口，准备�
 最终检查仍必跑；若已有先发失败，保留其原固定错误码而不是用最终失败覆盖它。最终proof仍保留，
 缺失或不相等绝不能产生通过；即使最终网络恢复原样，也不能挽救启动前已失败的检查。
 回归直接执行真实`execute`控制流，覆盖启动前/来宾失败、最终差异/采集不可用和临时变化恢复，全部维持拒绝。
+
+## Controller target provisioning scenario
+
+`--scenario controller-provision` selects one additional **fixed** guest workload,
+not an arbitrary script hook. Its binaries and Python are built/read from the
+same checked source; image signature checks, seccomp sandbox, bounded serial
+channel, APT-only relay and before/after host-network proof are unchanged.
+
+The guest performs actual controller software installation, target sealing,
+authenticated record planning and root socket-only MySQL provisioning. It checks
+source encoding preservation, both generated credentials, runtime CREATE denial
+(error 1142, not a connection error), exact-operation reentry, refusal of an
+unknown account and refusal of a missing credential without password reset.
+
+Synthetic source metadata/table headers are explicitly identified. No rows are
+restored, no controller starts, and no source host, reboot, node takeover, KVM or
+release acceptance is claimed. Only fixed-schema reports are uploaded; DSNs,
+passwords, SQL responses, seed contents and serial logs remain private scratch.

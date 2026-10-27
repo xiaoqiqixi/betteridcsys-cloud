@@ -165,6 +165,14 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 	}
 	defer target.DB.Close()
 	dir, archive, keyFile := encryptedSQLFixture(t, files, operation)
+	var dataPlan controllerbackup.DatabasePlan
+	if err := controllerbackup.WithVerifiedArchive(archive, keyFile, "source-sql-test", operation, dir, func(a *controllerbackup.Archive) error {
+		var err error
+		dataPlan, err = a.PlanDatabase(ctx)
+		return err
+	}); err != nil || dataPlan.Schema != 1 || dataPlan.Charset != "utf8mb4" || dataPlan.Collation != "utf8mb4_bin" || len(dataPlan.Tables) != 34 || dataPlan.Rows != count {
+		t.Fatal("authenticated data plan must preserve source encoding and complete row inventory", err, dataPlan)
+	}
 	restore := func() (controllerbackup.DatabaseRestoreReport, error) {
 		var report controllerbackup.DatabaseRestoreReport
 		err := controllerbackup.WithVerifiedArchive(archive, keyFile, "source-sql-test", operation, dir, func(a *controllerbackup.Archive) error {

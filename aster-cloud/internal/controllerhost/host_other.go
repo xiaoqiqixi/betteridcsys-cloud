@@ -16,3 +16,5 @@ func (*Host) WithSealedSource(string, func() error) error { return ErrUnavailabl
 func (*Host) PrepareTarget(string, string) (Status, error) { return Status{}, ErrUnavailable }
 
 func (*Host) TargetStatus(string, string) (Status, error) { return Status{}, ErrUnavailable }
+
+func (*Host) WithSealedTarget(string, string, func() error) error { return ErrUnavailable }

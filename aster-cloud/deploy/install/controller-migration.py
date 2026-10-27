@@ -628,7 +628,7 @@ class Host:
 
 
 class Target(Host):
-    """Prepare an inert target; no database provisioning or service activation."""
+    """Seal an inert target and explicitly provision its dedicated database."""
     def __init__(self, installer, operation):
         self.i = installer
         installer.check_target()
@@ -638,6 +638,11 @@ class Target(Host):
             installer.protected_path(str(path), directory=True, private=True)
             require(stat.S_IMODE(path.stat().st_mode) == 0o700, 'TARGET_DIRECTORY_NOT_PRIVATE')
         verify_installation(self, installer, target=True)
+        require(Path(__file__).resolve() == self.version_dir / 'templates/host-management/controller-migration.py' and
+                Path(installer.__file__).resolve() == self.version_dir / 'templates/host-management/install.py',
+                'TARGET_INSTALLED_COORDINATOR_REQUIRED')
+        for name in ('install.py', 'controller-migration.py', 'provision.py'):
+            require((self.version_dir / 'templates/host-management' / name).is_file(), 'TARGET_PROVISION_MODULE_MISSING')
         caps = installer.strict_json(run([str(self.binary), 'migration-capabilities'], 10))
         require(caps.get('target_preparation_seal') is True, 'TARGET_SEAL_NOT_SUPPORTED')
 
@@ -660,7 +665,7 @@ class Target(Host):
 
     def unused_host(self):
         require(set(p.name for p in self.root.iterdir()) <=
-                {'request.json', 'backup.age', 'recovery.key', 'plan.json', 'target.lock'}, 'TARGET_INPUT_INVENTORY_CHANGED')
+                {'request.json', 'backup.age', 'recovery.key', 'plan.json', 'target.lock', 'database-plan.json', 'database'}, 'TARGET_INPUT_INVENTORY_CHANGED')
         # A killed verification may leave private plaintext. Never silently
         # discard/reuse it, or turn an unreviewed partial run into success.
         require(not CONFIG.parent.exists() and not CONFIG.parent.is_symlink(), 'TARGET_CONFIGURATION_ALREADY_EXISTS')
@@ -694,6 +699,54 @@ class Target(Host):
         return self.i.strict_json(run([str(self.binary), 'migration-target-' + action,
                                        '-operation', self.operation], 1860, confirmed_errors=True))
 
+    def prepare_database(self, action):
+        # Full records and embedded migration checks precede directory creation,
+        # APT, credentials, SQL and even the data-stage start journal.
+        plan = self.target_command('database-plan')
+        require(plan.get('schema') == 1 and plan.get('protocol') == 'aster.controller-target-database/1' and
+                plan.get('operation_id') == self.operation, 'TARGET_DATABASE_PLAN_UNCONFIRMED')
+        if action == 'target-database-plan':
+            return {'schema': 1, 'plan': plan, 'readonly': True, 'database_provisioned': False,
+                    'database_restored': False, 'target_restore_approved': False, 'migration_ready': False}
+        path = self.root / 'database-plan.json'
+        if path.exists() or path.is_symlink():
+            require(self.read(path) == plan, 'TARGET_DATABASE_PLAN_CHANGED')
+        else:
+            self.write(path, plan)
+        directory = self.root / 'database'
+        if directory.exists() or directory.is_symlink():
+            self.i.protected_path(str(directory), directory=True, private=True)
+            require(stat.S_IMODE(directory.stat().st_mode) == 0o700, 'TARGET_DATABASE_DIRECTORY_UNSAFE')
+        else:
+            directory.mkdir(mode=0o700)
+            sync_directory(self.root)
+        require(set(p.name for p in directory.iterdir()) <= {'dependencies.json', 'mysql-provision.json',
+                'restore-provision.json', 'runtime-mysql-dsn', 'migration-mysql-dsn', 'mysql-client-home'},
+                'TARGET_DATABASE_INVENTORY_CHANGED')
+        # Only the manifest-checked sibling bundled with this installation.
+        module = self.i.provisioning_module()
+        try:
+            module.install_dependencies('controller', directory, with_mysql=True, resume=(directory / 'dependencies.json').exists())
+            self.unused_host()
+            require(self.target_command('database-plan') == plan, 'TARGET_DATABASE_PLAN_CHANGED')
+            module.start_owned_mysql(directory)
+            module.provision_restore_mysql(self.operation, plan['data']['charset'], plan['data']['collation'],
+                                           resume=(directory / 'restore-provision.json').exists())
+            self.unused_host()
+            require(self.target_command('database-plan') == plan, 'TARGET_DATABASE_PLAN_CHANGED')
+            module.verify_restore_mysql(self.operation, plan['data']['charset'], plan['data']['collation'])
+            proof = self.target_command('provision-check')
+            require(proof == {'database_provisioned': True, 'target_credentials_verified': True,
+                              'database_restored': False, 'target_restore_approved': False, 'migration_ready': False},
+                    'TARGET_PROVISION_UNCONFIRMED')
+            return proof
+        except module.ProvisionError as error:
+            # Never leak DSNs, arbitrary database errors or output. Preserve
+            # journals/partial installation; explicit same operation may resume.
+            if error.code and error.code.startswith('APT_'):
+                raise Refused(error.code) from None
+            raise Refused('TARGET_PROVISION_UNCONFIRMED') from None
+
     def prepare(self, action):
         with self.installation_lock():
             verify_installation(self, self.i, target=True)
@@ -718,6 +771,8 @@ class Target(Host):
                         result.get('admission_blocked') is True and result.get('guarded_processes_drained') is True and
                         result.get('source_isolated') is False and result.get('migration_ready') is False,
                         'TARGET_SEAL_UNCONFIRMED')
+                if action in ('target-database-plan', 'target-provision'):
+                    return self.prepare_database(action)
                 return {**result, 'database_restored': False, 'target_restore_approved': False}
 
 
@@ -728,14 +783,14 @@ class Arguments(argparse.ArgumentParser):
 
 def main():
     parser = Arguments(description=__doc__)
-    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status'))
+    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision'))
     parser.add_argument('--operation')
     args = parser.parse_args()
     require((args.action in ('capabilities', 'plan') and args.operation is None) or
             (args.action not in ('capabilities', 'plan') and isinstance(args.operation, str) and OP.fullmatch(args.operation)),
             'EXACT_OPERATION_ID_REQUIRED')
     if args.action == 'capabilities':
-        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status'],
+        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision'],
                 'export_restore': False, 'migration_ready': False}
     if args.action.startswith('target-'):
         return Target(install_module(), args.operation).prepare(args.action)
