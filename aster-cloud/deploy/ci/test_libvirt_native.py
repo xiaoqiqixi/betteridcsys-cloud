@@ -463,6 +463,34 @@ class NativeFixtureContract(unittest.TestCase):
             report['diagnostics']['mysql_inventory'] = bad
             self.assertEqual(h.public_result(report, self.metadata())['diagnostics'], {})
 
+    def test_mysql_inventory_parser_handles_server_boolean_fields_without_accepting_arbitrary_types(self):
+        guest = load("controller_inventory_parser", "controller-provision-native-guest.py")
+        counts = {key: 0 for key in ('current_root', 'root_socket', 'tcp_disabled', 'mysqlx_active', 'roles',
+            'default_roles', 'foreign_schemas', 'other_accounts', 'vendor_count', 'vendor_local', 'vendor_root_socket', 'vendor_password')}
+        counts.update(current_root=True, tcp_disabled=True, root_socket=1)
+        expected = {**counts, 'current_root': 1, 'tcp_disabled': 1}
+        self.assertEqual(guest.inventory_counts(json.dumps(counts).encode()), expected)
+        self.assertTrue(all(type(v) is int for v in guest.inventory_counts(json.dumps(counts).encode()).values()))
+        for bad in ({**counts, 'other_accounts': True}, {**counts, 'vendor_password': 'PRIVATE'},
+                    {**counts, 'tcp_disabled': 2}, {**counts, 'root_socket': -1},
+                    {**counts, 'vendor_count': 65536}, {**counts, 'extra': 'PRIVATE'}, {}):
+            with self.subTest(bad=bad), self.assertRaises(guest.Refused):
+                guest.inventory_counts(json.dumps(bad).encode())
+        for raw in (b'{', b'\xff', b'x' * 2049, b'{"current_root":0,"current_root":1}'):
+            with self.subTest(raw=raw[:30]), self.assertRaises(guest.Refused):
+                guest.inventory_counts(raw)
+
+    def test_mysql_inventory_probe_failure_has_only_a_fixed_nonsecret_reason(self):
+        report = dict(self.metadata(), schema=1, passed=False, kvm_ready=False,
+                      code='TARGET_RESTORE_SERVER_INVENTORY_REJECTED', phase='target-provision')
+        for code in ('inventory_timeout', 'inventory_output_bound', 'inventory_command_failed',
+                     'inventory_json_invalid', 'inventory_fields_invalid', 'inventory_counts_invalid', 'inventory_unavailable'):
+            report['diagnostics'] = {'mysql_inventory_error': code, 'stderr': 'PRIVATE'}
+            self.assertEqual(h.public_result(report, self.metadata())['diagnostics'], {'mysql_inventory_error': code})
+        for invalid in ('PRIVATE', {'code': 'inventory_timeout'}, True):
+            report['diagnostics'] = {'mysql_inventory_error': invalid}
+            self.assertEqual(h.public_result(report, self.metadata())['diagnostics'], {})
+
     def test_public_success_is_fully_validated_before_export(self):
         self.assertEqual(h.public_result(self.result(), self.metadata()), self.result())
         for extra in ("code", "phase", "diagnostics"):

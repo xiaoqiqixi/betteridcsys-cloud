@@ -812,6 +812,11 @@ def public_result(result, metadata):
     diagnostics = result.get("diagnostics")
     if isinstance(diagnostics, dict):
         safe = {}
+        inventory_error = diagnostics.get('mysql_inventory_error')
+        if isinstance(inventory_error, str) and inventory_error in {
+                'inventory_timeout', 'inventory_output_bound', 'inventory_command_failed', 'inventory_json_invalid',
+                'inventory_fields_invalid', 'inventory_counts_invalid', 'inventory_unavailable'}:
+            safe['mysql_inventory_error'] = inventory_error
         inventory = diagnostics.get('mysql_inventory')
         fields = {'current_root', 'root_socket', 'tcp_disabled', 'mysqlx_active', 'roles', 'default_roles',
                   'foreign_schemas', 'other_accounts', 'vendor_count', 'vendor_local', 'vendor_root_socket', 'vendor_password'}

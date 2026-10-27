@@ -215,6 +215,21 @@ def run_contract(fixture):
         require(re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", server.get("uuid", "")), "FIXTURE_SERVER_UUID_INVALID")
         report["server_version"] = server["version"]
         report["checks"].append("owned-native-process-socket-and-server-identity")
+        # Execute the exact native-guest diagnostic query on actual MySQL before
+        # any owned test object is created. This is parser/SQL proof, not Ubuntu
+        # root-account provenance or an installation acceptance substitute.
+        spec = importlib.util.spec_from_file_location("controller_inventory_probe", Path(__file__).with_name("controller-provision-native-guest.py"))
+        guest = importlib.util.module_from_spec(spec)
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(guest)
+        raw = admin.run(guest.inventory_query('0' * 32))
+        counts = guest.inventory_counts(raw)
+        require(counts['current_root'] == 0 and counts['tcp_disabled'] == 1 and counts['mysqlx_active'] == 0 and
+                counts['foreign_schemas'] >= 1 and counts['other_accounts'] >= 1 and
+                all(counts[k] == 0 for k in ('vendor_count', 'vendor_local', 'vendor_root_socket', 'vendor_password')),
+                "REAL_INVENTORY_QUERY_OR_PARSER_REJECTED")
+        report["checks"].append("actual-mysql-native-inventory-query-and-bounded-json-parser")
+        report["inventory_boolean_wire_types"] = {k: type(json.loads(raw)[k]).__name__ for k in ('current_root', 'tcp_disabled')}
         provision = load_provision()
         original_transport = provision.mysql_sql
         phase = "collision-preflight"
