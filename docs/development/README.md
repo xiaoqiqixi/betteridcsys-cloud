@@ -16,10 +16,13 @@
 
 libvirt 准备任务运行签名 Ubuntu 镜像中的真实 APT/systemd；使用 TCG，明确验证没有 KVM 时被控拒绝就绪。OVS 解析与隔离 NAT 报文测试不等于真实宿主、物理网络或跨节点 KVM 验收。新仓库正式发行来源迁移也仍是独立门禁。
 
+原生与浏览器证据名称绑定运行 ID 和 attempt，明确禁止覆盖。重跑不能删除或替换失败轮次的证据；核验时需匹配实际提交与轮次，而不是取同名文件的最新一份。[GitHub 上传制品规则](https://github.com/actions/upload-artifact#not-uploading-to-the-same-artifact)
+
 - [验证记录](../../aster-cloud/docs/VALIDATION.md) · [浏览器验证](../../aster-cloud/docs/BROWSER_VALIDATION.md)
 - [安装验证](../../aster-cloud/docs/INSTALL_VALIDATION.md) · [发布通道](../../aster-cloud/docs/RELEASE_CHANNEL.md)
 - [内置升级方案](https://github.com/xiaoqiqixi/betteridcsys-backend/blob/main/docs/development/BUILTIN_UPGRADES.md)：主控维护升级、被控滚动升级、兼容与失败恢复的开发合同，尚非发布功能。
 - [KVM 功能对照](../../aster-cloud/docs/KVM_ENHANCED_PARITY.md)：后续工作与明确未验收项。
+- [统一安装与主控迁移](INSTALL_AND_MIGRATION.md)：单入口角色选择、完整迁出/恢复/接管/回退合同与分阶段验收；迁移不是只上传数据库，也不等于已有 VM 冷迁移。
 
 ## 工程记录
 

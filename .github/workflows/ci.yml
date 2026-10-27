@@ -42,6 +42,7 @@ jobs:
         run: python3 -B aster-cloud/deploy/scripts/test_cloud_package.py
       - name: Published installer commands and proof boundaries
         run: |
+          python3 -B aster-cloud/deploy/ci/test_unified_install.py
           python3 -B aster-cloud/deploy/ci/test_install_entrypoints.py
           python3 -B aster-cloud/deploy/ci/test_public_cloud_evidence.py
           python3 -B aster-cloud/deploy/ci/check_install_entrypoints.py --readme README.md --bootstrap aster-cloud/deploy/install/release_verify.py
@@ -143,13 +144,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: cloud-libvirt-native-ubuntu-${{ matrix.ubuntu }}
+          name: cloud-libvirt-native-ubuntu-${{ matrix.ubuntu }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/cloud-libvirt-native/summary.json
             ${{ runner.temp }}/cloud-libvirt-native/guest-report.json
             ${{ runner.temp }}/cloud-libvirt-native/image-provenance.json
           if-no-files-found: warn
           retention-days: 7
+          overwrite: false
 
   native-ovs-parser:
     name: Native OVS parser and encoder (${{ matrix.os }})
@@ -299,7 +301,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: network-management-browser
+          name: network-management-browser-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             aster-cloud/artifacts/network-browser/*.png
             aster-cloud/artifacts/network-browser/report.json
@@ -310,6 +312,7 @@ jobs:
             aster-cloud/artifacts/network-browser/identity/fixture.json
           if-no-files-found: warn
           retention-days: 7
+          overwrite: false
       - name: Remove only owned native scratch, browser profile and test certificates
         if: always()
         run: python3 -I aster-cloud/deploy/ci/prepare-cloud-runner.py cleanup

@@ -92,6 +92,16 @@ class NativeFixtureContract(unittest.TestCase):
         self.assertIn(b"BEGIN PGP PUBLIC KEY BLOCK", raw)
         self.assertNotIn(b"PRIVATE KEY", raw)
 
+    def test_native_and_browser_evidence_is_unique_per_attempt_not_overwritten(self):
+        workflow = (HERE.parents[2] / '.github/workflows/ci.yml').read_text()
+        expected = (
+            'name: cloud-libvirt-native-ubuntu-${{ matrix.ubuntu }}-${{ github.run_id }}-${{ github.run_attempt }}',
+            'name: network-management-browser-${{ github.run_id }}-${{ github.run_attempt }}',
+        )
+        for name in expected:
+            with self.subTest(artifact=name):
+                self.assertTrue(name in workflow, name)
+
     def test_doctor_protocol_matches_real_production_constant_not_task_protocol(self):
         contract = (HERE.parents[1] / "internal/nodeproto/contract.go").read_text()
         actual = re.search(r'const Protocol = "([^"]+)"', contract).group(1)

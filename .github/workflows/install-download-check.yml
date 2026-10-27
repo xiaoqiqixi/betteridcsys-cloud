@@ -42,18 +42,29 @@ jobs:
           TARGET_OS: ${{ matrix.os }}
         run: |
           set -euo pipefail
-          # Execute reviewed main bytes proven identical to the public bootstrap.
-          # No credential/environment inheritance, package install or service start.
-          # The unprivileged runner intentionally opens this public source file;
-          # sudo only elevates its stdin consumer, not the file redirection.
+          # Real controlling tty selects the role in the new unified entry.
+          # It downloads ONLY the exact pinned legacy bootstrap, which verifies
+          # its actual signatures and installer plan. No apply/start is accepted.
+          # The runner intentionally owns this redacted stdout report, not root secrets.
           # shellcheck disable=SC2024
-          sudo -n /usr/bin/env -i PATH=/usr/bin:/bin LANG=C.UTF-8 /usr/bin/python3 -I - "$ROLE" \
-            --download-only --evidence "$RUNNER_TEMP/cloud-public-proof.json" \
-            < aster-cloud/deploy/install/release_verify.py
+          sudo -n /usr/bin/env -i PATH=/usr/bin:/bin LANG=C.UTF-8 /usr/bin/python3 -I \
+            aster-cloud/deploy/ci/unified-download.py --role "$ROLE" \
+            --evidence "$RUNNER_TEMP/cloud-public-proof.json" > "$RUNNER_TEMP/cloud-unified-proof.json"
           sudo -n chmod 0644 "$RUNNER_TEMP/cloud-public-proof.json"
           python3 -I aster-cloud/deploy/ci/public_cloud_evidence.py \
             --evidence "$RUNNER_TEMP/cloud-public-proof.json" --role "$ROLE" --runner-os "$TARGET_OS" \
             > "$RUNNER_TEMP/cloud-public-verification.json"
+          python3 -I - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          result = json.loads((root / 'cloud-unified-proof.json').read_text())
+          assert result['schema'] == 1 and result['role'] == os.environ['ROLE']
+          assert result['unified_role_menu_exercised'] is True
+          assert result['host_apply'] is False and result['service_started'] is False
+          assert result['entry_sha256'] == hashlib.sha256(Path('aster-cloud/deploy/install/cloud.py').read_bytes()).hexdigest()
+          assert result['public_proof_sha256'] == hashlib.sha256((root / 'cloud-public-proof.json').read_bytes()).hexdigest()
+          PY
       - name: Retain bounded nonsecret actual-platform evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -62,6 +73,7 @@ jobs:
           path: |
             ${{ runner.temp }}/cloud-public-proof.json
             ${{ runner.temp }}/cloud-public-verification.json
+            ${{ runner.temp }}/cloud-unified-proof.json
           if-no-files-found: warn
           overwrite: false
           retention-days: 7
