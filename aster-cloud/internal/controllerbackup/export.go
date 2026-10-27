@@ -170,6 +170,15 @@ func ExportSealedSource(ctx context.Context, config control.Config, operation st
 			dsn = raw
 		}
 	}
+	ownership, ownershipRaw, e := sourceDatabaseOwnership(strings.TrimSpace(string(dsn)))
+	if e != nil {
+		return ExportReport{}, ErrInvalid
+	}
+	if ownership != nil {
+		// Preserve provenance as encrypted source metadata, never as a target
+		// business table or a nonce that may be reused to adopt another DB.
+		files["source/database-ownership.json"] = ownershipRaw
+	}
 	files["controller/materials.json"], e = json.Marshal(intent.Materials)
 	if e != nil {
 		return ExportReport{}, ErrInvalid
@@ -217,7 +226,7 @@ func ExportSealedSource(ctx context.Context, config control.Config, operation st
 	if store.Check(ctx) != nil {
 		return ExportReport{}, ErrInvalid
 	}
-	rows, e := SnapshotDatabase(ctx, store.DB, write)
+	rows, e := snapshotDatabase(ctx, store.DB, ownership, write)
 	if e != nil {
 		return ExportReport{}, ErrInvalid
 	}

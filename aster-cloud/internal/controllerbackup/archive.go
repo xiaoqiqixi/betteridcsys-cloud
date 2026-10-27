@@ -100,6 +100,10 @@ func validManifest(m Manifest, expectedController, expectedOperation string) (in
 		}
 		if required[entry.Name] {
 			delete(required, entry.Name)
+		} else if entry.Name == "source/database-ownership.json" {
+			if entry.Size < 1 || entry.Size > 65536 {
+				return 0, false
+			}
 		} else if match := materialName.FindStringSubmatch(entry.Name); len(match) != 2 || match[1] != entry.SHA256 || entry.Size == 0 || entry.Size > 1<<20 {
 			return 0, false
 		}

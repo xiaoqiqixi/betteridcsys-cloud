@@ -56,6 +56,10 @@ func tableNames() []string {
 // caller supplies private bounded writers, keeps the source fenced, and has
 // already checked the embedded migration checksums. No source rows are written.
 func SnapshotDatabase(ctx context.Context, db *sql.DB, write func(string, func(io.Writer) error) error) (int64, error) {
+	return snapshotDatabase(ctx, db, nil, write)
+}
+
+func snapshotDatabase(ctx context.Context, db *sql.DB, ownership *databaseOwnership, write func(string, func(io.Writer) error) error) (int64, error) {
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return 0, ErrInvalid
@@ -81,6 +85,11 @@ func SnapshotDatabase(ctx context.Context, db *sql.DB, write func(string, func(i
 	}
 	defer tx.Rollback()
 	names := tableNames()
+	inventory := append([]string(nil), names...)
+	if ownership != nil {
+		inventory = append(inventory, installerOwnershipTable)
+		sort.Strings(inventory)
+	}
 	rows, err := tx.QueryContext(ctx, "SELECT TABLE_NAME,ENGINE,TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() ORDER BY TABLE_NAME")
 	if err != nil {
 		return 0, ErrInvalid
@@ -88,7 +97,7 @@ func SnapshotDatabase(ctx context.Context, db *sql.DB, write func(string, func(i
 	index := 0
 	for rows.Next() {
 		var name, engine, kind string
-		if rows.Scan(&name, &engine, &kind) != nil || index >= len(names) || name != names[index] || engine != "InnoDB" || kind != "BASE TABLE" {
+		if rows.Scan(&name, &engine, &kind) != nil || index >= len(inventory) || name != inventory[index] || engine != "InnoDB" || kind != "BASE TABLE" {
 			rows.Close()
 			return 0, ErrInvalid
 		}
@@ -96,7 +105,7 @@ func SnapshotDatabase(ctx context.Context, db *sql.DB, write func(string, func(i
 	}
 	err = rows.Err()
 	rows.Close()
-	if err != nil || index != len(names) {
+	if err != nil || index != len(inventory) {
 		return 0, ErrInvalid
 	}
 	for _, query := range []string{
@@ -111,7 +120,7 @@ func SnapshotDatabase(ctx context.Context, db *sql.DB, write func(string, func(i
 	}
 	// Obtain metadata locks on every approved table before taking column
 	// definitions. These transaction locks remain held through the final read.
-	for _, name := range names {
+	for _, name := range inventory {
 		r, e := tx.QueryContext(ctx, "SELECT * FROM `"+name+"` LIMIT 0")
 		if e != nil {
 			return 0, ErrInvalid
@@ -120,6 +129,9 @@ func SnapshotDatabase(ctx context.Context, db *sql.DB, write func(string, func(i
 	}
 	schema := DatabaseSchema{Schema: 1}
 	if tx.QueryRowContext(ctx, "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=DATABASE()").Scan(&schema.Charset, &schema.Collation) != nil || !sqlName.MatchString(schema.Charset) || !sqlName.MatchString(schema.Collation) {
+		return 0, ErrInvalid
+	}
+	if ownership != nil && verifyDatabaseOwnership(ctx, tx, ownership, schema) != nil {
 		return 0, ErrInvalid
 	}
 	if write("database/schema.json", func(w io.Writer) error { return json.NewEncoder(w).Encode(schema) }) != nil {
