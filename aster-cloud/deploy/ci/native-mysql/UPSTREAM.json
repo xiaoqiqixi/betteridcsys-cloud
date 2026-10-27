@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "repository": "xiaoqiqixi/betteridcsys-backend",
+  "source_commit": "8e3e8ca9623a438c709b0c5d6cb2b8f699a243cf",
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "path": "mysql-native.sh",
+      "upstream_path": "vps-billing/deploy/ci/mysql-native.sh",
+      "upstream_sha256": "e741ac1df91c2767a35d58c72e905bac4fef48a4d5e25f497c31ec95588b188e",
+      "imported_sha256": "e741ac1df91c2767a35d58c72e905bac4fef48a4d5e25f497c31ec95588b188e",
+      "adaptation": "Unmodified generic native MySQL fixture."
+    },
+    {
+      "path": "mysql-distribution.py",
+      "upstream_path": "vps-billing/deploy/ci/mysql-distribution.py",
+      "upstream_sha256": "a81114fbf80fe3116f3cd714fdd0068ca081c35a2423b67f661fc9bb8dd92ab7",
+      "imported_sha256": "a81114fbf80fe3116f3cd714fdd0068ca081c35a2423b67f661fc9bb8dd92ab7",
+      "adaptation": "Unmodified generic native MySQL fixture."
+    },
+    {
+      "path": "mysql-distribution.json",
+      "upstream_path": "vps-billing/deploy/ci/mysql-distribution.json",
+      "upstream_sha256": "3bf29355429a795edecccec6243481a888d3de976ce02a7d7e19cae07e446ac8",
+      "imported_sha256": "3bf29355429a795edecccec6243481a888d3de976ce02a7d7e19cae07e446ac8",
+      "adaptation": "Unmodified generic native MySQL fixture."
+    },
+    {
+      "path": "mysql-distribution-ubuntu22.json",
+      "upstream_path": "vps-billing/deploy/ci/mysql-distribution-ubuntu22.json",
+      "upstream_sha256": "0595467f4c22d0db298736e3b524a88b93c99030b6676e38028c6b8377bdebdb",
+      "imported_sha256": "0595467f4c22d0db298736e3b524a88b93c99030b6676e38028c6b8377bdebdb",
+      "adaptation": "Unmodified generic native MySQL fixture."
+    },
+    {
+      "path": "test_mysql_native.py",
+      "upstream_path": "vps-billing/deploy/ci/test_mysql_native.py",
+      "upstream_sha256": "bac74b508d80fdec003b35498c72c566b03fb9ca2477c7c7a3eac5d4e3b22dc7",
+      "imported_sha256": "bac74b508d80fdec003b35498c72c566b03fb9ca2477c7c7a3eac5d4e3b22dc7",
+      "adaptation": "Unmodified generic native MySQL fixture."
+    },
+    {
+      "path": "test_mysql_distribution.py",
+      "upstream_path": "vps-billing/deploy/ci/test_mysql_distribution.py",
+      "upstream_sha256": "f5eff58f5ef2cc29cafdf3249d0ff7fcc6c0bf1d6c9e2bcb9ca2d52663b189db",
+      "imported_sha256": "21006d1eb24e150b16b3ef02f120585f51ab8d2d0c2e88991b71bc698b21721f",
+      "adaptation": "Retains generic distribution/extraction tests; finance Nginx and finance native-wrapper checks remain upstream. Cloud runner guards are in test_prepare_cloud_runner.py."
+    }
+  ]
+}

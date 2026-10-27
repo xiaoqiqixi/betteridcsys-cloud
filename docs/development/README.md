@@ -10,7 +10,11 @@
 
 ## 验证与发布
 
-开发检查见下方“本地构建与测试”。CI 的单元/构建范围不等于真实 MySQL、原生安装或 KVM 验收；对应环境需单独建立、运行并记录。
+开发检查见下方“本地构建与测试”。[独立仓库 CI](../../.github/workflows/ci.yml)包含 11 项任务：Ubuntu22/24 Go 检查、两个原生 libvirt 准备环境、两个 OVS 解析器环境、两个 NAT 网络命名空间环境、管理台、真实 MySQL 与真实后端浏览器回归。必须核对同一提交的实际结果，不能把任务已配置视为验收通过。
+
+主控实库与浏览器任务使用云仓库自己的[隔离 MySQL 测试环境](../../aster-cloud/deploy/ci/native-mysql/README.md)，不需要检出财务实现。浏览器使用临时 Firefox 配置和独立测试 CA，结束后清理，不修改开发者或生产主机的证书信任。
+
+libvirt 准备任务运行签名 Ubuntu 镜像中的真实 APT/systemd；使用 TCG，明确验证没有 KVM 时被控拒绝就绪。OVS 解析与隔离 NAT 报文测试不等于真实宿主、物理网络或跨节点 KVM 验收。新仓库正式发行来源迁移也仍是独立门禁。
 
 - [验证记录](../../aster-cloud/docs/VALIDATION.md) · [浏览器验证](../../aster-cloud/docs/BROWSER_VALIDATION.md)
 - [安装验证](../../aster-cloud/docs/INSTALL_VALIDATION.md) · [发布通道](../../aster-cloud/docs/RELEASE_CHANNEL.md)

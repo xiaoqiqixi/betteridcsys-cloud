@@ -45,7 +45,20 @@ jobs:
           python3 -B aster-cloud/deploy/ci/test_install_entrypoints.py
           python3 -B aster-cloud/deploy/ci/test_public_cloud_evidence.py
           python3 -B aster-cloud/deploy/ci/check_install_entrypoints.py --readme README.md --bootstrap aster-cloud/deploy/install/release_verify.py
+      - name: Native installer and disposable fixture safety contracts (no host apply)
+        run: |
+          bash -n aster-cloud/deploy/install/controller.sh aster-cloud/deploy/install/node.sh aster-cloud/deploy/ci/native-mysql/mysql-native.sh
+          python3 -B aster-cloud/deploy/install/test_install.py
+          python3 -B aster-cloud/deploy/ci/test_cloud_installer.py
+          python3 -B aster-cloud/deploy/ci/test_cloud_release_verifier.py
+          python3 -B aster-cloud/deploy/ci/test_libvirt_native.py
+          python3 -B aster-cloud/deploy/ci/test_prepare_cloud_runner.py
+          python3 -B aster-cloud/deploy/ci/native-mysql/test_mysql_distribution.py
+          python3 -B aster-cloud/deploy/ci/native-mysql/test_mysql_native.py
+      - name: Workflow syntax
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/ci.yml .github/workflows/install-download-check.yml
   frontend:
+    name: Vue management console checks
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -59,9 +72,244 @@ jobs:
       - name: Management UI checks
         working-directory: aster-cloud/frontend
         run: |
-          npm ci --include=dev --no-audit --no-fund
+          npm ci --include=dev --ignore-scripts --no-audit --no-fund
           npm run typecheck
           npm test
           npm run build
           npm run format:check
           npm audit --audit-level=high
+
+  native-libvirt:
+    name: Native libvirt preparation (ubuntu-${{ matrix.ubuntu }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # All emulator hosts use reviewed libslirp 4.7.x (loopback-only command
+        # socketpair). The independently signed guests run supported 22/24.
+        # Ubuntu 26 is deferred, not a failed result reclassified as passing.
+        include:
+          - os: ubuntu-24.04
+            ubuntu: '22.04'
+          - os: ubuntu-24.04
+            ubuntu: '24.04'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Install emulator and image-verification tools, not a host libvirt service
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y qemu-system-x86 qemu-utils cloud-image-utils gnupg
+      - name: Real signed Ubuntu guest APT, systemd and libvirt; no fake KVM device
+        env:
+          TEST_UBUNTU: ${{ matrix.ubuntu }}
+        run: |
+          set -euo pipefail
+          python3 -I aster-cloud/deploy/ci/libvirt-native.py \
+            --ubuntu "$TEST_UBUNTU" --source-root "$GITHUB_WORKSPACE" \
+            --source-sha "$GITHUB_SHA" --output "$RUNNER_TEMP/cloud-libvirt-native"
+      - name: Independently require exact-source native proof, never KVM readiness
+        env:
+          TEST_UBUNTU: ${{ matrix.ubuntu }}
+        run: |
+          python3 -I - <<'PYTEST'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'cloud-libvirt-native'
+          summary = json.loads((root / 'summary.json').read_text())
+          guest = json.loads((root / 'guest-report.json').read_text())
+          for proof in (summary, guest):
+              assert proof['schema'] == 1 and proof['source_sha'] == os.environ['GITHUB_SHA']
+              assert proof['ubuntu'] == os.environ['TEST_UBUNTU']
+              assert all(proof[k] is True for k in ('passed', 'real_apt', 'real_systemd', 'libvirt_prepared'))
+              assert proof['kvm_ready'] is False
+          assert summary['host_network_unchanged'] is True and summary['tcg_only'] is True
+          assert summary['host_network_pre_vm_proof']['unchanged'] is True
+          assert summary['host_network_proof']['unchanged'] is True
+          assert summary['host_process_isolation_verified'] is True and summary['sandbox_selftests_passed'] is True
+          assert summary['relay_cleanup_verified'] is True
+          assert guest['explicit_kvm_denial'] is True and guest['non_kvm_doctor_checks_passed'] is True
+          assert guest['default_network_absent'] is True and guest['virbr_absent'] is True
+          assert guest['libvirt_no_tcp_listener'] is True and guest['empty_network_mount_verified'] is True
+          assert guest['owned_units_active'] is True and guest['vendor_masks_persistent'] is True
+          PYTEST
+      - name: Retain only sanitized native preparation evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cloud-libvirt-native-ubuntu-${{ matrix.ubuntu }}
+          path: |
+            ${{ runner.temp }}/cloud-libvirt-native/summary.json
+            ${{ runner.temp }}/cloud-libvirt-native/guest-report.json
+            ${{ runner.temp }}/cloud-libvirt-native/image-provenance.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  native-ovs-parser:
+    name: Native OVS parser and encoder (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Install parser only (no OVS service or kernel datapath)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y openvswitch-common libvirt-clients libxml2-utils
+          /usr/bin/ovs-ofctl --version
+      - name: Parse production flows and inspect real encoded meters; no skips
+        working-directory: aster-cloud
+        env:
+          ASTER_NATIVE_OVS_PARSER: '1'
+        run: |
+          set -euo pipefail
+          go test -mod=readonly -race -count=1 -timeout=3m -json ./internal/fabric -run '^TestNativeOVSParser' | tee native-ovs-parser.jsonl
+          python3 - <<'PYTEST'
+          import json
+          events = [json.loads(line) for line in open('native-ovs-parser.jsonl')]
+          assert not any(e['Action'] in ('skip', 'fail') for e in events), 'native parser gate skipped or failed'
+          expected = {'TestNativeOVSParserFlows', 'TestNativeOVSParserMeters'}
+          passed = {e.get('Test') for e in events if e['Action'] == 'pass'}
+          assert expected <= passed, 'required native parser tests did not execute'
+          PYTEST
+      - name: Validate exact public NIC filter with distribution libvirt schema
+        working-directory: aster-cloud
+        run: |
+          set -euo pipefail
+          go build -mod=readonly -trimpath -buildvcs=false -o "$RUNNER_TEMP/aster-node-schema" ./cmd/aster-node
+          "$RUNNER_TEMP/aster-node-schema" --print-public-network-filter aster-public-ipv4 > "$RUNNER_TEMP/aster-public-ipv4.xml"
+          virt-xml-validate "$RUNNER_TEMP/aster-public-ipv4.xml" nwfilter
+          # XML validation only: do not start libvirt, define filters or touch host networking.
+
+  native-nat:
+    name: Native NAT packet flow and revocation (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Install namespace tools (no network service)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y iproute2 nftables conntrack
+          /usr/sbin/nft --version
+      - name: Real isolated namespace traffic; no skips or host rule changes
+        working-directory: aster-cloud
+        run: |
+          set -euo pipefail
+          go test -mod=readonly -race -c -o "$RUNNER_TEMP/aster-nat.test" ./internal/fabric
+          sudo -- env ASTER_NATIVE_NAT=1 "$RUNNER_TEMP/aster-nat.test" -test.v -test.count=1 -test.timeout=3m -test.run '^TestNativeNAT' | tee native-nat.log
+          grep -q '^--- PASS: TestNativeNATPacketFlowAndRevocation ' native-nat.log
+          grep -q '^--- PASS: TestNativeNATInternetEgressAndRevocation ' native-nat.log
+          for marker in PUBLIC_INGRESS_DEFAULT_DENY_AND_OUTBOUND_REPLY_CONFIRMED PUBLIC_INGRESS_RELATED_ICMP_BOTH_DIRECTIONS_CONFIRMED PUBLIC_INGRESS_EXACT_SOURCE_PORT_AND_ICMP_CONFIRMED PUBLIC_INGRESS_ALL_PUBLIC_CIDR_AND_PROTECTED_FLOOR_CONFIRMED PUBLIC_INGRESS_REVOKE_CONNTRACK_AND_FINAL_READBACK_CONFIRMED PUBLIC_INGRESS_SHARED_NAT_BOUNDARY_CONFIRMED; do
+            grep -q "$marker" native-nat.log
+          done
+          if grep -qE -- '--- (SKIP|FAIL):' native-nat.log; then
+            echo 'Native NAT gate must not skip or fail.' >&2; exit 1
+          fi
+
+  native-mysql:
+    name: Independent controller MySQL acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Prepare disposable native runner
+        run: python3 -I aster-cloud/deploy/ci/prepare-cloud-runner.py prepare
+      - name: Real isolated MySQL, race and static binaries
+        run: env -u ASTER_CLOUD_TEST_DSN RUNNER_TEMP="$ASTER_NATIVE_FIXTURE_ROOT" bash aster-cloud/deploy/ci/native-mysql/mysql-native.sh -- bash aster-cloud/deploy/ci/check.sh
+      - name: Go vulnerability gate
+        working-directory: aster-cloud
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -format=text -show=version,verbose ./...
+      - name: Remove only owned native scratch
+        if: always()
+        run: python3 -I aster-cloud/deploy/ci/prepare-cloud-runner.py cleanup
+
+  network-browser:
+    name: Real MySQL network management browser acceptance
+    runs-on: ubuntu-24.04
+    # First measured tool provisioning took 21m48s. Keep the actual fixture and
+    # page-operation deadlines unchanged; allow bounded distribution download time.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.19.0'
+          package-manager-cache: false
+      - name: Build the real management frontend
+        working-directory: aster-cloud/frontend
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm run build
+      - name: Prepare disposable native runner
+        run: python3 -I aster-cloud/deploy/ci/prepare-cloud-runner.py prepare
+      - name: Install pinned private browser tools
+        run: |
+          set -euo pipefail
+          umask 077
+          tools_root=$(mktemp -d "$ASTER_NATIVE_FIXTURE_ROOT/browser-tools.XXXXXXXX")
+          npm install --prefix "$tools_root" --ignore-scripts --no-audit --no-fund --save-exact playwright@1.64.0
+          export PLAYWRIGHT_BROWSERS_PATH="$tools_root/browsers"
+          node "$tools_root/node_modules/playwright/cli.js" install --with-deps firefox
+          sudo apt-get install --no-install-recommends -y libnss3-tools
+          printf 'PLAYWRIGHT_MODULE_DIR=%s\nPLAYWRIGHT_BROWSERS_PATH=%s\n' "$tools_root/node_modules" "$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
+      - name: Strict TLS desktop/mobile UI and durable MySQL history; no skips
+        run: env -u ASTER_CLOUD_TEST_DSN RUNNER_TEMP="$ASTER_NATIVE_FIXTURE_ROOT" bash aster-cloud/deploy/ci/native-mysql/mysql-native.sh -- bash aster-cloud/deploy/ci/network-browser.sh
+      - name: Publish only screenshots and sanitized acceptance results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: network-management-browser
+          path: |
+            aster-cloud/artifacts/network-browser/*.png
+            aster-cloud/artifacts/network-browser/report.json
+            aster-cloud/artifacts/network-browser/tls.json
+            aster-cloud/artifacts/network-browser/fixture.json
+            aster-cloud/artifacts/network-browser/identity/*.png
+            aster-cloud/artifacts/network-browser/identity/report.json
+            aster-cloud/artifacts/network-browser/identity/fixture.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Remove only owned native scratch, browser profile and test certificates
+        if: always()
+        run: python3 -I aster-cloud/deploy/ci/prepare-cloud-runner.py cleanup

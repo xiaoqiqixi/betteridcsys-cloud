@@ -80,7 +80,7 @@ class NativeFixtureContract(unittest.TestCase):
         repo = HERE.parents[2]
         provision = load("libvirt_native_supported_provision", "../install/provision.py")
         self.assertEqual(provision.CODENAMES, {"22.04": "jammy", "24.04": "noble"})
-        workflow = (repo / ".github/workflows/cloud.yml").read_text()
+        workflow = (repo / ".github/workflows/ci.yml").read_text()
         self.assertEqual(re.findall(r"ubuntu: '([^']+)'", workflow), ["22.04", "24.04"])
         sandbox = (HERE / "libvirt-native-sandbox.c").read_text()
         self.assertEqual(re.findall(r'"ubuntu-([0-9.]+)-server-cloudimg-amd64.img"', sandbox), ["22.04", "24.04"])
