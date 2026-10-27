@@ -24,6 +24,9 @@ func encryptedSQLFixture(t *testing.T, files map[string][]byte, operation string
 	if e != nil {
 		t.Fatal(e)
 	}
+	if os.Chmod(dir, 0700) != nil {
+		t.Fatal("private fixture directory required")
+	}
 	all := map[string][]byte{"controller/config.json": []byte("{}\n"), "controller/materials.json": []byte("[]\n"), "source/plan.json": []byte("{}\n"), "source/installation.json": []byte("{}\n"), "source/isolated.json": []byte("{}\n")}
 	for name, raw := range files {
 		all[name] = raw

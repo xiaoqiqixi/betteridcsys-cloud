@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -56,7 +57,7 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 		t.Fatal("fixture DSN invalid")
 	}
 	defer store.DB.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	if e = store.Migrate(ctx); e != nil {
 		t.Fatal("migration failed", e)
@@ -206,6 +207,29 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 	if os.WriteFile(keyFile, keyBytes, 0600) != nil {
 		t.Fatal("cannot restore fixture key")
 	}
+	// The last age tag is checked only after all plaintext. A streaming
+	// importer must not create even the target schema before that final tag,
+	// nor accept authenticated data followed by undeclared ciphertext.
+	originalArchive, e := os.ReadFile(archive)
+	if e != nil || len(originalArchive) < 32 {
+		t.Fatal("archive fixture unavailable")
+	}
+	corrupt := bytes.Clone(originalArchive)
+	corrupt[len(corrupt)-1] ^= 1
+	for _, bad := range [][]byte{originalArchive[:len(originalArchive)-1], corrupt, append(bytes.Clone(originalArchive), 'X')} {
+		if os.WriteFile(archive, bad, 0600) != nil {
+			t.Fatal("cannot prepare final authentication refusal")
+		}
+		if _, e = restore(); e != controllerbackup.ErrInvalid {
+			t.Fatal("expected explicit refusal before target writes", e)
+		}
+		if target.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()").Scan(&tables) != nil || tables != 0 {
+			t.Fatal("late authentication failure reached target DDL")
+		}
+	}
+	if os.WriteFile(archive, originalArchive, 0600) != nil {
+		t.Fatal("cannot restore authenticated fixture")
+	}
 	report, e := restore()
 	if e != nil || report.Tables != 34 || report.Rows != count || !report.ExactRowsVerified || !report.DeclaredConstraintsVerified || report.TargetActivationApproved || report.MigrationReady {
 		t.Fatal("exact database restore did not pass, or claimed activation", e, report)
@@ -237,6 +261,73 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 	if e = target.Check(ctx); e != nil {
 		t.Fatal("restored current schema rejected", e)
 	}
+	t.Run("foreign-key refusal rolls back all restored rows", func(t *testing.T) {
+		badFiles := make(map[string][]byte, len(files))
+		for name, raw := range files {
+			badFiles[name] = raw
+		}
+		name := "database/controller_console_sessions.jsonl"
+		badFiles[name] = bytes.Replace(files[name], []byte(base64.StdEncoding.EncodeToString([]byte(userID))),
+			[]byte(base64.StdEncoding.EncodeToString([]byte(strings.Repeat("b", 32)))), 1)
+		if bytes.Equal(files[name], badFiles[name]) {
+			t.Fatal("orphan session fixture did not change")
+		}
+		op := make([]byte, 16)
+		if _, e := rand.Read(op); e != nil {
+			t.Fatal(e)
+		}
+		operation := hex.EncodeToString(op)
+		database := "aster_cloud_restore_" + operation
+		if _, e := admin.ExecContext(ctx, "CREATE DATABASE `"+database+"` CHARACTER SET utf8mb4 COLLATE utf8mb4_bin"); e != nil {
+			t.Fatal("owned refusal fixture creation failed")
+		}
+		defer func() {
+			if _, e := admin.Exec("DROP DATABASE `" + database + "`"); e != nil {
+				t.Error("owned refusal fixture cleanup failed")
+			}
+		}()
+		cfg := *c
+		cfg.DBName = database
+		target, e := control.OpenDSN(cfg.FormatDSN())
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer target.DB.Close()
+		dir, archive, key := encryptedSQLFixture(t, badFiles, operation)
+		var report controllerbackup.DatabaseRestoreReport
+		e = controllerbackup.WithVerifiedArchive(archive, key, "source-sql-test", operation, dir, func(a *controllerbackup.Archive) error {
+			var err error
+			report, err = a.RestoreEmptyDatabase(ctx, target.DB)
+			return err
+		})
+		if e != controllerbackup.ErrInvalid || report != (controllerbackup.DatabaseRestoreReport{}) {
+			t.Fatal("orphan FK was accepted or reported successful", e, report)
+		}
+		var tables int
+		if target.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()").Scan(&tables) != nil || tables != 34 {
+			t.Fatal("test did not reach the actual migrated SQL target")
+		}
+		for name := range files {
+			if !strings.HasSuffix(name, ".jsonl") {
+				continue
+			}
+			table := strings.TrimSuffix(strings.TrimPrefix(name, "database/"), ".jsonl")
+			var count int
+			want := 0
+			if table == "controller_schema" {
+				want = 12
+			} else if table == "controller_lock" || table == "controller_identity_lock" {
+				want = 1
+			}
+			if target.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM `"+table+"`").Scan(&count) != nil || count != want {
+				t.Fatal("failed restore retained partial application rows", table)
+			}
+		}
+		entries, e := os.ReadDir(dir)
+		if e != nil || len(entries) != 2 {
+			t.Fatal("failed restore retained plaintext staging")
+		}
+	})
 	// A foreign table must not be silently omitted or included in the backup.
 	if _, e = store.DB.ExecContext(ctx, "CREATE TABLE foreign_table(id INT PRIMARY KEY) ENGINE=InnoDB"); e != nil {
 		t.Fatal(e)

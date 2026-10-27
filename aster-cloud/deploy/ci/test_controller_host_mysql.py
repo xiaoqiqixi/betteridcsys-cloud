@@ -65,11 +65,12 @@ def worker(binary):
     global PHASE, CLEANUP_COMPLETE
     require(sys.platform == 'linux' and os.geteuid() == 0 and Path('/run/systemd/system').is_dir(), 'NATIVE_ROOT_SYSTEMD_REQUIRED')
     request = receive(sys.stdin.buffer)
-    require(set(request) == {'nonce', 'socket', 'relay_port', 'source_sha'}, 'SYSTEMD_REQUEST_INVALID')
+    require(set(request) == {'nonce', 'socket', 'relay_port', 'source_sha', 'server_uuid'}, 'SYSTEMD_REQUEST_INVALID')
     nonce, source = request['nonce'], request['source_sha']
     require(isinstance(nonce, str) and re.fullmatch(r'[a-f0-9]{24}', nonce) and
             isinstance(source, str) and re.fullmatch(r'[a-f0-9]{40}', source) and
             type(request['relay_port']) is int and 1024 <= request['relay_port'] <= 65535, 'SYSTEMD_IDENTITY_INVALID')
+    require(isinstance(request['server_uuid'], str) and re.fullmatch(r'[a-f0-9-]{36}', request['server_uuid']), 'FIXTURE_UUID_INVALID')
     controller = 'aster-fence-test-' + nonce
     database = 'aster_cloud_test_fence_' + nonce
     config_dir = Path('/etc/aster-controller')
@@ -191,6 +192,13 @@ def worker(binary):
         created_units += [unit]
         run(['/usr/bin/python3', '-I', HERE.parent / 'install/install.py', 'controller', '--bundle', bundle,
              '--sha256', bundle_sha, '--allow-development', '--approval', case / 'approval.json', '--apply'])
+        # Synthetic ownership receipt, paired to an actual native fixture DB.
+        # Not a claim that root-socket provisioning ran in this service test.
+        private(install_state / 'mysql-provision.json', json.dumps({
+            'schema': 1, 'database': database, 'runtime_user': 'aster_ci',
+            'migration_user': 'aster_fixture_migration', 'server_uuid': request['server_uuid'],
+            'nonce': nonce + '0' * 40, 'status': 'dedicated-database-provisioned',
+            'steps': ['database-created', 'runtime-created', 'runtime-granted', 'migration-created', 'migration-granted']}).encode())
         versions = installed / 'versions' / ('0.1.0-dev.1-' + bundle_sha[:16])
         exe, config_file = versions / 'bin/aster-controller', config_dir / 'config.json'
         helper = versions / 'templates/host-management/controller-migration.py'

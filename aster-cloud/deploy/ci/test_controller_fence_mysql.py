@@ -310,7 +310,7 @@ def supervisor(binary, systemd=False):
             if systemd:
                 source = os.environ.get('GITHUB_SHA', '')
                 require(re.fullmatch(r'[0-9a-f]{40}', source), 'EXACT_CI_SOURCE_REQUIRED')
-                request.update(relay_port=relay.port, source_sha=source)
+                request.update(relay_port=relay.port, source_sha=source, server_uuid=server_uuid)
             send(child.stdin, request)
             ready = receive(child.stdout)
             require(ready == {'phase': 'ready', 'controller_id': 'aster-fence-test-' + nonce}, 'SERVER_READY_PROTOCOL')
@@ -325,6 +325,12 @@ def supervisor(binary, systemd=False):
                                      "`.controller_audit WHERE action='fixture.ownership';")
             require(audit_owner == {'nonce': nonce, 'uuid': server_uuid}, 'BOOTSTRAPPED_OWNERSHIP_UNCONFIRMED')
             admin.run('DROP TABLE `' + database + '`.contract_ownership;')
+            if systemd:
+                # The real native provisioner deliberately retains this marker.
+                # Use its exact SQL shape in the disposable fixture: exporting
+                # an ordinarily installed source must verify, not drop/ignore it.
+                admin.run('CREATE TABLE `' + database + '`.aster_installer_ownership (id INT PRIMARY KEY,nonce CHAR(64) NOT NULL,server_uuid CHAR(36) NOT NULL);'
+                          'INSERT INTO `' + database + "`.aster_installer_ownership VALUES(1,'" + nonce + '0' * 40 + "','" + server_uuid + "');")
             # Seed two durable, synthetic unresolved receipts. No network member
             # is attached, and neither is eligible for automatic create dispatch.
             for index, state in enumerate(('sending', 'uncertain'), 1):
