@@ -51,6 +51,10 @@
 
 新系统级验收入口使用**实际安装器 --allow-development** 安装同提交真实 ELF 和明确标记的最小 UI 夹具；不是发布包验签或视觉验收。通过仅回环字节 relay 连接原生 MySQL Unix socket，以保留真实单元的 PrivateTmp 沙箱。覆盖真实 systemd 主控、批准的心跳 service/timer、同 ID 重入、plain cancel 拒绝、持久 mask 拒绝启动、daemon-reload 后复核、错误 ID/导出标记拒绝、原 inode 恢复、不自动启动、人工启动后严格 TLS，以及全库行快照不变。Ubuntu22/24 两平台均列入 MySQL CI；结果必须以新提交实际任务为准，不能把本地语法/模型测试算作系统级通过。
 
+`74b2edecbc71b252f0d8c2b2194a7c6c949b6283` 的[CI 40512617545](https://github.com/xiaoqiqixi/betteridcsys-cloud/actions/runs/40512617545)已完成：10/12 成功，两个原生 libvirt 环境均通过，但两个新增 systemd/MySQL 用例都在真实安装器 apply 阶段失败；基础 MySQL/HTTPS fence 用例仍通过。失败时确认自有资源清理完成。**系统级隔离尚未通过**，不能将 Go/浏览器绿灯挪用为其证明。后续增加只允许静态白名单的安装器错误诊断，不输出任意 stderr、DSN 或密钥。
+
+恢复路径进一步改为先核对全部单元/屏蔽 inode，再撤销任何一个屏蔽，避免发现外来主控文件前已部分恢复心跳定时器。计划额外拒绝可识别的非本安装版本 `aster-controller` 进程，不终止它们；仍不声称能识别管理员改名运行的任意旧程序。新实库负例包括实际未纳管主控副本、drop-in、外来 mask inode、配置漂移及拒绝后的不变性；其结果须等新提交实测。
+
 仍需本轮实际 systemd/MySQL 结果、更完整的并发与在途请求、原生 OS 重启复核及故障窗口验证。daemon-reload **不是**操作系统重启。完成这些才可关闭 M01。M02加密导出、M03空目标恢复、M04双活防护/接管回退、M05后台、M06跨主控实例迁移仍未交付；没有“导出后直接导入运行库”的捷径。
 
 实现语义参考：[Linux renameat2](https://man7.org/linux/man-pages/man2/rename.2.html)、[systemd 单元加载与 mask](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html)。Ubuntu22/24 的实际行为仍由分发版测试确认，不以最新版手册替代验收。

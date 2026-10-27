@@ -5,6 +5,7 @@ Only invoked by the nonce-database supervisor on a fresh disposable CI runner.
 No fake systemctl, host-path override, production database, KVM or OS reboot.
 """
 import argparse
+import ast
 import hashlib
 import http.client
 import importlib.util
@@ -37,6 +38,17 @@ def run(argv, data=None, denied=False, timeout=90):
     result = subprocess.run(list(map(str, argv)), input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             timeout=timeout, env=ENV)
     require(len(result.stdout) <= 1024 * 1024 and len(result.stderr) <= 65536, 'SYSTEMD_GATE_OUTPUT_BOUND')
+    if PHASE == 'install' and result.returncode and not denied:
+        # Print only a verbatim STATIC diagnostic already reviewed in installer
+        # source, never arbitrary subprocess output or a config/credential.
+        tree = ast.parse((HERE.parent / 'install/install.py').read_text())
+        known = {node.args[0].value for node in ast.walk(tree) if isinstance(node, ast.Call) and
+                 isinstance(node.func, ast.Name) and node.func.id == 'fail' and node.args and
+                 isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)}
+        known.add('Installation input or protected host operation failed; details withheld to protect secrets')
+        for message in known:
+            if result.stderr == ('ERROR: ' + message + '\n').encode():
+                raise RuntimeError('INSTALLER_REFUSED: ' + message)
     require((result.returncode != 0) if denied else (result.returncode == 0), 'SYSTEMD_GATE_COMMAND_' + PHASE)
     return result
 
@@ -77,7 +89,7 @@ def worker(binary):
         raise RuntimeError('SYSTEMD_WORKER_INTERRUPTED')
     signal.signal(signal.SIGTERM, interrupted)
     operation = secrets.token_hex(16)
-    owned, created_units, versions = [], [], None
+    owned, created_units, versions, foreign_process = [], [], None, None
     try:
         for path in (case, config_dir):
             path.mkdir(mode=0o700)
@@ -181,6 +193,35 @@ def worker(binary):
         PHASE = 'plan'
         planned = migrate('plan')
         require(planned['readonly'] and planned['units'] == names and not planned['source_isolated'], 'SYSTEMD_PLAN_INVALID')
+        # Actual unmanaged copy, not a mocked /proc listing or fake daemon.
+        copy = case / 'aster-controller'
+        shutil.copyfile(exe, copy)
+        copy.chmod(0o700)
+        with socket.socket() as spare:
+            spare.bind(('127.0.0.1', 0))
+            other_port = spare.getsockname()[1]
+        other_config = dict(config, listen='127.0.0.1:' + str(other_port))
+        private(case / 'foreign-config.json', json.dumps(other_config).encode())
+        foreign_process = subprocess.Popen([str(copy), 'serve', '-config', str(case / 'foreign-config.json')],
+                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ENV)
+        require(migrate('plan', denied=True).get('error') == 'UNMANAGED_CONTROLLER_PROCESS', 'FOREIGN_PROCESS_ACCEPTED')
+        require(foreign_process.poll() is None, 'FOREIGN_PROCESS_KILLED_BY_PLAN')
+        foreign_process.terminate()
+        foreign_process.communicate(timeout=45)
+        foreign_process = None
+        healthy()
+        dropin = systemd / 'aster-controller.service.d'
+        require(not dropin.exists() and not dropin.is_symlink(), 'FOREIGN_DROPIN_PATH_EXISTS')
+        dropin.mkdir(mode=0o755)
+        owned.append(dropin)
+        private(dropin / 'fixture.conf', b'[Service]\nEnvironment=ASTER_FIXTURE=1\n', 0o644)
+        run(['/usr/bin/systemctl', 'daemon-reload'])
+        require(migrate('plan', denied=True).get('error') == 'UNMANAGED_UNIT_SETTINGS', 'CUSTOM_UNIT_NOT_REJECTED')
+        require(json.loads(cli('migration-status').stdout)['phase'] == 'active', 'REFUSED_PLAN_FENCED_SOURCE')
+        (dropin / 'fixture.conf').unlink()
+        dropin.rmdir()
+        run(['/usr/bin/systemctl', 'daemon-reload'])
+        healthy()
         send(sys.stdout.buffer, {'phase': 'ready', 'controller_id': controller})
         require(receive(sys.stdin.buffer) == {'action': 'fence'}, 'SYSTEMD_FENCE_REQUIRED')
         PHASE = 'isolate'
@@ -193,6 +234,28 @@ def worker(binary):
             run(['/usr/bin/systemctl', 'start', name], denied=True)
         run(['/usr/bin/systemctl', 'daemon-reload'])
         require(migrate('status', operation) == proof, 'SYSTEMD_RELOAD_REMOVED_ISOLATION')
+        # Fixture-only fault injection. A new /dev/null link is NOT equivalent
+        # to the owned original inode and must never be removed by resume.
+        saved_mask = systemd / ('.aster-test-original-mask-' + nonce)
+        require(not saved_mask.exists() and not saved_mask.is_symlink(), 'MASK_FAULT_PATH_EXISTS')
+        unit.rename(saved_mask)
+        try:
+            os.symlink('/dev/null', unit)
+            foreign_inode = unit.lstat().st_ino
+            require(migrate('status', operation, denied=True).get('error') == 'PERSISTENT_MASK_CHANGED', 'FOREIGN_MASK_ACCEPTED')
+            require(migrate('resume-source', operation, denied=True).get('error') == 'PERSISTENT_MASK_CHANGED' and
+                    unit.lstat().st_ino == foreign_inode, 'FOREIGN_MASK_REPLACED')
+        finally:
+            if unit.is_symlink():
+                unit.unlink()
+            saved_mask.rename(unit)
+        original_config = config_file.read_bytes()
+        try:
+            config_file.write_bytes(original_config + b'\n')
+            require(migrate('status', operation, denied=True).get('error') == 'HOST_SOURCE_IDENTITY_CHANGED', 'CONFIG_DRIFT_ACCEPTED')
+        finally:
+            config_file.write_bytes(original_config)
+        require(migrate('status', operation)['source_isolated'], 'FAULT_INJECTION_THAWED_SOURCE')
         require(migrate('resume-source', 'f' * 32, denied=True).get('error'), 'WRONG_OPERATION_NOT_DENIED')
         # A future export seal must forbid local activation; this fixture tests
         # refusal only and does not claim that export has been implemented.
@@ -218,6 +281,13 @@ def worker(binary):
     finally:
         # Fresh-path checks above establish ownership before any installation;
         # only this fixture's role files and exact operation stages are removed.
+        if foreign_process is not None:
+            foreign_process.terminate()
+            try:
+                foreign_process.communicate(timeout=45)
+            except subprocess.TimeoutExpired:
+                foreign_process.kill()
+                foreign_process.communicate(timeout=5)
         if created_units:
             for name in names:
                 loaded = run(['/usr/bin/systemctl', 'show', '--property=LoadState', '--value', name]).stdout.strip()

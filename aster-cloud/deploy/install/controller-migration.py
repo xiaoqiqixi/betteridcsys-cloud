@@ -232,6 +232,23 @@ class Host:
         return sorted(names)
 
     def plan(self):
+        # The installed binary's capability says nothing about an older copy
+        # left running outside its unit. Refuse recognizable foreign controller
+        # processes; never kill them or pretend their writes were drained.
+        expected = self.binary.stat()
+        processes = [p for p in Path('/proc').iterdir() if p.name.isdigit()]
+        require(len(processes) <= 32768, 'PROCESS_INVENTORY_LIMIT')
+        for process in processes:
+            try:
+                executable = os.readlink(process / 'exe')
+                if Path(executable.removesuffix(' (deleted)')).name != 'aster-controller':
+                    continue
+                actual = (process / 'exe').stat()
+            except FileNotFoundError:
+                continue # process exited; no guessed PID is signalled
+            except PermissionError:
+                raise Refused('PROCESS_INVENTORY_UNCONFIRMED') from None
+            require((actual.st_dev, actual.st_ino) == (expected.st_dev, expected.st_ino), 'UNMANAGED_CONTROLLER_PROCESS')
         names = self.inventory()
         props = self.show(names)
         units = []
@@ -473,15 +490,28 @@ class Host:
             runtime = self.command('status')
             if (self.root / 'host-migration.json').exists():
                 require(runtime.get('guarded_processes_drained') is True, 'SOURCE_PROCESS_NOT_DRAINED')
+            # Validate EVERY original/mask pair before undoing any mask. A
+            # foreign controller inode must not partially unmask its timers.
+            restorations = []
             for unit in reversed(plan['units']):
                 record_path = directory / ('unit-' + str(unit['index']) + '.json')
                 target, stage = self.paths(operation, unit)
                 if not record_path.exists():
                     require(not stage.exists() and not stage.is_symlink(), 'UNRECORDED_MASK_STAGE_REQUIRES_REVIEW')
+                    self.restored_units(operation, [unit])
                     continue
                 record = self.read(record_path)
                 self.validate_mask_record(record, unit)
                 if target.is_symlink():
+                    self.masked_unit(operation, unit, record)
+                    restorations.append((unit, record, True))
+                else:
+                    self.restored_units(operation, [unit])
+                    require(inode(stage, 'mask') == record['mask_inode'], 'RESTORED_MASK_STAGE_CHANGED')
+                    restorations.append((unit, record, False))
+            for unit, record, masked in restorations:
+                target, stage = self.paths(operation, unit)
+                if masked:
                     self.masked_unit(operation, unit, record)
                     exchange(stage, target, 2) if unit['original_inode'] is not None else exchange(target, stage, 1)
                 require(inode(stage, 'mask') == record['mask_inode'], 'RESTORED_MASK_STAGE_CHANGED')
