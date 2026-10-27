@@ -78,6 +78,39 @@ def private(path, raw, mode=0o600):
         os.fsync(f.fileno())
 
 
+def inventory_diagnostics(operation):
+    """Failure-only observation in the owned VM, never production admission.
+
+    No usernames, authentication strings, credentials, SQL text or raw command
+    output leave this helper. A vendor-name count is NOT an account allowlist.
+    """
+    try:
+        require(re.fullmatch(r'[0-9a-f]{32}', operation) is not None)
+        database, runtime, migration = 'aster_cloud_restore_' + operation, 'aster_r_' + operation[:23], 'aster_m_' + operation[:23]
+        known = "Host='localhost' AND ((User='root' AND plugin='auth_socket') OR (User IN ('mysql.infoschema','mysql.session','mysql.sys') AND account_locked='Y') OR (User IN ('" + runtime + "','" + migration + "') AND plugin='caching_sha2_password'))"
+        query = "SELECT JSON_OBJECT('current_root',CURRENT_USER()='root@localhost','tcp_disabled',@@skip_networking,"
+        query += "'root_socket',(SELECT COUNT(*) FROM mysql.user WHERE User='root' AND Host='localhost' AND plugin='auth_socket' AND authentication_string IN ('','root')),"
+        query += "'mysqlx_active',(SELECT COUNT(*) FROM information_schema.PLUGINS WHERE PLUGIN_NAME='mysqlx' AND PLUGIN_STATUS='ACTIVE'),"
+        query += "'roles',(SELECT COUNT(*) FROM mysql.role_edges),'default_roles',(SELECT COUNT(*) FROM mysql.default_roles),"
+        query += "'foreign_schemas',(SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME NOT IN ('mysql','sys','information_schema','performance_schema','" + database + "')),"
+        query += "'other_accounts',(SELECT COUNT(*) FROM mysql.user WHERE User<>'debian-sys-maint' AND NOT (" + known + ")),"
+        query += "'vendor_count',(SELECT COUNT(*) FROM mysql.user WHERE User='debian-sys-maint'),"
+        query += "'vendor_local',(SELECT COUNT(*) FROM mysql.user WHERE User='debian-sys-maint' AND Host='localhost'),"
+        query += "'vendor_root_socket',(SELECT COUNT(*) FROM mysql.user WHERE User='debian-sys-maint' AND Host='localhost' AND plugin='auth_socket' AND authentication_string='root'),"
+        query += "'vendor_password',(SELECT COUNT(*) FROM mysql.user WHERE User='debian-sys-maint' AND plugin<>'auth_socket' AND account_locked='N'));\n"
+        p = subprocess.run(['/usr/bin/mysql', '--no-defaults', '--protocol=SOCKET', '--socket=/run/mysqld/mysqld.sock',
+            '--user=root', '--batch', '--raw', '--skip-column-names', '--skip-reconnect', '--connect-timeout=3'],
+            input=query.encode(), env=ENV, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=8)
+        require(p.returncode == 0 and len(p.stdout) <= 2048 and len(p.stderr) <= 2048)
+        fields = {'current_root', 'root_socket', 'tcp_disabled', 'mysqlx_active', 'roles', 'default_roles',
+                  'foreign_schemas', 'other_accounts', 'vendor_count', 'vendor_local', 'vendor_root_socket', 'vendor_password'}
+        value = json.loads(p.stdout)
+        require(isinstance(value, dict) and set(value) == fields and all(type(v) is int and 0 <= v <= 65535 for v in value.values()))
+        return {'mysql_inventory': value}
+    except Exception:
+        return {}  # Keep the original refusal even when diagnostics fail.
+
+
 def execute(metadata):
     progress('preflight')
     require(os.geteuid() == 0 and Path('/proc/1/comm').read_text().strip() == 'systemd')
@@ -263,6 +296,8 @@ def main():
     except Exception as error:
         report = {'schema': 1, 'passed': False, 'code': str(error) if isinstance(error, Refused) else 'TARGET_NATIVE_ASSERTION_FAILED',
                   'phase': PHASE, 'kvm_ready': False, **{k: metadata[k] for k in ('source_sha', 'ubuntu', 'image_sha256')}}
+        if report['code'] == 'TARGET_RESTORE_SERVER_INVENTORY_REJECTED':
+            report['diagnostics'] = inventory_diagnostics(NONCE)
     with open('/dev/ttyS0', 'w') as console:
         console.write('ASTER_LIBVIRT_NATIVE_RESULT_' + NONCE + ' ' + base64.b64encode(json.dumps(report).encode()).decode() + '\n')
         console.flush()

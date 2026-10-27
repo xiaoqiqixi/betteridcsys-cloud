@@ -249,3 +249,14 @@ embeds the compiled test executable in the cloud-init seed. The actual target
 controller and installer are still delivered and verified. The provisioning-only
 helper is stripped. This removes unnecessary seed work; it is **not yet evidence**
 that slow boot is resolved. The signed images and 30-minute VM bound stay fixed.
+
+`f61d6cf` passed both independent MySQL suites, including durable-proof failure
+and read-only structural verification. Its Ubuntu24 target reached the actual
+scenario and failed `TARGET_RESTORE_SERVER_INVENTORY_REJECTED`; seed slimming
+allowed `runcmd-enter` at 450s rather than the prior pre-runcmd timeout. This
+isolates the current failure to server inventory, not to row import or an
+assumed vendor account. The failure-only observer now emits twelve fixed,
+bounded counts (including whether a distribution-maintenance account exists
+and uses root-mapped socket authentication). No account names, hashes, passwords
+or raw SQL output are public. Counts never change admission; production still
+refuses the mismatch. The host revalidates exact keys, integer types and bounds.

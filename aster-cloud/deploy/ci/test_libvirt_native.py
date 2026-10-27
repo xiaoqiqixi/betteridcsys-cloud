@@ -448,6 +448,21 @@ class NativeFixtureContract(unittest.TestCase):
         report["source_sha"] = "b" * 40
         with self.assertRaises(h.Refused): h.public_result(report, self.metadata())
 
+    def test_mysql_failure_diagnostics_export_only_fixed_bounded_counts(self):
+        fields = ('current_root', 'root_socket', 'tcp_disabled', 'mysqlx_active', 'roles', 'default_roles',
+                  'foreign_schemas', 'other_accounts', 'vendor_count', 'vendor_local', 'vendor_root_socket', 'vendor_password')
+        counts = {key: 0 for key in fields}
+        counts.update(current_root=1, root_socket=1, tcp_disabled=1, vendor_count=1, vendor_local=1, vendor_password=1)
+        report = dict(self.metadata(), schema=1, passed=False, kvm_ready=False,
+                      code='TARGET_RESTORE_SERVER_INVENTORY_REJECTED', phase='target-provision',
+                      diagnostics={'mysql_inventory': counts})
+        self.assertEqual(h.public_result(report, self.metadata())['diagnostics'], {'mysql_inventory': counts})
+        for bad in ({**counts, 'password': 'SECRET'}, {**counts, 'vendor_count': True},
+                    {**counts, 'other_accounts': -1}, {**counts, 'other_accounts': 65536},
+                    {**counts, 'vendor_password': 'SECRET'}, {}):
+            report['diagnostics']['mysql_inventory'] = bad
+            self.assertEqual(h.public_result(report, self.metadata())['diagnostics'], {})
+
     def test_public_success_is_fully_validated_before_export(self):
         self.assertEqual(h.public_result(self.result(), self.metadata()), self.result())
         for extra in ("code", "phase", "diagnostics"):

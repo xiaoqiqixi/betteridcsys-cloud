@@ -812,6 +812,12 @@ def public_result(result, metadata):
     diagnostics = result.get("diagnostics")
     if isinstance(diagnostics, dict):
         safe = {}
+        inventory = diagnostics.get('mysql_inventory')
+        fields = {'current_root', 'root_socket', 'tcp_disabled', 'mysqlx_active', 'roles', 'default_roles',
+                  'foreign_schemas', 'other_accounts', 'vendor_count', 'vendor_local', 'vendor_root_socket', 'vendor_password'}
+        if (isinstance(inventory, dict) and set(inventory) == fields and
+                all(type(v) is int and 0 <= v <= 65535 for v in inventory.values())):
+            safe['mysql_inventory'] = {k: inventory[k] for k in sorted(fields)}
         plan = diagnostics.get("apt_plan_rejections")
         if (isinstance(plan, dict) and set(plan) == {"categories", "packages", "unknown_package_count", "truncated"} and
                 isinstance(plan["categories"], list) and len(plan["categories"]) <= 3 and
