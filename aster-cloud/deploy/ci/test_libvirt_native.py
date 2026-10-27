@@ -615,7 +615,7 @@ class NativeFixtureContract(unittest.TestCase):
         self.assertIn('require(result.get("passed") is True, "GUEST_ACCEPTANCE_FAILED")', source)
         self.assertIn('public = public_result(result, metadata)', source)
         self.assertIn('"progress": VM_PROGRESS, "guest_result_seen": GUEST_RESULT_SEEN', source)
-        self.assertIn('deadline = time.monotonic() + 1200', source)
+        self.assertIn('deadline = time.monotonic() + 1800', source)
 
     def test_real_proc_sandbox_contract_requires_identity_caps_and_two_filters(self):
         fields = {"Uid": [str(os.getuid())] * 4, "Gid": [str(os.getgid())] * 4,

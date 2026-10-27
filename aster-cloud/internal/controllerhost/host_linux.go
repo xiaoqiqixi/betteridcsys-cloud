@@ -153,17 +153,20 @@ func (h *Host) Admit() error {
 
 // Any fence inode (including an incomplete/corrupt one) blocks admission.
 func (h *Host) Check() error {
-	f, e := h.file("fence.json", false)
-	if errors.Is(e, syscall.ENOENT) {
-		return nil
+	for _, name := range []string{"fence.json", "host-migration.json"} {
+		f, e := h.file(name, false)
+		if errors.Is(e, syscall.ENOENT) {
+			continue
+		}
+		if f != nil {
+			f.Close()
+		}
+		if e != nil {
+			return ErrUnavailable
+		}
+		return ErrFenced
 	}
-	if f != nil {
-		f.Close()
-	}
-	if e != nil {
-		return ErrUnavailable
-	}
-	return ErrFenced
+	return nil
 }
 
 func (h *Host) read(name string) (intent, error) {
@@ -231,6 +234,9 @@ func (h *Host) statusLocked() (Status, error) {
 	s := Status{Schema: 1, ControllerID: h.id, Phase: "active"}
 	v, e := h.read("fence.json")
 	if errors.Is(e, syscall.ENOENT) {
+		if h.Check() != nil {
+			return Status{}, ErrUnavailable
+		}
 		return s, nil
 	}
 	if e != nil {
@@ -299,6 +305,13 @@ func (h *Host) Cancel(operation string) (Status, error) {
 		return Status{}, e
 	}
 	defer h.unlock()
+	seal, sealError := h.file("host-migration.json", false)
+	if seal != nil {
+		seal.Close()
+	}
+	if !errors.Is(sealError, syscall.ENOENT) {
+		return Status{}, ErrInvalid
+	}
 	v, e := h.read("fence.json")
 	if errors.Is(e, syscall.ENOENT) {
 		old, e := h.read(operation + ".cancelled.json")

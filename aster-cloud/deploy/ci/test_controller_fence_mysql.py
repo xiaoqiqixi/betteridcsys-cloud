@@ -6,6 +6,7 @@ unprivileged supervisor owns a fresh nonce-marked database; the root worker only
 runs the real controller against it and owns its private config/process state.
 """
 import argparse
+import contextlib
 import hashlib
 import http.client
 import importlib.util
@@ -23,6 +24,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 
@@ -172,7 +174,74 @@ def worker(binary):
             shutil.rmtree(state)
 
 
-def supervisor(binary):
+class NativeSocketRelay:
+    """Loopback byte transport into the OWNED real SQL fixture, not fake SQL.
+
+    systemd PrivateTmp cannot see the supervisor's private Unix socket. Never
+    change the production unit sandbox or enable a MySQL public listener.
+    """
+    def __init__(self, path):
+        self.path, self.threads, self.failures = path, [], []
+        self.stop = threading.Event()
+
+    def __enter__(self):
+        self.listener = socket.socket()
+        self.listener.bind(('127.0.0.1', 0))
+        self.listener.listen(16)
+        self.listener.settimeout(0.2)
+        self.port = self.listener.getsockname()[1]
+        self.acceptor = threading.Thread(target=self.accept, daemon=True)
+        self.acceptor.start()
+        return self
+
+    def accept(self):
+        while not self.stop.is_set():
+            try:
+                client, _ = self.listener.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            self.threads = [t for t in self.threads if t.is_alive()]
+            if len(self.threads) >= 64:
+                client.close()
+                self.failures.append('RELAY_CONNECTION_LIMIT')
+                continue
+            task = threading.Thread(target=self.transfer, args=(client,), daemon=True)
+            self.threads.append(task)
+            task.start()
+
+    def transfer(self, client):
+        with client, socket.socket(socket.AF_UNIX) as upstream:
+            try:
+                upstream.settimeout(2)
+                client.settimeout(2)
+                upstream.connect(str(self.path))
+                deadline = time.monotonic() + 300
+                while not self.stop.is_set() and time.monotonic() < deadline:
+                    ready, _, _ = select.select([client, upstream], [], [], 0.2)
+                    for source in ready:
+                        raw = source.recv(65536)
+                        if not raw:
+                            return
+                        (upstream if source is client else client).sendall(raw)
+            except (BrokenPipeError, ConnectionResetError):
+                pass # ordinary peer teardown, not a successful SQL assertion
+            except OSError:
+                if not self.stop.is_set():
+                    self.failures.append('RELAY_IO_FAILED')
+
+    def __exit__(self, *_):
+        self.stop.set()
+        self.listener.close()
+        self.acceptor.join(timeout=3)
+        for task in self.threads:
+            task.join(timeout=3)
+        require(not self.acceptor.is_alive() and not any(t.is_alive() for t in self.threads) and not self.failures,
+                'RELAY_CLEANUP_OR_TRANSPORT_FAILED')
+
+
+def supervisor(binary, systemd=False):
     require(os.geteuid() != 0, 'SUPERVISOR_MUST_BE_NONROOT')
     spec = importlib.util.spec_from_file_location('fence_native_grants', Path(__file__).with_name('test_cloud_mysql_grants.py'))
     g = importlib.util.module_from_spec(spec)
@@ -182,7 +251,8 @@ def supervisor(binary):
     nonce = secrets.token_hex(12)
     database = 'aster_cloud_test_fence_' + nonce
     child, created, clean = None, False, False
-    with tempfile.TemporaryDirectory(prefix='fence-', dir=fixture.root) as work:
+    with tempfile.TemporaryDirectory(prefix='fence-', dir=fixture.root) as work, \
+            (NativeSocketRelay(fixture.socket) if systemd else contextlib.nullcontext()) as relay:
         work = Path(work)
         admin = g.Client(fixture, work, fixture.admin_cnf)
         server_uuid = admin.run('SELECT @@server_uuid;').strip().decode()
@@ -193,10 +263,16 @@ def supervisor(binary):
                       "`.contract_ownership(nonce CHAR(24) PRIMARY KEY,server_uuid CHAR(36)); INSERT INTO `" + database +
                       "`.contract_ownership VALUES('" + nonce + "','" + server_uuid + "');")
             created = True
-            child = subprocess.Popen(['/usr/bin/sudo', '-n', '/usr/bin/python3', '-I', str(Path(__file__).resolve()),
+            worker_path = Path(__file__).with_name('test_controller_host_mysql.py') if systemd else Path(__file__)
+            child = subprocess.Popen(['/usr/bin/sudo', '-n', '/usr/bin/python3', '-I', str(worker_path.resolve()),
                                       '--worker', '--binary', str(binary.resolve(strict=True))],
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            send(child.stdin, {'nonce': nonce, 'socket': str(fixture.socket)})
+            request = {'nonce': nonce, 'socket': str(fixture.socket)}
+            if systemd:
+                source = os.environ.get('GITHUB_SHA', '')
+                require(re.fullmatch(r'[0-9a-f]{40}', source), 'EXACT_CI_SOURCE_REQUIRED')
+                request.update(relay_port=relay.port, source_sha=source)
+            send(child.stdin, request)
             ready = receive(child.stdout)
             require(ready == {'phase': 'ready', 'controller_id': 'aster-fence-test-' + nonce}, 'SERVER_READY_PROTOCOL')
             # Seed two durable, synthetic unresolved receipts. No network member
@@ -217,7 +293,8 @@ def supervisor(binary):
                 return hashlib.sha256(result.stdout).hexdigest()
             before = snapshot()
             send(child.stdin, {'action': 'fence'})
-            require(receive(child.stdout) == {'phase': 'fenced', 'automatic_service_exit': True, 'new_commands_denied': True}, 'FENCE_PROTOCOL')
+            require(receive(child.stdout) == {'phase': 'fenced',
+                    'systemd_isolation' if systemd else 'automatic_service_exit': True, 'new_commands_denied': True}, 'FENCE_PROTOCOL')
             require(snapshot() == before, 'FENCE_CHANGED_PERSISTED_DATABASE')
             send(child.stdin, {'action': 'cancel'})
             require(receive(child.stdout) == {'phase': 'complete', 'strict_tls': True, 'same_identity_restart': True}, 'CANCEL_PROTOCOL')
@@ -229,10 +306,14 @@ def supervisor(binary):
             require(snapshot() == before, 'RESTART_REPLAYED_OR_CHANGED_DATA')
             require(admin.run('SELECT state FROM `' + database + '`.controller_jobs ORDER BY operation_id;').splitlines() == [b'sending', b'uncertain'], 'UNKNOWN_RESULTS_CHANGED')
             report = {'schema': 1, 'passed': True, 'real_mysql': True, 'real_controller_process': True,
-                      'strict_tls': True, 'host_trust_modified': False, 'automatic_service_drain': True,
+                      'strict_tls': True, 'host_trust_modified': False, 'automatic_service_drain': not systemd,
                       'all_database_rows_unchanged': True, 'unknown_receipts_retained': 2,
                       'database_snapshot_sha256': before, 'same_identity_restart': True,
-                      'node_rpc_performed': False, 'systemd_isolation_verified': False,
+                      'node_rpc_performed': False, 'systemd_isolation_verified': systemd,
+                      'persistent_masks_reloaded': systemd, 'actual_installer_applied': systemd,
+                      'development_fixture_bundle': systemd, 'publisher_authentication_verified': False,
+                      'loopback_sql_transport_relay': systemd, 'heartbeat_units_covered': 2 if systemd else 0,
+                      'source_isolation_observed_before_resume': systemd,
                       'reboot_verified': False, 'source_isolated': False, 'migration_ready': False}
         finally:
             if child is not None:
@@ -241,7 +322,19 @@ def supervisor(binary):
                     child.stdin = None
                 # EOF/phase timeouts let the root worker perform its own bounded
                 # cleanup. Never kill a guessed PID or delete a live database.
-                child.communicate(timeout=180)
+                _, error = child.communicate(timeout=180)
+                root_cleanup = not systemd or child.returncode == 0
+                if child.returncode:
+                    # Workers emit only a fixed-code JSON envelope, never raw
+                    # SQL, credentials or systemd journal output.
+                    try:
+                        value = json.loads(error)
+                        if isinstance(value, dict) and set(value) <= {'passed', 'code', 'phase', 'cleanup_complete'} and len(error) < 2048:
+                            print(json.dumps(value), file=sys.stderr)
+                            root_cleanup = root_cleanup or value.get('cleanup_complete') is True
+                    except (ValueError, UnicodeError):
+                        pass
+                require(root_cleanup, 'ROOT_SERVICE_CLEANUP_UNCONFIRMED_DATABASE_RETAINED')
             if created:
                 owner = admin.json("SELECT JSON_OBJECT('nonce',nonce,'uuid',server_uuid) FROM `" + database + "`.contract_ownership;")
                 require(owner == {'nonce': nonce, 'uuid': server_uuid}, 'CLEANUP_OWNERSHIP_UNCONFIRMED')
@@ -256,9 +349,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--worker', action='store_true')
+    parser.add_argument('--systemd', action='store_true')
     args = parser.parse_args()
     try:
-        (worker if args.worker else supervisor)(args.binary)
+        require(not (args.worker and args.systemd), 'SYSTEMD_USES_OWN_ROOT_WORKER')
+        worker(args.binary) if args.worker else supervisor(args.binary, args.systemd)
     except Exception as exc:
         print(json.dumps({'passed': False, 'code': str(exc) if isinstance(exc, RuntimeError) else 'FENCE_MYSQL_ACCEPTANCE_FAILED'}), file=sys.stderr)
         raise SystemExit(1)

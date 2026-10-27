@@ -683,7 +683,11 @@ def run_vm(arguments, work, metadata):
     selector = selectors.DefaultSelector(); selector.register(process.stdout, selectors.EVENT_READ)
     try:
         SANDBOX_PROOF.update(verify_running_sandbox(process))
-        deadline = time.monotonic() + 1200
+        # Run 40504806662 on signed Ubuntu22 reached real libvirt preparation,
+        # resume and image verification at 1170s; a 1200s whole-VM cap killed
+        # the final doctor phase. Keep a finite 30m bound (40m job), no retry,
+        # and require the same complete guest report and assertions.
+        deadline = time.monotonic() + 1800
         with (work / "private-serial.log").open("xb") as log:
             (work / "private-serial.log").chmod(0o600)
             while time.monotonic() < deadline:

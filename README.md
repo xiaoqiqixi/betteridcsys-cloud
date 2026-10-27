@@ -56,6 +56,7 @@ bash -o pipefail -c 'curl --fail --silent --show-error --proto "=https" --tlsv1.
 - [VPC、路由与恢复](aster-cloud/docs/NETWORK_MANAGEMENT.md) · [公网地址池](aster-cloud/docs/PUBLIC_IP_MANAGEMENT.md)
 - [公网出口](aster-cloud/docs/PUBLIC_NAT_EGRESS.md) · [直绑与浮动 IP](aster-cloud/docs/VM_PUBLIC_IP_MANAGEMENT.md) · [入站规则](aster-cloud/docs/PUBLIC_INGRESS.md)
 - [日志与审计](aster-cloud/docs/LOGGING.md) · [财务连接](aster-cloud/plugins/billingconnector/README.md)
+- [主控维护与迁移边界](aster-cloud/docs/CONTROLLER_MIGRATION.md)
 
 ## 开发与集成
 

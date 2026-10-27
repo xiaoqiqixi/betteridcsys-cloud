@@ -49,7 +49,8 @@ func run(args []string) error {
 	if command == "migration-capabilities" && len(args) == 1 {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
 			"schema": 1, "protocol": "aster.controller-host/1", "runtime_fence": runtime.GOOS == "linux",
-			"migration_ready": false, "export_restore": false,
+			"host_migration_seal": runtime.GOOS == "linux",
+			"migration_ready":     false, "export_restore": false,
 		})
 	}
 	flags := flag.NewFlagSet("aster-controller "+command, flag.ContinueOnError)

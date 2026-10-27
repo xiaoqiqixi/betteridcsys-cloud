@@ -110,6 +110,15 @@ def main():
         run('check', ok=False, code='CONTROLLER_MIGRATION_FENCED')
         checks.append('new_process_denied_and_exit_observed_without_replay')
 
+        # The privileged host coordinator seals its intent under control.lock
+        # before touching systemd. Plain CLI cancellation must never thaw it.
+        seal = state / 'host-migration.json'
+        private(seal, json.dumps({'schema': 1, 'operation_id': operation}).encode())
+        run('migration-cancel', '-operation', operation, ok=False)
+        run('check', ok=False, code='CONTROLLER_MIGRATION_FENCED')
+        seal.unlink()  # fixture cleanup only; normal removal belongs to coordinator
+        checks.append('host_coordinator_seal_cannot_be_cancelled_by_plain_cli')
+
         changed_file = case / 'changed.json'
         private(changed_file, json.dumps({**config, 'listen': '127.0.0.1:9444'}).encode())
         run('migration-cancel', '-operation', operation, path=changed_file, ok=False)
