@@ -147,6 +147,15 @@ def main():
         fixture(inputs)
         originals = {name: (inputs / name).read_bytes() for name in ('request.json', 'backup.age', 'recovery.key')}
         PHASE = 'readonly-plan'
+        # Independent real-systemd contract: an absent pattern exits nonzero,
+        # whereas the standard unit is a successful positive query control.
+        # No fake systemctl, ignored exit status or network error means success.
+        absent = run(['/usr/bin/systemctl', 'list-unit-files', '--no-pager', '--no-legend',
+                      'aster-target-absent-' + nonce + '*'], denied=True)
+        present = run(['/usr/bin/systemctl', 'list-unit-files', '--full', '--no-pager', '--no-legend',
+                       'systemd-journald.service'])
+        require(absent.returncode > 0 and not absent.stdout and
+                present.stdout.decode().split()[0] == 'systemd-journald.service', 'TARGET_SYSTEMD_QUERY_CONTRACT')
         plan = json.loads(entry('target-plan').stdout)
         require(plan['readonly'] and not plan['database_restored'] and not plan['target_restore_approved'] and
                 not plan['migration_ready'] and plan['plan']['controller_id'] == controller and
@@ -154,6 +163,7 @@ def main():
         require(not state.exists() and not config_dir.exists() and not unit.exists() and
                 not (inputs / 'plan.json').exists(), 'TARGET_PLAN_WRITES')
         require(set(p.name for p in inputs.iterdir()) == set(originals), 'TARGET_PLAINTEXT_LEFTOVER')
+        checks.append('real_systemd_empty_pattern_and_positive_query_control')
         checks.append('actual_installer_and_binary_readonly_fixed_input_plan')
         PHASE = 'input-and-host-negative'
         request_path = inputs / 'request.json'

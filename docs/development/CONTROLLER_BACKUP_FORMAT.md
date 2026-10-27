@@ -78,3 +78,5 @@
 封存后普通 `serve`、派发、心跳、数据库迁移、管理员初始化等命令在数据库/被控 I/O 前拒绝执行。源主机的 `migration-cancel`、`migration-fence` 和导出入口不能解除目标封存。截断、损坏、权限错误及不匹配的计划保留原始证据并拒绝继续；没有自动删除、覆盖或 `--force` 解封路径。该机制是**本机准入隔离**，不是跨主机仲裁；此阶段 `database_restored`、`target_restore_approved`、`source_isolated`、`migration_ready` 均保持 false。
 
 目前仍需完成：目标独占 MySQL 创建及最小授权、带标记空库恢复的宿主机编排、配置/材料安全落盘、旧会话撤销、重启恢复、节点单活接管、迁移 UI 和双主机整链验收。不得据此启动新主控或宣称可以完成主控迁移。当前根权限 CI 使用真实安装器/ELF/systemd 查询与独立加密的合成源包，明确**不是**真实源导出、SQL 导入或双主机验收；对应既有原生 MySQL 源导出检查单独保留。
+
+目标准备的 systemd 查询需要区分“没有匹配单元”和“查询失败”。systemd [v249](https://github.com/systemd/systemd/blob/v249/src/systemctl/systemctl-list-unit-files.c) 与 [v255](https://github.com/systemd/systemd/blob/v255/src/systemctl/systemctl-list-unit-files.c) 的 `list-unit-files` 在零匹配时返回 `-ENOENT`。因此查询同时包含标准 `systemd-journald.service` 作为正向对照，仍要求命令退出 0，结果只能含该精确名称；出现控制器单元、空响应或执行失败均拒绝。不会把任意非零退出、超时或系统总线错误当作“目标为空”。已加载单元另以 `list-units --all` 检查，覆盖不活跃但仍已加载的服务。

@@ -667,10 +667,18 @@ class Target(Host):
         for base in ('/etc/systemd/system', '/run/systemd/system', '/usr/lib/systemd/system', '/lib/systemd/system'):
             for pattern in ('aster-controller*', 'controller-aster*', 'controller-heartbeat*'):
                 require(not list(Path(base).glob(pattern)), 'TARGET_CONTROLLER_UNIT_ALREADY_EXISTS')
-        for command in ('list-units', 'list-unit-files'):
-            require(not run(['/usr/bin/systemctl', command, '--no-pager', '--no-legend',
-                             'aster-controller*', 'controller-aster*', 'controller-heartbeat*'], 30).strip(),
-                    'TARGET_FOREIGN_SYSTEMD_UNIT')
+        require(not run(['/usr/bin/systemctl', 'list-units', '--all', '--no-pager', '--no-legend',
+                         'aster-controller*', 'controller-aster*', 'controller-heartbeat*'], 30).strip(),
+                'TARGET_FOREIGN_SYSTEMD_UNIT')
+        # systemd 249/255 list-unit-files returns -ENOENT for zero matches.
+        # Do NOT accept an arbitrary nonzero command as proof of an empty host.
+        # Include the standard journald unit as a positive query control, require
+        # exit zero, and accept exactly that one name, never a controller unit.
+        inventory = run(['/usr/bin/systemctl', 'list-unit-files', '--full', '--no-pager', '--no-legend',
+                         'systemd-journald.service', 'aster-controller*', 'controller-aster*',
+                         'controller-heartbeat*'], 30).decode('utf-8').splitlines()
+        require(len(inventory) == 1 and 2 <= len(inventory[0].split()) <= 3 and
+                inventory[0].split()[0] == 'systemd-journald.service', 'TARGET_FOREIGN_SYSTEMD_UNIT')
         # No kill/stop action: an unidentified old controller must be diagnosed,
         # never adopted or stopped by a target preparation request.
         for process in Path('/proc').iterdir():
