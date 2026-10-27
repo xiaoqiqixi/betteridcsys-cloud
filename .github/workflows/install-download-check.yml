@@ -44,6 +44,9 @@ jobs:
           set -euo pipefail
           # Execute reviewed main bytes proven identical to the public bootstrap.
           # No credential/environment inheritance, package install or service start.
+          # The unprivileged runner intentionally opens this public source file;
+          # sudo only elevates its stdin consumer, not the file redirection.
+          # shellcheck disable=SC2024
           sudo -n /usr/bin/env -i PATH=/usr/bin:/bin LANG=C.UTF-8 /usr/bin/python3 -I - "$ROLE" \
             --download-only --evidence "$RUNNER_TEMP/cloud-public-proof.json" \
             < aster-cloud/deploy/install/release_verify.py
