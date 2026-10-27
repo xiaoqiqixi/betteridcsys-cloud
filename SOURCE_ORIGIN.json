@@ -1,0 +1,2562 @@
+{
+  "schema": 1,
+  "source_repository": "xiaoqiqixi/betteridcsys",
+  "source_commit": "fa4d2139ff5ecfc2802c0825e839134ca488d138",
+  "component": "betteridcsys-cloud",
+  "source_is_verified_committed_main": true,
+  "local_uncommitted_changes_included": false,
+  "files": {
+    "LICENSE": {
+      "upstream_path": "LICENSE",
+      "upstream_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "exported_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    "aster-cloud/.gitignore": {
+      "upstream_path": "aster-cloud/.gitignore",
+      "upstream_sha256": "c77471ba01784497ad0b1036fec535f382197c0008ec5c3184e382c30e01c03e",
+      "exported_sha256": "c77471ba01784497ad0b1036fec535f382197c0008ec5c3184e382c30e01c03e"
+    },
+    "aster-cloud/CHANGELOG.md": {
+      "upstream_path": "aster-cloud/CHANGELOG.md",
+      "upstream_sha256": "e9dbfc09eb1bc94e93ca0ccc82be2ff2ff82508827f2af31cabe5d05704452aa",
+      "exported_sha256": "4175b7fab62fb9758cc43eee223e4845ce2c413547dd440b1d2b25fa60fa936b",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/GLOSSARY.md": {
+      "upstream_path": "aster-cloud/GLOSSARY.md",
+      "upstream_sha256": "a8d7b61aeec16816a2c6e9e505c527373f2646d72d60117b3085da4c6a40596a",
+      "exported_sha256": "a8d7b61aeec16816a2c6e9e505c527373f2646d72d60117b3085da4c6a40596a"
+    },
+    "aster-cloud/NODE_README.md": {
+      "upstream_path": "aster-cloud/NODE_README.md",
+      "upstream_sha256": "fc434e3b0dcdfd3486505532f3dbed21fa9e2b0afc34148d83f9c7eb1015307f",
+      "exported_sha256": "fc434e3b0dcdfd3486505532f3dbed21fa9e2b0afc34148d83f9c7eb1015307f"
+    },
+    "aster-cloud/README.md": {
+      "upstream_path": "aster-cloud/README.md",
+      "upstream_sha256": "8d5520d012e695c1bf85647ebc6d4ad421955252ec5897d9a0dbdd916ba2c659",
+      "exported_sha256": "6ec4215ec2a7cb93035b32111926bc3ffccac4c386d3ae7e70ac020c6e3cfa1b",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/cmd/aster-billing-plugin/main.go": {
+      "upstream_path": "aster-cloud/cmd/aster-billing-plugin/main.go",
+      "upstream_sha256": "d85912c6a2c284772bf7d369ab7707cc05381cc3b4e740aea70e18def8f0d903",
+      "exported_sha256": "d85912c6a2c284772bf7d369ab7707cc05381cc3b4e740aea70e18def8f0d903"
+    },
+    "aster-cloud/cmd/aster-billing-plugin/main_test.go": {
+      "upstream_path": "aster-cloud/cmd/aster-billing-plugin/main_test.go",
+      "upstream_sha256": "90b91bfbada757fedac9a4d9e5627f93df986b5e4b26fb9424a8c331a539c90d",
+      "exported_sha256": "90b91bfbada757fedac9a4d9e5627f93df986b5e4b26fb9424a8c331a539c90d"
+    },
+    "aster-cloud/cmd/aster-controller/logging_test.go": {
+      "upstream_path": "aster-cloud/cmd/aster-controller/logging_test.go",
+      "upstream_sha256": "12789ebe673a7c4b3b68c93ab02727e02e2312c97ad8093d76b8261306e0efc1",
+      "exported_sha256": "12789ebe673a7c4b3b68c93ab02727e02e2312c97ad8093d76b8261306e0efc1"
+    },
+    "aster-cloud/cmd/aster-controller/main.go": {
+      "upstream_path": "aster-cloud/cmd/aster-controller/main.go",
+      "upstream_sha256": "547e4a08cfc2520160f3d7aa51c1387351928edfb7282410d8cbc426875496b7",
+      "exported_sha256": "547e4a08cfc2520160f3d7aa51c1387351928edfb7282410d8cbc426875496b7"
+    },
+    "aster-cloud/cmd/aster-network/main.go": {
+      "upstream_path": "aster-cloud/cmd/aster-network/main.go",
+      "upstream_sha256": "d45c5502541fc1eac06efddbc6ae400870ffa067cf61b3e79db16a82ade062e4",
+      "exported_sha256": "d45c5502541fc1eac06efddbc6ae400870ffa067cf61b3e79db16a82ade062e4"
+    },
+    "aster-cloud/cmd/aster-network/main_test.go": {
+      "upstream_path": "aster-cloud/cmd/aster-network/main_test.go",
+      "upstream_sha256": "8b7c09408f9e7ac9354f1f4f63d5b01b0b352619df4db2d799f0ae82032a2d21",
+      "exported_sha256": "8b7c09408f9e7ac9354f1f4f63d5b01b0b352619df4db2d799f0ae82032a2d21"
+    },
+    "aster-cloud/cmd/aster-node/logging_test.go": {
+      "upstream_path": "aster-cloud/cmd/aster-node/logging_test.go",
+      "upstream_sha256": "c8380034b52fe7bcc03ef4b06fbcbb9d9ed3ec54ecbb88f3f6d6663386a5ace5",
+      "exported_sha256": "c8380034b52fe7bcc03ef4b06fbcbb9d9ed3ec54ecbb88f3f6d6663386a5ace5"
+    },
+    "aster-cloud/cmd/aster-node/main.go": {
+      "upstream_path": "aster-cloud/cmd/aster-node/main.go",
+      "upstream_sha256": "a44524b3ca26e33a0173e040bca707a24bdbba6018cbc47123d441518d354949",
+      "exported_sha256": "a44524b3ca26e33a0173e040bca707a24bdbba6018cbc47123d441518d354949"
+    },
+    "aster-cloud/cmd/aster-node/main_test.go": {
+      "upstream_path": "aster-cloud/cmd/aster-node/main_test.go",
+      "upstream_sha256": "8b1d60c39fadb728a96bff0614450b7b12b2305d0bd319ddb9a570af12938690",
+      "exported_sha256": "8b1d60c39fadb728a96bff0614450b7b12b2305d0bd319ddb9a570af12938690"
+    },
+    "aster-cloud/deploy/OVERLAY_OPERATIONS.md": {
+      "upstream_path": "aster-cloud/deploy/OVERLAY_OPERATIONS.md",
+      "upstream_sha256": "b2519f583063d4b827296a95a2c712755dc4a3edb6d7180e9aefb760d354013d",
+      "exported_sha256": "b2519f583063d4b827296a95a2c712755dc4a3edb6d7180e9aefb760d354013d"
+    },
+    "aster-cloud/deploy/ci/NETWORK_BROWSER.md": {
+      "upstream_path": "aster-cloud/deploy/ci/NETWORK_BROWSER.md",
+      "upstream_sha256": "9fab7fafe90c132d3d40c72fa0e5a83b8bc907fa91dfb211a9c7329c0259a21a",
+      "exported_sha256": "9fab7fafe90c132d3d40c72fa0e5a83b8bc907fa91dfb211a9c7329c0259a21a"
+    },
+    "aster-cloud/deploy/ci/check.sh": {
+      "upstream_path": "aster-cloud/deploy/ci/check.sh",
+      "upstream_sha256": "ea99d5d3a61f92c9ab6237427c3b8ab829bb10b65a50ecfec10e69f57b148d7f",
+      "exported_sha256": "ea99d5d3a61f92c9ab6237427c3b8ab829bb10b65a50ecfec10e69f57b148d7f"
+    },
+    "aster-cloud/deploy/ci/cloud_release.py": {
+      "upstream_path": "aster-cloud/deploy/ci/cloud_release.py",
+      "upstream_sha256": "f17d6fe4aa34b9ca3b63459c0e0e06ab2d41fd7f343b37ec44d2c052382ada9b",
+      "exported_sha256": "f17d6fe4aa34b9ca3b63459c0e0e06ab2d41fd7f343b37ec44d2c052382ada9b"
+    },
+    "aster-cloud/deploy/ci/fixtures/gh-2.103.2-linux-amd64.attestation.json": {
+      "upstream_path": "aster-cloud/deploy/ci/fixtures/gh-2.103.2-linux-amd64.attestation.json",
+      "upstream_sha256": "56a973357566cb0ac6e2297731f238951d0f5f5291e3733fc89e754ae38934be",
+      "exported_sha256": "56a973357566cb0ac6e2297731f238951d0f5f5291e3733fc89e754ae38934be"
+    },
+    "aster-cloud/deploy/ci/identity-browser-contract.mjs": {
+      "upstream_path": "aster-cloud/deploy/ci/identity-browser-contract.mjs",
+      "upstream_sha256": "3c340bfed8ef642350548c949f6fa283e5111be170e949decf3231d481941f9e",
+      "exported_sha256": "3c340bfed8ef642350548c949f6fa283e5111be170e949decf3231d481941f9e"
+    },
+    "aster-cloud/deploy/ci/identity-browser-fixture.gotxt": {
+      "upstream_path": "aster-cloud/deploy/ci/identity-browser-fixture.gotxt",
+      "upstream_sha256": "44f2f8fbaa3ff9f97803d6e28296af6ec60c27bcf873e44c0adfce8754b84457",
+      "exported_sha256": "44f2f8fbaa3ff9f97803d6e28296af6ec60c27bcf873e44c0adfce8754b84457"
+    },
+    "aster-cloud/deploy/ci/identity-browser.mjs": {
+      "upstream_path": "aster-cloud/deploy/ci/identity-browser.mjs",
+      "upstream_sha256": "bed7a3ca749ac5c78e18650397321ff8927201a1dfc79ec23e452148db0bbb27",
+      "exported_sha256": "bed7a3ca749ac5c78e18650397321ff8927201a1dfc79ec23e452148db0bbb27"
+    },
+    "aster-cloud/deploy/ci/identity-browser.test.mjs": {
+      "upstream_path": "aster-cloud/deploy/ci/identity-browser.test.mjs",
+      "upstream_sha256": "0f48adb57b6675bda1cc568ee28d2363a618b5107871a22d0d446ed59b8d1dca",
+      "exported_sha256": "0f48adb57b6675bda1cc568ee28d2363a618b5107871a22d0d446ed59b8d1dca"
+    },
+    "aster-cloud/deploy/ci/libvirt-native-guest.py": {
+      "upstream_path": "aster-cloud/deploy/ci/libvirt-native-guest.py",
+      "upstream_sha256": "043b7a19570f90e0bd271154083838a69fd91331a6dab4f2de9f21ccd7cd0283",
+      "exported_sha256": "043b7a19570f90e0bd271154083838a69fd91331a6dab4f2de9f21ccd7cd0283"
+    },
+    "aster-cloud/deploy/ci/libvirt-native-image-key.asc": {
+      "upstream_path": "aster-cloud/deploy/ci/libvirt-native-image-key.asc",
+      "upstream_sha256": "690a3d2de5af22d572c204677f2e3e785870fc53d5512abd2a90bf58b55142e2",
+      "exported_sha256": "690a3d2de5af22d572c204677f2e3e785870fc53d5512abd2a90bf58b55142e2"
+    },
+    "aster-cloud/deploy/ci/libvirt-native-sandbox.c": {
+      "upstream_path": "aster-cloud/deploy/ci/libvirt-native-sandbox.c",
+      "upstream_sha256": "46f119a9fd073b2456223687d80c0141be485f8a674741ae7c481e93e2db65b9",
+      "exported_sha256": "46f119a9fd073b2456223687d80c0141be485f8a674741ae7c481e93e2db65b9"
+    },
+    "aster-cloud/deploy/ci/libvirt-native.md": {
+      "upstream_path": "aster-cloud/deploy/ci/libvirt-native.md",
+      "upstream_sha256": "57b5a4d67e2c04fda1d33e0a081c4c456989f302d831ab65340e6c8969e09ee9",
+      "exported_sha256": "57b5a4d67e2c04fda1d33e0a081c4c456989f302d831ab65340e6c8969e09ee9"
+    },
+    "aster-cloud/deploy/ci/libvirt-native.py": {
+      "upstream_path": "aster-cloud/deploy/ci/libvirt-native.py",
+      "upstream_sha256": "d8e7d4349b4dbf2bd6d4d5c9835f1d4f13cd722eb5fe4eb4d92e08bed3a2d771",
+      "exported_sha256": "d8e7d4349b4dbf2bd6d4d5c9835f1d4f13cd722eb5fe4eb4d92e08bed3a2d771"
+    },
+    "aster-cloud/deploy/ci/members-browser.mjs": {
+      "upstream_path": "aster-cloud/deploy/ci/members-browser.mjs",
+      "upstream_sha256": "95d0e46d58b74726713a78d0b3db80c9d20a6d380c7b0cb926dc10fe8ed7608f",
+      "exported_sha256": "95d0e46d58b74726713a78d0b3db80c9d20a6d380c7b0cb926dc10fe8ed7608f"
+    },
+    "aster-cloud/deploy/ci/members-browser.test.mjs": {
+      "upstream_path": "aster-cloud/deploy/ci/members-browser.test.mjs",
+      "upstream_sha256": "f4622e21f46cbc72babdac3b9845fb82da7194733c27083a7c4b737cdf7d5881",
+      "exported_sha256": "f4622e21f46cbc72babdac3b9845fb82da7194733c27083a7c4b737cdf7d5881"
+    },
+    "aster-cloud/deploy/ci/members_browser_contract.py": {
+      "upstream_path": "aster-cloud/deploy/ci/members_browser_contract.py",
+      "upstream_sha256": "fe22edfe151cb7e99970b6c8baecd4b4c51277b1c16176bcb7c0d2395b8d4705",
+      "exported_sha256": "fe22edfe151cb7e99970b6c8baecd4b4c51277b1c16176bcb7c0d2395b8d4705"
+    },
+    "aster-cloud/deploy/ci/network-browser-fixture.gotxt": {
+      "upstream_path": "aster-cloud/deploy/ci/network-browser-fixture.gotxt",
+      "upstream_sha256": "9b844f74e537933c218d715aa6960e321a28683d71d56ed5da27128ff76fb1d6",
+      "exported_sha256": "9b844f74e537933c218d715aa6960e321a28683d71d56ed5da27128ff76fb1d6"
+    },
+    "aster-cloud/deploy/ci/network-browser-tls.mjs": {
+      "upstream_path": "aster-cloud/deploy/ci/network-browser-tls.mjs",
+      "upstream_sha256": "d7ed5f9515ec3359de8ae25f0b8abaccc59655bab47dc2f0df424a2b749a7a58",
+      "exported_sha256": "d7ed5f9515ec3359de8ae25f0b8abaccc59655bab47dc2f0df424a2b749a7a58"
+    },
+    "aster-cloud/deploy/ci/network-browser.mjs": {
+      "upstream_path": "aster-cloud/deploy/ci/network-browser.mjs",
+      "upstream_sha256": "b1095d181e9dacbc6bd4a7f7341a5897f740e7ac030e0a0f52b574394984098e",
+      "exported_sha256": "b1095d181e9dacbc6bd4a7f7341a5897f740e7ac030e0a0f52b574394984098e"
+    },
+    "aster-cloud/deploy/ci/network-browser.sh": {
+      "upstream_path": "aster-cloud/deploy/ci/network-browser.sh",
+      "upstream_sha256": "f9ac25fd7358720192d0601e40f542ebca1112d73df4dc3fbf52bb8d954799d8",
+      "exported_sha256": "f9ac25fd7358720192d0601e40f542ebca1112d73df4dc3fbf52bb8d954799d8"
+    },
+    "aster-cloud/deploy/ci/public_cloud_evidence.py": {
+      "upstream_path": "aster-cloud/deploy/ci/public_cloud_evidence.py",
+      "upstream_sha256": "8d28b38a4d4b334b508bee31b034b17871fe6119c8148c12568b616515068b6b",
+      "exported_sha256": "8d28b38a4d4b334b508bee31b034b17871fe6119c8148c12568b616515068b6b"
+    },
+    "aster-cloud/deploy/ci/sidebar-browser.mjs": {
+      "upstream_path": "aster-cloud/deploy/ci/sidebar-browser.mjs",
+      "upstream_sha256": "ab8a50ae4e2bb0b936875d4d6e22db6f9d437c132a514face12c1529f68551b7",
+      "exported_sha256": "ab8a50ae4e2bb0b936875d4d6e22db6f9d437c132a514face12c1529f68551b7"
+    },
+    "aster-cloud/deploy/ci/test_cloud_installer.py": {
+      "upstream_path": "aster-cloud/deploy/ci/test_cloud_installer.py",
+      "upstream_sha256": "28088ecc24d447d5ea7bec5b864c5d3970cb1ae8948b3a82830b6463c534c65f",
+      "exported_sha256": "28088ecc24d447d5ea7bec5b864c5d3970cb1ae8948b3a82830b6463c534c65f"
+    },
+    "aster-cloud/deploy/ci/test_cloud_mysql_grants.py": {
+      "upstream_path": "aster-cloud/deploy/ci/test_cloud_mysql_grants.py",
+      "upstream_sha256": "80bcf33c8569fc5694ddce19628bcacbda791791cf102c29a2e1d438b09e7c94",
+      "exported_sha256": "80bcf33c8569fc5694ddce19628bcacbda791791cf102c29a2e1d438b09e7c94"
+    },
+    "aster-cloud/deploy/ci/test_cloud_release.py": {
+      "upstream_path": "aster-cloud/deploy/ci/test_cloud_release.py",
+      "upstream_sha256": "422a58a7bb2dc75469dcab0f5995f12e340c4cefe69d0104d08e8d634aca36be",
+      "exported_sha256": "422a58a7bb2dc75469dcab0f5995f12e340c4cefe69d0104d08e8d634aca36be"
+    },
+    "aster-cloud/deploy/ci/test_cloud_release_verifier.py": {
+      "upstream_path": "aster-cloud/deploy/ci/test_cloud_release_verifier.py",
+      "upstream_sha256": "ef7acfb6e58b63b0db16d532410f087df77ce83d4da26d43b0e5f050fb7eb2be",
+      "exported_sha256": "ef7acfb6e58b63b0db16d532410f087df77ce83d4da26d43b0e5f050fb7eb2be"
+    },
+    "aster-cloud/deploy/ci/test_libvirt_native.py": {
+      "upstream_path": "aster-cloud/deploy/ci/test_libvirt_native.py",
+      "upstream_sha256": "b5b8ae271c0a1200f574d5c92625793c35233a148a762026b946821c53173317",
+      "exported_sha256": "b5b8ae271c0a1200f574d5c92625793c35233a148a762026b946821c53173317"
+    },
+    "aster-cloud/deploy/ci/test_members_browser_contract.py": {
+      "upstream_path": "aster-cloud/deploy/ci/test_members_browser_contract.py",
+      "upstream_sha256": "a0c566899ed9f29b2472a63674f40421f06ce531654d2df7171203b6c80e3c47",
+      "exported_sha256": "a0c566899ed9f29b2472a63674f40421f06ce531654d2df7171203b6c80e3c47"
+    },
+    "aster-cloud/deploy/ci/test_public_cloud_evidence.py": {
+      "upstream_path": "aster-cloud/deploy/ci/test_public_cloud_evidence.py",
+      "upstream_sha256": "6510dbad716f6b18d6f6901279b8921c9feb97642ee7d33424b15e6f58e6d3ba",
+      "exported_sha256": "6510dbad716f6b18d6f6901279b8921c9feb97642ee7d33424b15e6f58e6d3ba"
+    },
+    "aster-cloud/deploy/controller-OPERATIONS.md": {
+      "upstream_path": "aster-cloud/deploy/controller-OPERATIONS.md",
+      "upstream_sha256": "db9d4c4be0d858e0c71082057e46b8adbd067c1dcb92f48041f1dd733ebd5d4f",
+      "exported_sha256": "2d2a6004aaf9f8684a2226addd726c8170f8b7c2a5b16447ed3db38cbf8f0195",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/deploy/controller-aster.service": {
+      "upstream_path": "aster-cloud/deploy/controller-aster.service",
+      "upstream_sha256": "d246a452e74b3fae3252070920029ddf0e04de3dc132920e37ce3175927278ab",
+      "exported_sha256": "d246a452e74b3fae3252070920029ddf0e04de3dc132920e37ce3175927278ab"
+    },
+    "aster-cloud/deploy/controller-heartbeat@.service": {
+      "upstream_path": "aster-cloud/deploy/controller-heartbeat@.service",
+      "upstream_sha256": "615db2491bee105a9f022ba6a9aad9a63a55d03878a7c4a8de66d3cd676a80ed",
+      "exported_sha256": "615db2491bee105a9f022ba6a9aad9a63a55d03878a7c4a8de66d3cd676a80ed"
+    },
+    "aster-cloud/deploy/controller-heartbeat@.timer": {
+      "upstream_path": "aster-cloud/deploy/controller-heartbeat@.timer",
+      "upstream_sha256": "8e45d89e982d0cddd55174581401f7e4e556a3b520271ec7ec5aa123cdda7e6d",
+      "exported_sha256": "8e45d89e982d0cddd55174581401f7e4e556a3b520271ec7ec5aa123cdda7e6d"
+    },
+    "aster-cloud/deploy/controller-ovs.example.json": {
+      "upstream_path": "aster-cloud/deploy/controller-ovs.example.json",
+      "upstream_sha256": "97f64b97ba8489e9a930b7b42be3bbaec17d48605c3422c53ea2be6ddc56afcb",
+      "exported_sha256": "97f64b97ba8489e9a930b7b42be3bbaec17d48605c3422c53ea2be6ddc56afcb"
+    },
+    "aster-cloud/deploy/fabric-private.example.json": {
+      "upstream_path": "aster-cloud/deploy/fabric-private.example.json",
+      "upstream_sha256": "54aa38020d1d50c393ac3493f17bd44191095f9b28f7814ff55033b6ccfdd275",
+      "exported_sha256": "54aa38020d1d50c393ac3493f17bd44191095f9b28f7814ff55033b6ccfdd275"
+    },
+    "aster-cloud/deploy/install/README.md": {
+      "upstream_path": "aster-cloud/deploy/install/README.md",
+      "upstream_sha256": "9e24c8636c2ffe5ee4e167dfe6d72ab7b8af2dd2e5306caf4d3943fbd7c47676",
+      "exported_sha256": "9e24c8636c2ffe5ee4e167dfe6d72ab7b8af2dd2e5306caf4d3943fbd7c47676"
+    },
+    "aster-cloud/deploy/install/controller.sh": {
+      "upstream_path": "aster-cloud/deploy/install/controller.sh",
+      "upstream_sha256": "fa23942fda81a05052ad294a1638ab54c04af16acac146fb192f44fecd747574",
+      "exported_sha256": "fa23942fda81a05052ad294a1638ab54c04af16acac146fb192f44fecd747574"
+    },
+    "aster-cloud/deploy/install/install.py": {
+      "upstream_path": "aster-cloud/deploy/install/install.py",
+      "upstream_sha256": "45501bf31c0322c66fd4935ed5ae1db5068e050206f7c35a3353c74722e8704e",
+      "exported_sha256": "45501bf31c0322c66fd4935ed5ae1db5068e050206f7c35a3353c74722e8704e"
+    },
+    "aster-cloud/deploy/install/node.sh": {
+      "upstream_path": "aster-cloud/deploy/install/node.sh",
+      "upstream_sha256": "e0d5915fb4eee65ac0e86100372c4266e3432695af19d27541c2df90a454bf05",
+      "exported_sha256": "e0d5915fb4eee65ac0e86100372c4266e3432695af19d27541c2df90a454bf05"
+    },
+    "aster-cloud/deploy/install/provision.py": {
+      "upstream_path": "aster-cloud/deploy/install/provision.py",
+      "upstream_sha256": "a1101ceaedc3ec10cf39a7e23e7fccf724900932a37900e3cc6f3fcce5e2ae1b",
+      "exported_sha256": "a1101ceaedc3ec10cf39a7e23e7fccf724900932a37900e3cc6f3fcce5e2ae1b"
+    },
+    "aster-cloud/deploy/install/release-trusted-root.json": {
+      "upstream_path": "aster-cloud/deploy/install/release-trusted-root.json",
+      "upstream_sha256": "65ca537f6ed8a47fd0e560c421baa1f6c1efb8b25fc200d8c5c02c0e92eb2b9c",
+      "exported_sha256": "65ca537f6ed8a47fd0e560c421baa1f6c1efb8b25fc200d8c5c02c0e92eb2b9c"
+    },
+    "aster-cloud/deploy/install/release_verify.py": {
+      "upstream_path": "aster-cloud/deploy/install/release_verify.py",
+      "upstream_sha256": "14b9a22b9c06ac7f743621adf650197064d0c971383935ccb861db1d6bbd397f",
+      "exported_sha256": "14b9a22b9c06ac7f743621adf650197064d0c971383935ccb861db1d6bbd397f"
+    },
+    "aster-cloud/deploy/install/test_install.py": {
+      "upstream_path": "aster-cloud/deploy/install/test_install.py",
+      "upstream_sha256": "e9755961c83ed8a31ddca445c71a375e153f21b10c99ffec77fc66c0506edbbf",
+      "exported_sha256": "e9755961c83ed8a31ddca445c71a375e153f21b10c99ffec77fc66c0506edbbf"
+    },
+    "aster-cloud/deploy/journald-aster-cloud.conf.example": {
+      "upstream_path": "aster-cloud/deploy/journald-aster-cloud.conf.example",
+      "upstream_sha256": "0824adcc4e37f1460392736eec96823b805eb4b30cc83b2b9e50be56078c52d8",
+      "exported_sha256": "0824adcc4e37f1460392736eec96823b805eb4b30cc83b2b9e50be56078c52d8"
+    },
+    "aster-cloud/deploy/node-aster-node.service": {
+      "upstream_path": "aster-cloud/deploy/node-aster-node.service",
+      "upstream_sha256": "c6db90be39922852b97ff62631a9df9d18676efd79cc2b56b8d0eecc7d697820",
+      "exported_sha256": "c6db90be39922852b97ff62631a9df9d18676efd79cc2b56b8d0eecc7d697820"
+    },
+    "aster-cloud/deploy/node-config.example.json": {
+      "upstream_path": "aster-cloud/deploy/node-config.example.json",
+      "upstream_sha256": "23d66b46249e5bf1166dca135afa8f4a6bddaf69f0b8282ec87355fd0ae4f501",
+      "exported_sha256": "23d66b46249e5bf1166dca135afa8f4a6bddaf69f0b8282ec87355fd0ae4f501"
+    },
+    "aster-cloud/deploy/node-ovs.conf.example": {
+      "upstream_path": "aster-cloud/deploy/node-ovs.conf.example",
+      "upstream_sha256": "b8f9ad3bf58366d4ce3e0f09d47d3677ac23ab5d3fea5b557df5c3d26aabcf08",
+      "exported_sha256": "b8f9ad3bf58366d4ce3e0f09d47d3677ac23ab5d3fea5b557df5c3d26aabcf08"
+    },
+    "aster-cloud/deploy/node-ovs.example.json": {
+      "upstream_path": "aster-cloud/deploy/node-ovs.example.json",
+      "upstream_sha256": "ab691e496eead1e7ea1bec8c591c09ec2920a697643f8a54511d93edd8f1752b",
+      "exported_sha256": "ab691e496eead1e7ea1bec8c591c09ec2920a697643f8a54511d93edd8f1752b"
+    },
+    "aster-cloud/deploy/node-static-ipv4-filter.example.xml": {
+      "upstream_path": "aster-cloud/deploy/node-static-ipv4-filter.example.xml",
+      "upstream_sha256": "e1eb831d88c9671d9d7103aeece90969cbfbfe9dc855f3d32c00bdb9f867706d",
+      "exported_sha256": "e1eb831d88c9671d9d7103aeece90969cbfbfe9dc855f3d32c00bdb9f867706d"
+    },
+    "aster-cloud/deploy/overlay-private.example.json": {
+      "upstream_path": "aster-cloud/deploy/overlay-private.example.json",
+      "upstream_sha256": "a05defab2d92ce58af19b2eb0b93363f7897a3bd1f037af911e13df718467b0b",
+      "exported_sha256": "a05defab2d92ce58af19b2eb0b93363f7897a3bd1f037af911e13df718467b0b"
+    },
+    "aster-cloud/deploy/scripts/package-cloud.py": {
+      "upstream_path": "aster-cloud/deploy/scripts/package-cloud.py",
+      "upstream_sha256": "d6d7468e36a296d8f44ea67813a7ceb2bcbb41b8507bde927c413f4ae0fb39d5",
+      "exported_sha256": "7bd1d25da11cc53bc5ae9217715f4f4586ff66aafdf69ee2e4e767028eebdb7e",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/deploy/scripts/test_cloud_package.py": {
+      "upstream_path": "aster-cloud/deploy/scripts/test_cloud_package.py",
+      "upstream_sha256": "4c458dbc2de5e03b89b700f4d860cefdf96101fccaa7099a724a57ca9a503bff",
+      "exported_sha256": "8195b7c07ca403b5be55d2f4bb76627f0ee481e0cce46aa4d02806f666406a8d",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/docs/ARCHITECTURE.md": {
+      "upstream_path": "aster-cloud/docs/ARCHITECTURE.md",
+      "upstream_sha256": "1bad43538fdec941a69d24d56b1074033da6414bd8da14376ec6fd8bb3375555",
+      "exported_sha256": "a30108faf4be67a68015517090afddda614d5b0cf6f524e9592383c98a3b7fe0",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/docs/BROWSER_VALIDATION.md": {
+      "upstream_path": "aster-cloud/docs/BROWSER_VALIDATION.md",
+      "upstream_sha256": "f25f255f02649a0969421b7c86ade7a06bbfbbae384447922e89c86cfabb772a",
+      "exported_sha256": "f25f255f02649a0969421b7c86ade7a06bbfbbae384447922e89c86cfabb772a"
+    },
+    "aster-cloud/docs/CONSOLE_API.md": {
+      "upstream_path": "aster-cloud/docs/CONSOLE_API.md",
+      "upstream_sha256": "1e9474a6dfe88e3f28801db8716cc88b7c90b5fb91d1c2241d4ab6eb2f7b08f8",
+      "exported_sha256": "735e0df8e4a6316e80608b4c34010e9020b225c22acba28b5f098fa72d71f7d6",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/docs/GETTING_STARTED.md": {
+      "upstream_path": "aster-cloud/docs/GETTING_STARTED.md",
+      "upstream_sha256": "712602c0d40db88886795af582cd477240b22a4a0800372c13f5724a8e139c18",
+      "exported_sha256": "a9ce82ee7bbe913518165fec3a0bdbb823061bc1b1fcc38f295d31eb022e9fa7",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/docs/INSTALL_PACKAGES.md": {
+      "upstream_path": "aster-cloud/docs/INSTALL_PACKAGES.md",
+      "upstream_sha256": "a405de98c7f492e57e811457ae9f35f5ccfeffbc08665598284f0a0345eafd6a",
+      "exported_sha256": "a405de98c7f492e57e811457ae9f35f5ccfeffbc08665598284f0a0345eafd6a"
+    },
+    "aster-cloud/docs/INSTALL_VALIDATION.md": {
+      "upstream_path": "aster-cloud/docs/INSTALL_VALIDATION.md",
+      "upstream_sha256": "9e3ddbc2555f045cfe00fb5cad725b7b26975f86d0eaf4a7160ab045555afd26",
+      "exported_sha256": "9e3ddbc2555f045cfe00fb5cad725b7b26975f86d0eaf4a7160ab045555afd26"
+    },
+    "aster-cloud/docs/KVM_ENHANCED_PARITY.md": {
+      "upstream_path": "aster-cloud/docs/KVM_ENHANCED_PARITY.md",
+      "upstream_sha256": "3ffa099f4ddcdf7535d1aa95e35ad6ab8b84653dee8927185d34ed0e28e833cd",
+      "exported_sha256": "79b3915eff3c9fe34288a6844b01a1a0cdde64af6f28c2b125f3e48f9de12372",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/docs/LOGGING.md": {
+      "upstream_path": "aster-cloud/docs/LOGGING.md",
+      "upstream_sha256": "688e66b0c068d6e7fa817563e13d74d389346cbe6cbf0b821ce3ede01938d841",
+      "exported_sha256": "688e66b0c068d6e7fa817563e13d74d389346cbe6cbf0b821ce3ede01938d841"
+    },
+    "aster-cloud/docs/MEMBERS_PAGINATION.md": {
+      "upstream_path": "aster-cloud/docs/MEMBERS_PAGINATION.md",
+      "upstream_sha256": "2819c0a99ad015809bad5b9bfcbbf662455e846a44c581fafb0aa4232865ea10",
+      "exported_sha256": "2819c0a99ad015809bad5b9bfcbbf662455e846a44c581fafb0aa4232865ea10"
+    },
+    "aster-cloud/docs/NAT_NETWORK_VALIDATION.md": {
+      "upstream_path": "aster-cloud/docs/NAT_NETWORK_VALIDATION.md",
+      "upstream_sha256": "f22a9c7d63533b434ae8fc64536e3ea1c754f0c9437e633a3a97aab6fbcf164c",
+      "exported_sha256": "f22a9c7d63533b434ae8fc64536e3ea1c754f0c9437e633a3a97aab6fbcf164c"
+    },
+    "aster-cloud/docs/NETWORK_API.md": {
+      "upstream_path": "aster-cloud/docs/NETWORK_API.md",
+      "upstream_sha256": "448d350f8fc417a46a517f2673869e7b135bde1d371053c48d7c04f5fa7bdb63",
+      "exported_sha256": "448d350f8fc417a46a517f2673869e7b135bde1d371053c48d7c04f5fa7bdb63"
+    },
+    "aster-cloud/docs/NETWORK_MANAGEMENT.md": {
+      "upstream_path": "aster-cloud/docs/NETWORK_MANAGEMENT.md",
+      "upstream_sha256": "3d004f3970a27721c0980e884b29c66178f3b1f2f52efe8de690acb63ecaa8cf",
+      "exported_sha256": "3d004f3970a27721c0980e884b29c66178f3b1f2f52efe8de690acb63ecaa8cf"
+    },
+    "aster-cloud/docs/NETWORK_RECOVERY_VALIDATION.md": {
+      "upstream_path": "aster-cloud/docs/NETWORK_RECOVERY_VALIDATION.md",
+      "upstream_sha256": "e59c4dfdce4714b763611847edaaf5678717462e5922fa5b5de9beb46f5fa201",
+      "exported_sha256": "e59c4dfdce4714b763611847edaaf5678717462e5922fa5b5de9beb46f5fa201"
+    },
+    "aster-cloud/docs/NETWORK_VALIDATION.md": {
+      "upstream_path": "aster-cloud/docs/NETWORK_VALIDATION.md",
+      "upstream_sha256": "19d78bedf20550cd7612ea3455d29cffe90920af19412c3ffdaea029d6454ee0",
+      "exported_sha256": "19d78bedf20550cd7612ea3455d29cffe90920af19412c3ffdaea029d6454ee0"
+    },
+    "aster-cloud/docs/OPERATIONS_VALIDATION.md": {
+      "upstream_path": "aster-cloud/docs/OPERATIONS_VALIDATION.md",
+      "upstream_sha256": "bf305faccffbde7c0f8630f9c260da22278fd028b35f469e6dc08f0ff1c2fd33",
+      "exported_sha256": "bf305faccffbde7c0f8630f9c260da22278fd028b35f469e6dc08f0ff1c2fd33"
+    },
+    "aster-cloud/docs/OVERLAY_CONTROL.md": {
+      "upstream_path": "aster-cloud/docs/OVERLAY_CONTROL.md",
+      "upstream_sha256": "9c52abe98f0a5d6716760ef5f7476e1cf37245427fa55d99c457ece877d66971",
+      "exported_sha256": "9c52abe98f0a5d6716760ef5f7476e1cf37245427fa55d99c457ece877d66971"
+    },
+    "aster-cloud/docs/OVERLAY_DESIGN.md": {
+      "upstream_path": "aster-cloud/docs/OVERLAY_DESIGN.md",
+      "upstream_sha256": "4da05397c35907b6fca365fb0666e919b69f1e015ab13e10a37acc9c3f57977e",
+      "exported_sha256": "4da05397c35907b6fca365fb0666e919b69f1e015ab13e10a37acc9c3f57977e"
+    },
+    "aster-cloud/docs/OVS_VM_GATE_VALIDATION.md": {
+      "upstream_path": "aster-cloud/docs/OVS_VM_GATE_VALIDATION.md",
+      "upstream_sha256": "311158c341ff269779213525b2fcb8b70372fd48942b5a7017afcfa09d8296cb",
+      "exported_sha256": "c29d40a215961c853d3cac12486a9c80f1fa6b7e125b9d72b98c52c9a96762d2",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/docs/PUBLIC_INGRESS.md": {
+      "upstream_path": "aster-cloud/docs/PUBLIC_INGRESS.md",
+      "upstream_sha256": "6fd9091e4852582bead08ab06afc9a83c67c76da1caf7bcef754f0ae96b88b7e",
+      "exported_sha256": "6fd9091e4852582bead08ab06afc9a83c67c76da1caf7bcef754f0ae96b88b7e"
+    },
+    "aster-cloud/docs/PUBLIC_IP_MANAGEMENT.md": {
+      "upstream_path": "aster-cloud/docs/PUBLIC_IP_MANAGEMENT.md",
+      "upstream_sha256": "9d7b61d6a0f7e68d41a491818e8d02fe495c786a50ac7856a96b625d06e0a0c8",
+      "exported_sha256": "9d7b61d6a0f7e68d41a491818e8d02fe495c786a50ac7856a96b625d06e0a0c8"
+    },
+    "aster-cloud/docs/PUBLIC_NAT_EGRESS.md": {
+      "upstream_path": "aster-cloud/docs/PUBLIC_NAT_EGRESS.md",
+      "upstream_sha256": "cfd9cdfe275db84cdfadde329798f0d8f70a703dd8264b6d5564b5df9ac99fe1",
+      "exported_sha256": "cfd9cdfe275db84cdfadde329798f0d8f70a703dd8264b6d5564b5df9ac99fe1"
+    },
+    "aster-cloud/docs/RELEASE_CHANNEL.md": {
+      "upstream_path": "aster-cloud/docs/RELEASE_CHANNEL.md",
+      "upstream_sha256": "c5d56db528938af7f8927abd14547a17150d1ff86f69df2f7d2d23b82dc69075",
+      "exported_sha256": "418633480f3cc2cc5fccd312a5ddab48c345e2421ad9136c324f8ab4ff1a1cfe",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/docs/VALIDATION.md": {
+      "upstream_path": "aster-cloud/docs/VALIDATION.md",
+      "upstream_sha256": "b375ddc223027a29474fb5a0091ebaf94a2c19e1cd06b6d650d7917ea80f00ec",
+      "exported_sha256": "cbfda8e0b23a89d535167d4fd036c2c299c4df10d990ee3326ebb0e8e505a84f",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/docs/VM_PUBLIC_IP_MANAGEMENT.md": {
+      "upstream_path": "aster-cloud/docs/VM_PUBLIC_IP_MANAGEMENT.md",
+      "upstream_sha256": "54647e8564f7ff12c9d35e471fd59e9fb322cf8ab0d88fbdee81b0c167e859fe",
+      "exported_sha256": "54647e8564f7ff12c9d35e471fd59e9fb322cf8ab0d88fbdee81b0c167e859fe"
+    },
+    "aster-cloud/frontend/.gitignore": {
+      "upstream_path": "aster-cloud/frontend/.gitignore",
+      "upstream_sha256": "22dac02a421b1ea6c823c2c213b810b7da571337f9ef5b9c5fc36b61668f2caf",
+      "exported_sha256": "22dac02a421b1ea6c823c2c213b810b7da571337f9ef5b9c5fc36b61668f2caf"
+    },
+    "aster-cloud/frontend/design-spec.md": {
+      "upstream_path": "aster-cloud/frontend/design-spec.md",
+      "upstream_sha256": "b7aac0215f2dbf057e5f6752f6fde3e2201ef2c1efabe803ffd40c08afcb2834",
+      "exported_sha256": "b7aac0215f2dbf057e5f6752f6fde3e2201ef2c1efabe803ffd40c08afcb2834"
+    },
+    "aster-cloud/frontend/index.html": {
+      "upstream_path": "aster-cloud/frontend/index.html",
+      "upstream_sha256": "d7ef7603586abe5ac6852a2f2f93d8164d00c29922873cd95770fc69a8c58180",
+      "exported_sha256": "d7ef7603586abe5ac6852a2f2f93d8164d00c29922873cd95770fc69a8c58180"
+    },
+    "aster-cloud/frontend/package-lock.json": {
+      "upstream_path": "aster-cloud/frontend/package-lock.json",
+      "upstream_sha256": "092ee4f85343c18b30fadd342609a4ae8f71cf5fbd114d6fed856597d8a7e1e0",
+      "exported_sha256": "092ee4f85343c18b30fadd342609a4ae8f71cf5fbd114d6fed856597d8a7e1e0"
+    },
+    "aster-cloud/frontend/package.json": {
+      "upstream_path": "aster-cloud/frontend/package.json",
+      "upstream_sha256": "3f86de34d360775e7d5a05ae662884972456db9a443348a704afcd8d9a1144b9",
+      "exported_sha256": "3f86de34d360775e7d5a05ae662884972456db9a443348a704afcd8d9a1144b9"
+    },
+    "aster-cloud/frontend/src/App.vue": {
+      "upstream_path": "aster-cloud/frontend/src/App.vue",
+      "upstream_sha256": "ac776ce868486b64d112aef6f4bf92bb5daad5ddd22554a574badcc8b40b7eeb",
+      "exported_sha256": "ac776ce868486b64d112aef6f4bf92bb5daad5ddd22554a574badcc8b40b7eeb"
+    },
+    "aster-cloud/frontend/src/api/client.ts": {
+      "upstream_path": "aster-cloud/frontend/src/api/client.ts",
+      "upstream_sha256": "2421146afd5b4f22b7df1b2db2f5d1654c2fc8ec61fff12e59fb71181e4c0824",
+      "exported_sha256": "2421146afd5b4f22b7df1b2db2f5d1654c2fc8ec61fff12e59fb71181e4c0824"
+    },
+    "aster-cloud/frontend/src/api/identity.ts": {
+      "upstream_path": "aster-cloud/frontend/src/api/identity.ts",
+      "upstream_sha256": "06621bda57d51712cd9acebde84522025d8f9b71c4b983041196ddf55fad2b52",
+      "exported_sha256": "06621bda57d51712cd9acebde84522025d8f9b71c4b983041196ddf55fad2b52"
+    },
+    "aster-cloud/frontend/src/api/migration-targets.ts": {
+      "upstream_path": "aster-cloud/frontend/src/api/migration-targets.ts",
+      "upstream_sha256": "68489fbdebe78fd8594ad3c9ae7d83a0d9391b19beb0ce5d95830dba353d365e",
+      "exported_sha256": "68489fbdebe78fd8594ad3c9ae7d83a0d9391b19beb0ce5d95830dba353d365e"
+    },
+    "aster-cloud/frontend/src/api/network.ts": {
+      "upstream_path": "aster-cloud/frontend/src/api/network.ts",
+      "upstream_sha256": "63ef41bccbf5e47f62932ca6a76555b5f17632692a7ea14ee206c7ad9e07175d",
+      "exported_sha256": "63ef41bccbf5e47f62932ca6a76555b5f17632692a7ea14ee206c7ad9e07175d"
+    },
+    "aster-cloud/frontend/src/api/overlay.ts": {
+      "upstream_path": "aster-cloud/frontend/src/api/overlay.ts",
+      "upstream_sha256": "68f9744bd9dcec1b7417ec0d97730228aa86e82973219ead75517a51b238a665",
+      "exported_sha256": "68f9744bd9dcec1b7417ec0d97730228aa86e82973219ead75517a51b238a665"
+    },
+    "aster-cloud/frontend/src/api/public-ingress.ts": {
+      "upstream_path": "aster-cloud/frontend/src/api/public-ingress.ts",
+      "upstream_sha256": "b6fcbdec62bc6d3eb068c44c0440a3acdee72f2c1a32ba86c5669ffa497ebd76",
+      "exported_sha256": "b6fcbdec62bc6d3eb068c44c0440a3acdee72f2c1a32ba86c5669ffa497ebd76"
+    },
+    "aster-cloud/frontend/src/api/public-ip-resource.ts": {
+      "upstream_path": "aster-cloud/frontend/src/api/public-ip-resource.ts",
+      "upstream_sha256": "d0415ad1fbe9c105a7802d9e1f7c6366a5a518bb0cdab9952647a0c779f26a19",
+      "exported_sha256": "d0415ad1fbe9c105a7802d9e1f7c6366a5a518bb0cdab9952647a0c779f26a19"
+    },
+    "aster-cloud/frontend/src/api/public-ip.ts": {
+      "upstream_path": "aster-cloud/frontend/src/api/public-ip.ts",
+      "upstream_sha256": "f186d6f2bc40a8e3118c945e62966716b74e4f5adf1069a946c2bb35145fee2c",
+      "exported_sha256": "f186d6f2bc40a8e3118c945e62966716b74e4f5adf1069a946c2bb35145fee2c"
+    },
+    "aster-cloud/frontend/src/api/types.ts": {
+      "upstream_path": "aster-cloud/frontend/src/api/types.ts",
+      "upstream_sha256": "8f2f9cac4e7253c58035544c487ee159d7dcd61bb3b09388656574909b70443e",
+      "exported_sha256": "8f2f9cac4e7253c58035544c487ee159d7dcd61bb3b09388656574909b70443e"
+    },
+    "aster-cloud/frontend/src/audit-query.ts": {
+      "upstream_path": "aster-cloud/frontend/src/audit-query.ts",
+      "upstream_sha256": "a74d474d015275961ddc53c3cc5353cfd169fed68cd1691b921192be86fa12b0",
+      "exported_sha256": "a74d474d015275961ddc53c3cc5353cfd169fed68cd1691b921192be86fa12b0"
+    },
+    "aster-cloud/frontend/src/components/ActionDialog.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/ActionDialog.vue",
+      "upstream_sha256": "12f5c33318286e3f10821665b7a8d4eba570f215f93707aab94f446a5453682a",
+      "exported_sha256": "12f5c33318286e3f10821665b7a8d4eba570f215f93707aab94f446a5453682a"
+    },
+    "aster-cloud/frontend/src/components/BindingIngressSummary.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/BindingIngressSummary.vue",
+      "upstream_sha256": "72be79aa89fef4fdc900627bebb8c91925223ca4df3dd5feba61bc583256bba6",
+      "exported_sha256": "72be79aa89fef4fdc900627bebb8c91925223ca4df3dd5feba61bc583256bba6"
+    },
+    "aster-cloud/frontend/src/components/CreateInstanceDialog.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/CreateInstanceDialog.vue",
+      "upstream_sha256": "f8840c05fc4206dfd8163ae72eb7eff442328c8ce8c71b1171a53678c16f2583",
+      "exported_sha256": "f8840c05fc4206dfd8163ae72eb7eff442328c8ce8c71b1171a53678c16f2583"
+    },
+    "aster-cloud/frontend/src/components/DirectPublicAddressSelect.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/DirectPublicAddressSelect.vue",
+      "upstream_sha256": "f2d9484408f5aa62059fe829dffa70c14773b691d7ffb2a3abf4f8e4d8636878",
+      "exported_sha256": "f2d9484408f5aa62059fe829dffa70c14773b691d7ffb2a3abf4f8e4d8636878"
+    },
+    "aster-cloud/frontend/src/components/IdentityEditorFields.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/IdentityEditorFields.vue",
+      "upstream_sha256": "ea39f50154a3efb50bbd6258275a093513e25d212b0f27e1d8b34ef0fcd6cd2e",
+      "exported_sha256": "ea39f50154a3efb50bbd6258275a093513e25d212b0f27e1d8b34ef0fcd6cd2e"
+    },
+    "aster-cloud/frontend/src/components/IdentityOperationNotice.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/IdentityOperationNotice.vue",
+      "upstream_sha256": "a77a3b71bb463767bcf4d6cbf5635b07f8988cab7121d3400c39389a206c1659",
+      "exported_sha256": "a77a3b71bb463767bcf4d6cbf5635b07f8988cab7121d3400c39389a206c1659"
+    },
+    "aster-cloud/frontend/src/components/IdentityPendingTray.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/IdentityPendingTray.vue",
+      "upstream_sha256": "ee594eb9edd1666468a3f75eee43f52c1e19520c84dfcb81fba087c5f67290e7",
+      "exported_sha256": "ee594eb9edd1666468a3f75eee43f52c1e19520c84dfcb81fba087c5f67290e7"
+    },
+    "aster-cloud/frontend/src/components/IdentitySessionRevocation.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/IdentitySessionRevocation.vue",
+      "upstream_sha256": "953def4ff5527cb5006dee6eefe077339b348b7c2912aee40ac52fe06e4dd72c",
+      "exported_sha256": "953def4ff5527cb5006dee6eefe077339b348b7c2912aee40ac52fe06e4dd72c"
+    },
+    "aster-cloud/frontend/src/components/InlineError.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/InlineError.vue",
+      "upstream_sha256": "d40512237cc2d02a8183c8454387c1643bb6e5978a3471658b442cda6ea6129d",
+      "exported_sha256": "d40512237cc2d02a8183c8454387c1643bb6e5978a3471658b442cda6ea6129d"
+    },
+    "aster-cloud/frontend/src/components/InstanceLedger.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/InstanceLedger.vue",
+      "upstream_sha256": "a8d8e54b5d61c8b5c5b99d9157c0fe1a74f0cecf11ac682e1a8f3e25763dbc71",
+      "exported_sha256": "a8d8e54b5d61c8b5c5b99d9157c0fe1a74f0cecf11ac682e1a8f3e25763dbc71"
+    },
+    "aster-cloud/frontend/src/components/InstanceMetricsPanel.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/InstanceMetricsPanel.vue",
+      "upstream_sha256": "f399585af73c9e66486fc2cfcb3285db4a38ef2c44eb5a45d8d19aefa7e8440f",
+      "exported_sha256": "f399585af73c9e66486fc2cfcb3285db4a38ef2c44eb5a45d8d19aefa7e8440f"
+    },
+    "aster-cloud/frontend/src/components/InstanceObservationPanel.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/InstanceObservationPanel.vue",
+      "upstream_sha256": "602ba0a36c8b3c325847936c6df8b2d3ed1c37218fb389ef4cc4682785e4f071",
+      "exported_sha256": "602ba0a36c8b3c325847936c6df8b2d3ed1c37218fb389ef4cc4682785e4f071"
+    },
+    "aster-cloud/frontend/src/components/MigrationWizard.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/MigrationWizard.vue",
+      "upstream_sha256": "e5627f0d7a873ca6640e5e4e272a6f86bd61736a43629f6d7177462681c9d980",
+      "exported_sha256": "e5627f0d7a873ca6640e5e4e272a6f86bd61736a43629f6d7177462681c9d980"
+    },
+    "aster-cloud/frontend/src/components/NavLinks.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/NavLinks.vue",
+      "upstream_sha256": "1369398f3860671998101353f39536603a84f11866165b9388cc859c851e0def",
+      "exported_sha256": "1369398f3860671998101353f39536603a84f11866165b9388cc859c851e0def"
+    },
+    "aster-cloud/frontend/src/components/NetworkCreateDialog.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/NetworkCreateDialog.vue",
+      "upstream_sha256": "eb2adf0757a939db2ac405279c47abe7d3be1e91df866f77d41f37058ba2981f",
+      "exported_sha256": "eb2adf0757a939db2ac405279c47abe7d3be1e91df866f77d41f37058ba2981f"
+    },
+    "aster-cloud/frontend/src/components/NetworkNav.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/NetworkNav.vue",
+      "upstream_sha256": "ad18fe831aae5640deff8816b15bbe0be41cb17780cae49cb1cb9fd638885e87",
+      "exported_sha256": "ad18fe831aae5640deff8816b15bbe0be41cb17780cae49cb1cb9fd638885e87"
+    },
+    "aster-cloud/frontend/src/components/OperationActions.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/OperationActions.vue",
+      "upstream_sha256": "ace5f4a3e3c334c5e0ad5a43414ebbbabcaa417fe61f620dde0832882843b150",
+      "exported_sha256": "ace5f4a3e3c334c5e0ad5a43414ebbbabcaa417fe61f620dde0832882843b150"
+    },
+    "aster-cloud/frontend/src/components/OperationRecord.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/OperationRecord.vue",
+      "upstream_sha256": "4f87e3295e59057e85abd6e587131b5c0c6acd1e0b068f8a7e2e44a1cfc9ca49",
+      "exported_sha256": "4f87e3295e59057e85abd6e587131b5c0c6acd1e0b068f8a7e2e44a1cfc9ca49"
+    },
+    "aster-cloud/frontend/src/components/OverlayEpochActions.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/OverlayEpochActions.vue",
+      "upstream_sha256": "64f6d72115403d5cce0b448dff597c1342b788aef17180058092b81175410ccf",
+      "exported_sha256": "64f6d72115403d5cce0b448dff597c1342b788aef17180058092b81175410ccf"
+    },
+    "aster-cloud/frontend/src/components/OverlayEpochDialog.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/OverlayEpochDialog.vue",
+      "upstream_sha256": "bbbb539d0a3dcf3c2d27e6eeef7964691db553b0bd98e296ca14d585245a4827",
+      "exported_sha256": "bbbb539d0a3dcf3c2d27e6eeef7964691db553b0bd98e296ca14d585245a4827"
+    },
+    "aster-cloud/frontend/src/components/OverlayNATEditor.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/OverlayNATEditor.vue",
+      "upstream_sha256": "e298db7fb840e8402f9e4b7d8636dfdc1baf78fcef7f88547ebfc326d4d1d49d",
+      "exported_sha256": "e298db7fb840e8402f9e4b7d8636dfdc1baf78fcef7f88547ebfc326d4d1d49d"
+    },
+    "aster-cloud/frontend/src/components/OverlaySelectionEditor.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/OverlaySelectionEditor.vue",
+      "upstream_sha256": "37b4ab45f08edbd96fde968f766d7608446ef5b3d8a474ce3bbde62774798476",
+      "exported_sha256": "37b4ab45f08edbd96fde968f766d7608446ef5b3d8a474ce3bbde62774798476"
+    },
+    "aster-cloud/frontend/src/components/OverlaySnapshotPanel.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/OverlaySnapshotPanel.vue",
+      "upstream_sha256": "a6d482a9bcafa997c5a97b67c5234b2835a8596015f00b83f7a7b583c99e9b07",
+      "exported_sha256": "a6d482a9bcafa997c5a97b67c5234b2835a8596015f00b83f7a7b583c99e9b07"
+    },
+    "aster-cloud/frontend/src/components/OverlayVPCDialog.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/OverlayVPCDialog.vue",
+      "upstream_sha256": "c1b8ec0532e395ae68688f7c0556219057b96e38b4579d0bf2d55cea909ecb9b",
+      "exported_sha256": "c1b8ec0532e395ae68688f7c0556219057b96e38b4579d0bf2d55cea909ecb9b"
+    },
+    "aster-cloud/frontend/src/components/PublicIPDialog.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/PublicIPDialog.vue",
+      "upstream_sha256": "73c57eb454845d49fb5660d083e78caff77d89f440ba704b19a6b1f357c30602",
+      "exported_sha256": "73c57eb454845d49fb5660d083e78caff77d89f440ba704b19a6b1f357c30602"
+    },
+    "aster-cloud/frontend/src/components/PublicIPResourceDialog.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/PublicIPResourceDialog.vue",
+      "upstream_sha256": "03961608793ed8cf18bf7dec9d1d3d4ee84915187362dd0b186324decaf9ebb3",
+      "exported_sha256": "03961608793ed8cf18bf7dec9d1d3d4ee84915187362dd0b186324decaf9ebb3"
+    },
+    "aster-cloud/frontend/src/components/PublicIPResourcesPanel.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/PublicIPResourcesPanel.vue",
+      "upstream_sha256": "5fdf4de44e45f2645f329bf9a35671100584b7cee06f50c247b1cbb922262409",
+      "exported_sha256": "5fdf4de44e45f2645f329bf9a35671100584b7cee06f50c247b1cbb922262409"
+    },
+    "aster-cloud/frontend/src/components/PublicIngressDialog.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/PublicIngressDialog.vue",
+      "upstream_sha256": "075b582fda59589f75b90831b871d5c177e3adb114771d311f5cffa315f7e6de",
+      "exported_sha256": "075b582fda59589f75b90831b871d5c177e3adb114771d311f5cffa315f7e6de"
+    },
+    "aster-cloud/frontend/src/components/PublicIngressPanel.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/PublicIngressPanel.vue",
+      "upstream_sha256": "7d363e2d3acdc4cb326cc5cefcd9257f27bf3335cf979244de16d17c4f0d0fd7",
+      "exported_sha256": "7d363e2d3acdc4cb326cc5cefcd9257f27bf3335cf979244de16d17c4f0d0fd7"
+    },
+    "aster-cloud/frontend/src/components/SourceRetirementPanel.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/SourceRetirementPanel.vue",
+      "upstream_sha256": "4ef764f891e5e8d23b8e0566dabc615fa0e5e5e60c5c8d636d6d00969f199ea7",
+      "exported_sha256": "4ef764f891e5e8d23b8e0566dabc615fa0e5e5e60c5c8d636d6d00969f199ea7"
+    },
+    "aster-cloud/frontend/src/components/StateBlock.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/StateBlock.vue",
+      "upstream_sha256": "70fdf8febe8b819a0adac817691a420070037fad5d87b9a7013e7f96da06bebd",
+      "exported_sha256": "70fdf8febe8b819a0adac817691a420070037fad5d87b9a7013e7f96da06bebd"
+    },
+    "aster-cloud/frontend/src/components/StatusBadge.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/StatusBadge.vue",
+      "upstream_sha256": "1739c60ed80566943ff54a2a44e0dd8cc78b294d7a08b1d4e644e3d180538995",
+      "exported_sha256": "1739c60ed80566943ff54a2a44e0dd8cc78b294d7a08b1d4e644e3d180538995"
+    },
+    "aster-cloud/frontend/src/components/ToastStack.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/ToastStack.vue",
+      "upstream_sha256": "397c1f84eab690494bef9516bf60de7be3d467debf354956ed9d97aa9fd2a484",
+      "exported_sha256": "397c1f84eab690494bef9516bf60de7be3d467debf354956ed9d97aa9fd2a484"
+    },
+    "aster-cloud/frontend/src/components/UiButton.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/UiButton.vue",
+      "upstream_sha256": "238cdb26666f879e10a194b97a391e47000944137ccdd503cadc53b68176bb4f",
+      "exported_sha256": "238cdb26666f879e10a194b97a391e47000944137ccdd503cadc53b68176bb4f"
+    },
+    "aster-cloud/frontend/src/components/UiOverlay.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/UiOverlay.vue",
+      "upstream_sha256": "4b3ec2ed4d26e606e1f2edb6ec503bffdf2f242353312644e27232a41362f541",
+      "exported_sha256": "4b3ec2ed4d26e606e1f2edb6ec503bffdf2f242353312644e27232a41362f541"
+    },
+    "aster-cloud/frontend/src/components/UiSelect.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/UiSelect.vue",
+      "upstream_sha256": "19f82e54ad0c1ce737fa28afbae3802c0c22c251fbca1377efa94738e2713a2b",
+      "exported_sha256": "19f82e54ad0c1ce737fa28afbae3802c0c22c251fbca1377efa94738e2713a2b"
+    },
+    "aster-cloud/frontend/src/components/UserEditor.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/UserEditor.vue",
+      "upstream_sha256": "791e16c6b799002bd08b0e3247b0589a4419a255f9fed217b69250f693e2504e",
+      "exported_sha256": "791e16c6b799002bd08b0e3247b0589a4419a255f9fed217b69250f693e2504e"
+    },
+    "aster-cloud/frontend/src/components/WorkbenchHeader.vue": {
+      "upstream_path": "aster-cloud/frontend/src/components/WorkbenchHeader.vue",
+      "upstream_sha256": "99d804e9c6504bc659234aa4a2102e4c11958797d04131a5cb0e1f104576e351",
+      "exported_sha256": "99d804e9c6504bc659234aa4a2102e4c11958797d04131a5cb0e1f104576e351"
+    },
+    "aster-cloud/frontend/src/components/overlay-stack.ts": {
+      "upstream_path": "aster-cloud/frontend/src/components/overlay-stack.ts",
+      "upstream_sha256": "cf18d8e0420c55fc4c7ddc53075f7749e5fa0151fb191bb8c8bdd69f64b46974",
+      "exported_sha256": "cf18d8e0420c55fc4c7ddc53075f7749e5fa0151fb191bb8c8bdd69f64b46974"
+    },
+    "aster-cloud/frontend/src/composables/identity-ledger.ts": {
+      "upstream_path": "aster-cloud/frontend/src/composables/identity-ledger.ts",
+      "upstream_sha256": "1398e5a9b94f78f05dcbc40bcc810caf24116fc750ca0bcedf9ce42dbe01d115",
+      "exported_sha256": "1398e5a9b94f78f05dcbc40bcc810caf24116fc750ca0bcedf9ce42dbe01d115"
+    },
+    "aster-cloud/frontend/src/composables/identity-mutation.ts": {
+      "upstream_path": "aster-cloud/frontend/src/composables/identity-mutation.ts",
+      "upstream_sha256": "197a435c5bdf2a9009228bfad4bc623b899fa74784273cc3e523f135330cd106",
+      "exported_sha256": "197a435c5bdf2a9009228bfad4bc623b899fa74784273cc3e523f135330cd106"
+    },
+    "aster-cloud/frontend/src/composables/mutation.ts": {
+      "upstream_path": "aster-cloud/frontend/src/composables/mutation.ts",
+      "upstream_sha256": "a05abdc08f847de07cdcd023c37a6b1ec18ec9f1298bbca8125b99bce3e4f822",
+      "exported_sha256": "a05abdc08f847de07cdcd023c37a6b1ec18ec9f1298bbca8125b99bce3e4f822"
+    },
+    "aster-cloud/frontend/src/composables/notices.ts": {
+      "upstream_path": "aster-cloud/frontend/src/composables/notices.ts",
+      "upstream_sha256": "a364d68663270229adbb7aa9fecfa7f0d5e577d6fbc4487ae2d187325861efb1",
+      "exported_sha256": "a364d68663270229adbb7aa9fecfa7f0d5e577d6fbc4487ae2d187325861efb1"
+    },
+    "aster-cloud/frontend/src/composables/overlay-mutation.ts": {
+      "upstream_path": "aster-cloud/frontend/src/composables/overlay-mutation.ts",
+      "upstream_sha256": "1c02bf6d60bd6d2c1f117fe5e78d9e33c7ca2f95ba29a33fff27978339353d11",
+      "exported_sha256": "1c02bf6d60bd6d2c1f117fe5e78d9e33c7ca2f95ba29a33fff27978339353d11"
+    },
+    "aster-cloud/frontend/src/composables/preferences.ts": {
+      "upstream_path": "aster-cloud/frontend/src/composables/preferences.ts",
+      "upstream_sha256": "cdd616af8e0e808aabd8130eeed5da0442ecd2baf268f245a4ded88fc5baced9",
+      "exported_sha256": "cdd616af8e0e808aabd8130eeed5da0442ecd2baf268f245a4ded88fc5baced9"
+    },
+    "aster-cloud/frontend/src/composables/public-ingress-mutation.ts": {
+      "upstream_path": "aster-cloud/frontend/src/composables/public-ingress-mutation.ts",
+      "upstream_sha256": "59cb09a076d25ca97f50b8f553afac05a7579926160829c10fb843821aeadab6",
+      "exported_sha256": "59cb09a076d25ca97f50b8f553afac05a7579926160829c10fb843821aeadab6"
+    },
+    "aster-cloud/frontend/src/composables/public-ip-mutation.ts": {
+      "upstream_path": "aster-cloud/frontend/src/composables/public-ip-mutation.ts",
+      "upstream_sha256": "0a3b2b81b0b8fe2094bafdae5cc1ba03dd1de7c0814938183f431f7dae193316",
+      "exported_sha256": "0a3b2b81b0b8fe2094bafdae5cc1ba03dd1de7c0814938183f431f7dae193316"
+    },
+    "aster-cloud/frontend/src/composables/public-ip-resource-mutation.ts": {
+      "upstream_path": "aster-cloud/frontend/src/composables/public-ip-resource-mutation.ts",
+      "upstream_sha256": "549b0e45c0b8e456f30b4832f8d146080aa1da019b02ffcd52abda4467955601",
+      "exported_sha256": "549b0e45c0b8e456f30b4832f8d146080aa1da019b02ffcd52abda4467955601"
+    },
+    "aster-cloud/frontend/src/composables/query.ts": {
+      "upstream_path": "aster-cloud/frontend/src/composables/query.ts",
+      "upstream_sha256": "6ca051261ac88e2a3ca74a5dc99868fbe8e7a1d5b0542f656b391f2fc3dbca15",
+      "exported_sha256": "6ca051261ac88e2a3ca74a5dc99868fbe8e7a1d5b0542f656b391f2fc3dbca15"
+    },
+    "aster-cloud/frontend/src/composables/session.ts": {
+      "upstream_path": "aster-cloud/frontend/src/composables/session.ts",
+      "upstream_sha256": "957ad512b4242e967e92e4790be8ef640afacfed61b5ced0137ffd5fe8570988",
+      "exported_sha256": "957ad512b4242e967e92e4790be8ef640afacfed61b5ced0137ffd5fe8570988"
+    },
+    "aster-cloud/frontend/src/composables/users-page.ts": {
+      "upstream_path": "aster-cloud/frontend/src/composables/users-page.ts",
+      "upstream_sha256": "58cc99e45c069452023890ca1cd151b3f85a234553b93d4cab1e26d0af4c9198",
+      "exported_sha256": "58cc99e45c069452023890ca1cd151b3f85a234553b93d4cab1e26d0af4c9198"
+    },
+    "aster-cloud/frontend/src/context.ts": {
+      "upstream_path": "aster-cloud/frontend/src/context.ts",
+      "upstream_sha256": "c88c7e96f7dc07ea6da9599e5965e77df67bfe19f687b74ceb668bb786d48ee0",
+      "exported_sha256": "c88c7e96f7dc07ea6da9599e5965e77df67bfe19f687b74ceb668bb786d48ee0"
+    },
+    "aster-cloud/frontend/src/format.ts": {
+      "upstream_path": "aster-cloud/frontend/src/format.ts",
+      "upstream_sha256": "76b533c438b1c16f72a10702e37e08f3178fa66ba1be1cd97935fa8c79e8b04d",
+      "exported_sha256": "76b533c438b1c16f72a10702e37e08f3178fa66ba1be1cd97935fa8c79e8b04d"
+    },
+    "aster-cloud/frontend/src/identity-copy.ts": {
+      "upstream_path": "aster-cloud/frontend/src/identity-copy.ts",
+      "upstream_sha256": "7741290e8ca5534e269dc8cdaa7ade0c8e149fa46ef44d0a58c245f6f9fdb5d8",
+      "exported_sha256": "7741290e8ca5534e269dc8cdaa7ade0c8e149fa46ef44d0a58c245f6f9fdb5d8"
+    },
+    "aster-cloud/frontend/src/main.ts": {
+      "upstream_path": "aster-cloud/frontend/src/main.ts",
+      "upstream_sha256": "f70cd4c659686e81622f0743ed867a077f34f7c625c4a2feb79b4ce6c34a4622",
+      "exported_sha256": "f70cd4c659686e81622f0743ed867a077f34f7c625c4a2feb79b4ce6c34a4622"
+    },
+    "aster-cloud/frontend/src/metrics-format.ts": {
+      "upstream_path": "aster-cloud/frontend/src/metrics-format.ts",
+      "upstream_sha256": "4a9891160a52ef11d41c8a15a78ca3fa3b8f9e60a75ce561db6748b53ea7e6ee",
+      "exported_sha256": "4a9891160a52ef11d41c8a15a78ca3fa3b8f9e60a75ce561db6748b53ea7e6ee"
+    },
+    "aster-cloud/frontend/src/pages/AuditPage.vue": {
+      "upstream_path": "aster-cloud/frontend/src/pages/AuditPage.vue",
+      "upstream_sha256": "e9273415a5b309422618247bf5756a8f62ed5c078be9338a79d46e16d15dc28f",
+      "exported_sha256": "e9273415a5b309422618247bf5756a8f62ed5c078be9338a79d46e16d15dc28f"
+    },
+    "aster-cloud/frontend/src/pages/InstanceDetailPage.vue": {
+      "upstream_path": "aster-cloud/frontend/src/pages/InstanceDetailPage.vue",
+      "upstream_sha256": "5c9404c5e9cb99c152b0794a315c039b6ab4a9e9598ec851b8ed3747e8710400",
+      "exported_sha256": "5c9404c5e9cb99c152b0794a315c039b6ab4a9e9598ec851b8ed3747e8710400"
+    },
+    "aster-cloud/frontend/src/pages/InstancesPage.vue": {
+      "upstream_path": "aster-cloud/frontend/src/pages/InstancesPage.vue",
+      "upstream_sha256": "fba228476cc81c04c7e397fa9253c95fb9744404b008a007c3630b807ce19ede",
+      "exported_sha256": "fba228476cc81c04c7e397fa9253c95fb9744404b008a007c3630b807ce19ede"
+    },
+    "aster-cloud/frontend/src/pages/LoginPage.vue": {
+      "upstream_path": "aster-cloud/frontend/src/pages/LoginPage.vue",
+      "upstream_sha256": "1f70f002e38da0ed3727e91383c8df219e858f528cd4f5ea66b1ba070493c93c",
+      "exported_sha256": "1f70f002e38da0ed3727e91383c8df219e858f528cd4f5ea66b1ba070493c93c"
+    },
+    "aster-cloud/frontend/src/pages/NetworksPage.vue": {
+      "upstream_path": "aster-cloud/frontend/src/pages/NetworksPage.vue",
+      "upstream_sha256": "69a2520a9e20b60d4f44781fa4b9def39e07f9b1d62487dbbee3c9e26b18d85c",
+      "exported_sha256": "69a2520a9e20b60d4f44781fa4b9def39e07f9b1d62487dbbee3c9e26b18d85c"
+    },
+    "aster-cloud/frontend/src/pages/NodesPage.vue": {
+      "upstream_path": "aster-cloud/frontend/src/pages/NodesPage.vue",
+      "upstream_sha256": "2e67fc093d284517fbe61896d9c78cfbd32483e36ef78d0928008d9026d07e78",
+      "exported_sha256": "2e67fc093d284517fbe61896d9c78cfbd32483e36ef78d0928008d9026d07e78"
+    },
+    "aster-cloud/frontend/src/pages/OperationDetailPage.vue": {
+      "upstream_path": "aster-cloud/frontend/src/pages/OperationDetailPage.vue",
+      "upstream_sha256": "92e4bacc2e1d1a0e26c9ad13cd90799cee4e72d7313bb2b9326c64bf486ef516",
+      "exported_sha256": "92e4bacc2e1d1a0e26c9ad13cd90799cee4e72d7313bb2b9326c64bf486ef516"
+    },
+    "aster-cloud/frontend/src/pages/OperationsPage.vue": {
+      "upstream_path": "aster-cloud/frontend/src/pages/OperationsPage.vue",
+      "upstream_sha256": "e9a8c99e96579efdb8ee62c6b08a257fa71dbb7dafcf296221e27cc839714c09",
+      "exported_sha256": "e9a8c99e96579efdb8ee62c6b08a257fa71dbb7dafcf296221e27cc839714c09"
+    },
+    "aster-cloud/frontend/src/pages/OverlayEpochPage.vue": {
+      "upstream_path": "aster-cloud/frontend/src/pages/OverlayEpochPage.vue",
+      "upstream_sha256": "25fcda30dcef7c3b6940447f5f34bae195a7849b1628c7fa77207b1a4d167ce5",
+      "exported_sha256": "25fcda30dcef7c3b6940447f5f34bae195a7849b1628c7fa77207b1a4d167ce5"
+    },
+    "aster-cloud/frontend/src/pages/OverlayNetworksPage.vue": {
+      "upstream_path": "aster-cloud/frontend/src/pages/OverlayNetworksPage.vue",
+      "upstream_sha256": "65f93f5a49c63154c2639ce40003b8a1d9e53c1f86a4a9a8d15625b352cdded9",
+      "exported_sha256": "65f93f5a49c63154c2639ce40003b8a1d9e53c1f86a4a9a8d15625b352cdded9"
+    },
+    "aster-cloud/frontend/src/pages/PublicIPsPage.vue": {
+      "upstream_path": "aster-cloud/frontend/src/pages/PublicIPsPage.vue",
+      "upstream_sha256": "2511af448b685ddf06074538d4c68a49d39601fabb3a1b867ca5816d027806a7",
+      "exported_sha256": "2511af448b685ddf06074538d4c68a49d39601fabb3a1b867ca5816d027806a7"
+    },
+    "aster-cloud/frontend/src/pages/UsersPage.vue": {
+      "upstream_path": "aster-cloud/frontend/src/pages/UsersPage.vue",
+      "upstream_sha256": "28ab3e296facc3a86aefd3794400caff5df6508345e9ab6943f4f2fe23b6bac9",
+      "exported_sha256": "28ab3e296facc3a86aefd3794400caff5df6508345e9ab6943f4f2fe23b6bac9"
+    },
+    "aster-cloud/frontend/src/permissions.ts": {
+      "upstream_path": "aster-cloud/frontend/src/permissions.ts",
+      "upstream_sha256": "1bbfa5c048fde64b6ba06c0be4da108a971c362324361bf80f094b260259b406",
+      "exported_sha256": "1bbfa5c048fde64b6ba06c0be4da108a971c362324361bf80f094b260259b406"
+    },
+    "aster-cloud/frontend/src/presentation.ts": {
+      "upstream_path": "aster-cloud/frontend/src/presentation.ts",
+      "upstream_sha256": "8f2824406c91058ff321e4a7a92f1f20a660e99a0e40cb65eb040eaa864fb917",
+      "exported_sha256": "8f2824406c91058ff321e4a7a92f1f20a660e99a0e40cb65eb040eaa864fb917"
+    },
+    "aster-cloud/frontend/src/style.css": {
+      "upstream_path": "aster-cloud/frontend/src/style.css",
+      "upstream_sha256": "c16acc1aa2d4530d58daaf8071ee0e60d5bbe5b5037abf368bb9ca20ffaf4461",
+      "exported_sha256": "c16acc1aa2d4530d58daaf8071ee0e60d5bbe5b5037abf368bb9ca20ffaf4461"
+    },
+    "aster-cloud/frontend/tests/api.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/api.test.ts",
+      "upstream_sha256": "c75bf99f695897cb12db8315f25d872966e3f0c894079ed5fce4941a532acc57",
+      "exported_sha256": "c75bf99f695897cb12db8315f25d872966e3f0c894079ed5fce4941a532acc57"
+    },
+    "aster-cloud/frontend/tests/audit-filters.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/audit-filters.test.ts",
+      "upstream_sha256": "bee4264632a6afe8cbc02215bae3f150141707d5417d6d8a596704805bbe208f",
+      "exported_sha256": "bee4264632a6afe8cbc02215bae3f150141707d5417d6d8a596704805bbe208f"
+    },
+    "aster-cloud/frontend/tests/audit-format.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/audit-format.test.ts",
+      "upstream_sha256": "a9b91ee6084b717781f17b4627f8211216fd8d939dd331555492c7ff8a5e5f09",
+      "exported_sha256": "a9b91ee6084b717781f17b4627f8211216fd8d939dd331555492c7ff8a5e5f09"
+    },
+    "aster-cloud/frontend/tests/audit-query.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/audit-query.test.ts",
+      "upstream_sha256": "2a5dc06c69ed598bfcb4548a6db79923810b99c80e8d54fc1a75cc5553d4ad72",
+      "exported_sha256": "2a5dc06c69ed598bfcb4548a6db79923810b99c80e8d54fc1a75cc5553d4ad72"
+    },
+    "aster-cloud/frontend/tests/components.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/components.test.ts",
+      "upstream_sha256": "eb7b191a7d22c66cb1255f1b534ad5a5ed2ea08e9df657a22329ca4d0710b770",
+      "exported_sha256": "eb7b191a7d22c66cb1255f1b534ad5a5ed2ea08e9df657a22329ca4d0710b770"
+    },
+    "aster-cloud/frontend/tests/design-contract.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/design-contract.test.ts",
+      "upstream_sha256": "1f073cee54349b237d620db1b2d12300d48551bdb57dd64c6093544babb0842c",
+      "exported_sha256": "1f073cee54349b237d620db1b2d12300d48551bdb57dd64c6093544babb0842c"
+    },
+    "aster-cloud/frontend/tests/fixtures.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/fixtures.ts",
+      "upstream_sha256": "a3d244547dd861e3f965b2984c1a938e4a4ece635f1d17680dadff13a2bd2fb5",
+      "exported_sha256": "a3d244547dd861e3f965b2984c1a938e4a4ece635f1d17680dadff13a2bd2fb5"
+    },
+    "aster-cloud/frontend/tests/helpers.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/helpers.ts",
+      "upstream_sha256": "0e55e4b6c8c3bf97ca8fb0b5853d1ec2b8f5cf592e588139d96acc0de4fc1123",
+      "exported_sha256": "0e55e4b6c8c3bf97ca8fb0b5853d1ec2b8f5cf592e588139d96acc0de4fc1123"
+    },
+    "aster-cloud/frontend/tests/identity-editor.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/identity-editor.test.ts",
+      "upstream_sha256": "e9ec4b693847700d28159d34fb177d23c6848899161394c4b52996f5f15bf50e",
+      "exported_sha256": "e9ec4b693847700d28159d34fb177d23c6848899161394c4b52996f5f15bf50e"
+    },
+    "aster-cloud/frontend/tests/identity-fixtures.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/identity-fixtures.ts",
+      "upstream_sha256": "dcf2e7ef72824d8700155c7e392785ad2d3da96f72a90b296e2903e02c375e85",
+      "exported_sha256": "dcf2e7ef72824d8700155c7e392785ad2d3da96f72a90b296e2903e02c375e85"
+    },
+    "aster-cloud/frontend/tests/identity-operations.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/identity-operations.test.ts",
+      "upstream_sha256": "6a673667092000a8950fc0559cc56c9c3f96ac0690c9d0d11446df3870879b8f",
+      "exported_sha256": "6a673667092000a8950fc0559cc56c9c3f96ac0690c9d0d11446df3870879b8f"
+    },
+    "aster-cloud/frontend/tests/instance-ledger.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/instance-ledger.test.ts",
+      "upstream_sha256": "e8b981ab35fea8cd6f265415f7a4c4b25b48bb19a4303f34fea1f836dae6d518",
+      "exported_sha256": "e8b981ab35fea8cd6f265415f7a4c4b25b48bb19a4303f34fea1f836dae6d518"
+    },
+    "aster-cloud/frontend/tests/metrics-api.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/metrics-api.test.ts",
+      "upstream_sha256": "b7045ed956f8ca234398448ad22ee6a7723a14a84c2f8980258962f268a3472c",
+      "exported_sha256": "b7045ed956f8ca234398448ad22ee6a7723a14a84c2f8980258962f268a3472c"
+    },
+    "aster-cloud/frontend/tests/metrics-panel.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/metrics-panel.test.ts",
+      "upstream_sha256": "e2314b5d0e89c324f35651423f10de7843ef15b27db3a8527c2ad650e45cdeb0",
+      "exported_sha256": "e2314b5d0e89c324f35651423f10de7843ef15b27db3a8527c2ad650e45cdeb0"
+    },
+    "aster-cloud/frontend/tests/migration-targets.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/migration-targets.test.ts",
+      "upstream_sha256": "485d58b279b7794e6a33cae054127d51dae3ff7e97050a9944af9384ab6e74bd",
+      "exported_sha256": "485d58b279b7794e6a33cae054127d51dae3ff7e97050a9944af9384ab6e74bd"
+    },
+    "aster-cloud/frontend/tests/navigation.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/navigation.test.ts",
+      "upstream_sha256": "9194ff3bf896431989deef28d63b08c9514a1e6683677e649615b01202ee569e",
+      "exported_sha256": "9194ff3bf896431989deef28d63b08c9514a1e6683677e649615b01202ee569e"
+    },
+    "aster-cloud/frontend/tests/network-api.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/network-api.test.ts",
+      "upstream_sha256": "0c27b1641686c6a1509726f0f8c58c36756465ccb2398821230681322004804d",
+      "exported_sha256": "0c27b1641686c6a1509726f0f8c58c36756465ccb2398821230681322004804d"
+    },
+    "aster-cloud/frontend/tests/network-dialog.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/network-dialog.test.ts",
+      "upstream_sha256": "1537f1e4358f26e034f9fc0864dccf92f232ed5799a12de0fce4fe5fe9fadb94",
+      "exported_sha256": "1537f1e4358f26e034f9fc0864dccf92f232ed5799a12de0fce4fe5fe9fadb94"
+    },
+    "aster-cloud/frontend/tests/network-page.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/network-page.test.ts",
+      "upstream_sha256": "1ff285edbed3b27d0f42b73d930b00dc5f809ab13cc7039c5adfedaae7643832",
+      "exported_sha256": "1ff285edbed3b27d0f42b73d930b00dc5f809ab13cc7039c5adfedaae7643832"
+    },
+    "aster-cloud/frontend/tests/network-pending.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/network-pending.test.ts",
+      "upstream_sha256": "a7de023fd9580ebab5f265c2ee4f0a2a9cab2c80cb10538cb6e4df7531e0f483",
+      "exported_sha256": "a7de023fd9580ebab5f265c2ee4f0a2a9cab2c80cb10538cb6e4df7531e0f483"
+    },
+    "aster-cloud/frontend/tests/nodes-ledger.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/nodes-ledger.test.ts",
+      "upstream_sha256": "342e70d8429119968df9be5b6bb1b402384722940e3c77d435f1807b6ab01134",
+      "exported_sha256": "342e70d8429119968df9be5b6bb1b402384722940e3c77d435f1807b6ab01134"
+    },
+    "aster-cloud/frontend/tests/notices.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/notices.test.ts",
+      "upstream_sha256": "56044609d7c46bf5e23c64c7f1e92600b2253b43c772edd64463c1e6c9373cc4",
+      "exported_sha256": "56044609d7c46bf5e23c64c7f1e92600b2253b43c772edd64463c1e6c9373cc4"
+    },
+    "aster-cloud/frontend/tests/operations.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/operations.test.ts",
+      "upstream_sha256": "8a098d81d941c2c985369de9d54718a2d7c78494b53a326d01333292e9f5563c",
+      "exported_sha256": "8a098d81d941c2c985369de9d54718a2d7c78494b53a326d01333292e9f5563c"
+    },
+    "aster-cloud/frontend/tests/overlay-api.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/overlay-api.test.ts",
+      "upstream_sha256": "6aa8036711c031a4d1742842cfde3dd36f905b7ec5171b18039b2311d55a554b",
+      "exported_sha256": "6aa8036711c031a4d1742842cfde3dd36f905b7ec5171b18039b2311d55a554b"
+    },
+    "aster-cloud/frontend/tests/overlay-fixtures.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/overlay-fixtures.ts",
+      "upstream_sha256": "c24f8cc9c0f801361a2aa7fb1a407f998f229300cfbd043e66c5e969c6fdfee4",
+      "exported_sha256": "c24f8cc9c0f801361a2aa7fb1a407f998f229300cfbd043e66c5e969c6fdfee4"
+    },
+    "aster-cloud/frontend/tests/overlay-mutation.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/overlay-mutation.test.ts",
+      "upstream_sha256": "05726c34d8cb1988cdaca362cc1bab49281f857748f0bd99d204ad564497419a",
+      "exported_sha256": "05726c34d8cb1988cdaca362cc1bab49281f857748f0bd99d204ad564497419a"
+    },
+    "aster-cloud/frontend/tests/overlay-ui.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/overlay-ui.test.ts",
+      "upstream_sha256": "f00265b911abd6d8c1ee191688dbdc7b3d05ba3d8718599d98f882d1ddfeb0a4",
+      "exported_sha256": "f00265b911abd6d8c1ee191688dbdc7b3d05ba3d8718599d98f882d1ddfeb0a4"
+    },
+    "aster-cloud/frontend/tests/presentation.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/presentation.test.ts",
+      "upstream_sha256": "003b3c1114459de44ddf64097826404fe4a05d8917f0605cf492d19c0cb55174",
+      "exported_sha256": "003b3c1114459de44ddf64097826404fe4a05d8917f0605cf492d19c0cb55174"
+    },
+    "aster-cloud/frontend/tests/public-ingress-api.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-ingress-api.test.ts",
+      "upstream_sha256": "8faf520d8192f816c572020db17ccb1aa14127e44bf17835c93eb9da8cb085f7",
+      "exported_sha256": "8faf520d8192f816c572020db17ccb1aa14127e44bf17835c93eb9da8cb085f7"
+    },
+    "aster-cloud/frontend/tests/public-ingress-binding.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-ingress-binding.test.ts",
+      "upstream_sha256": "94d68c219ee4ad51278f80097fb4280f20415dbf7c55b48bb379f345dd575845",
+      "exported_sha256": "94d68c219ee4ad51278f80097fb4280f20415dbf7c55b48bb379f345dd575845"
+    },
+    "aster-cloud/frontend/tests/public-ingress-fixtures.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-ingress-fixtures.ts",
+      "upstream_sha256": "52ce1d3d940526b08bb3240b816638f17daae5b7524118a7e35f2cf95a1c15ca",
+      "exported_sha256": "52ce1d3d940526b08bb3240b816638f17daae5b7524118a7e35f2cf95a1c15ca"
+    },
+    "aster-cloud/frontend/tests/public-ingress-mutation.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-ingress-mutation.test.ts",
+      "upstream_sha256": "8429425bf09d63691b539b54ec6b3141f3ca28a6fb9ac4f8a0787600d1101cae",
+      "exported_sha256": "8429425bf09d63691b539b54ec6b3141f3ca28a6fb9ac4f8a0787600d1101cae"
+    },
+    "aster-cloud/frontend/tests/public-ingress-overlay.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-ingress-overlay.test.ts",
+      "upstream_sha256": "0e2c8b7e6bf791323370f594b6a2b3c6bbbf536c3174ec95dcda1f77ad1092b5",
+      "exported_sha256": "0e2c8b7e6bf791323370f594b6a2b3c6bbbf536c3174ec95dcda1f77ad1092b5"
+    },
+    "aster-cloud/frontend/tests/public-ingress-ui.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-ingress-ui.test.ts",
+      "upstream_sha256": "27d2f5980f20942c8d0c3d1d84baba954015ddd601ced114dd1174e310caeafb",
+      "exported_sha256": "27d2f5980f20942c8d0c3d1d84baba954015ddd601ced114dd1174e310caeafb"
+    },
+    "aster-cloud/frontend/tests/public-ip-api.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-ip-api.test.ts",
+      "upstream_sha256": "69f7b6a74941a39618ceb86d3890e33b3a1dbb63aa2da138767b360b051fb8c4",
+      "exported_sha256": "69f7b6a74941a39618ceb86d3890e33b3a1dbb63aa2da138767b360b051fb8c4"
+    },
+    "aster-cloud/frontend/tests/public-ip-fixtures.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-ip-fixtures.ts",
+      "upstream_sha256": "c3914cd674aa611a48d9b0817fc471d04c2d2b4c5ba933ceec431bb1a3223adc",
+      "exported_sha256": "c3914cd674aa611a48d9b0817fc471d04c2d2b4c5ba933ceec431bb1a3223adc"
+    },
+    "aster-cloud/frontend/tests/public-ip-mutation.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-ip-mutation.test.ts",
+      "upstream_sha256": "cddc9b9969ee573e1922fb1cc2b415b275e28667b897005b7ee3a8ec910b088a",
+      "exported_sha256": "cddc9b9969ee573e1922fb1cc2b415b275e28667b897005b7ee3a8ec910b088a"
+    },
+    "aster-cloud/frontend/tests/public-ip-resource-api.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-ip-resource-api.test.ts",
+      "upstream_sha256": "8446fd37f2d9ee79eb1c55b3570b08d4a3992a9cfda83f469c6de9fe508a2ecf",
+      "exported_sha256": "8446fd37f2d9ee79eb1c55b3570b08d4a3992a9cfda83f469c6de9fe508a2ecf"
+    },
+    "aster-cloud/frontend/tests/public-ip-resource-fixtures.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-ip-resource-fixtures.ts",
+      "upstream_sha256": "2f64e1549072a8257e10c202b64edb066dcfe9c38c84338ae3adbe4f0ed20380",
+      "exported_sha256": "2f64e1549072a8257e10c202b64edb066dcfe9c38c84338ae3adbe4f0ed20380"
+    },
+    "aster-cloud/frontend/tests/public-ip-resource-mutation.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-ip-resource-mutation.test.ts",
+      "upstream_sha256": "bff8bb27dcdcf99d85d7948006b6eb7651a040ccfbc575548d9a3860268ca23b",
+      "exported_sha256": "bff8bb27dcdcf99d85d7948006b6eb7651a040ccfbc575548d9a3860268ca23b"
+    },
+    "aster-cloud/frontend/tests/public-ip-resource-ui.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-ip-resource-ui.test.ts",
+      "upstream_sha256": "7e287eb5fa24fe090f43f63eeeb9661600cb75b2a3751280a165850701bbc78b",
+      "exported_sha256": "7e287eb5fa24fe090f43f63eeeb9661600cb75b2a3751280a165850701bbc78b"
+    },
+    "aster-cloud/frontend/tests/public-ip-ui.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-ip-ui.test.ts",
+      "upstream_sha256": "d57f0791dc4f09b9d55af1fb90d6f8988226afc45520c5ee04dce3407e556be6",
+      "exported_sha256": "d57f0791dc4f09b9d55af1fb90d6f8988226afc45520c5ee04dce3407e556be6"
+    },
+    "aster-cloud/frontend/tests/public-mutation-storage.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/public-mutation-storage.test.ts",
+      "upstream_sha256": "4d5547bcf8f04164058a1fcd130d4b1c12a92e7bb8f15af1bc4b981eea3ddc50",
+      "exported_sha256": "4d5547bcf8f04164058a1fcd130d4b1c12a92e7bb8f15af1bc4b981eea3ddc50"
+    },
+    "aster-cloud/frontend/tests/shell-responsive.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/shell-responsive.test.ts",
+      "upstream_sha256": "43b38a8cf33ac206f3141a25183ff3df80e65c9ac151dfb17d8e876d25789cb6",
+      "exported_sha256": "43b38a8cf33ac206f3141a25183ff3df80e65c9ac151dfb17d8e876d25789cb6"
+    },
+    "aster-cloud/frontend/tests/source-retirement.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/source-retirement.test.ts",
+      "upstream_sha256": "ad9db5198702da9c0b2d162ab3fb459997f75811fd6a5b668908e5b05b31c9f6",
+      "exported_sha256": "ad9db5198702da9c0b2d162ab3fb459997f75811fd6a5b668908e5b05b31c9f6"
+    },
+    "aster-cloud/frontend/tests/state.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/state.test.ts",
+      "upstream_sha256": "a6c78a2ed487934cfa40aee635fc22d57bd34c8d15820a2831d0864eef5843ee",
+      "exported_sha256": "a6c78a2ed487934cfa40aee635fc22d57bd34c8d15820a2831d0864eef5843ee"
+    },
+    "aster-cloud/frontend/tests/users-pagination.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/users-pagination.test.ts",
+      "upstream_sha256": "4bf92bdc4a730b5775fead714b8b5fb4a4d8326022b2f11882cb8db4dd1f2a61",
+      "exported_sha256": "4bf92bdc4a730b5775fead714b8b5fb4a4d8326022b2f11882cb8db4dd1f2a61"
+    },
+    "aster-cloud/frontend/tests/workbench-header.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/workbench-header.test.ts",
+      "upstream_sha256": "c130dabc9b6af767550dd93dbd77f687e291573881ae898d3071343249f2e27b",
+      "exported_sha256": "c130dabc9b6af767550dd93dbd77f687e291573881ae898d3071343249f2e27b"
+    },
+    "aster-cloud/frontend/tests/workbench-surfaces.test.ts": {
+      "upstream_path": "aster-cloud/frontend/tests/workbench-surfaces.test.ts",
+      "upstream_sha256": "4f0afaaa1c0f1067b528ee114da2d78c36eb454830ecc4c0773c0f1706ce3745",
+      "exported_sha256": "4f0afaaa1c0f1067b528ee114da2d78c36eb454830ecc4c0773c0f1706ce3745"
+    },
+    "aster-cloud/frontend/tsconfig.json": {
+      "upstream_path": "aster-cloud/frontend/tsconfig.json",
+      "upstream_sha256": "a7c1658f6a9c6813b5c298cfb19dbc4309573c1c9d9ba17c8364902ace587e2e",
+      "exported_sha256": "a7c1658f6a9c6813b5c298cfb19dbc4309573c1c9d9ba17c8364902ace587e2e"
+    },
+    "aster-cloud/frontend/vite.config.ts": {
+      "upstream_path": "aster-cloud/frontend/vite.config.ts",
+      "upstream_sha256": "6c99ad0c342b893096f36f886da7a56891274c722c2aa5de28be23746be12fef",
+      "exported_sha256": "6c99ad0c342b893096f36f886da7a56891274c722c2aa5de28be23746be12fef"
+    },
+    "aster-cloud/frontend/vitest.config.ts": {
+      "upstream_path": "aster-cloud/frontend/vitest.config.ts",
+      "upstream_sha256": "e6356ef12688fe9c7359583fe7aa5527167eed13831883ec6dcdc64c7be433d2",
+      "exported_sha256": "e6356ef12688fe9c7359583fe7aa5527167eed13831883ec6dcdc64c7be433d2"
+    },
+    "aster-cloud/go.mod": {
+      "upstream_path": "aster-cloud/go.mod",
+      "upstream_sha256": "2959576cb2342f6b5107f983d868bb26397b9c40f06542790f08132f75b085f7",
+      "exported_sha256": "7377cbe4df956bba7ffa7cff01b4fdbbbc394313080eb5946f426ec5862e4f59",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/go.sum": {
+      "upstream_path": "aster-cloud/go.sum",
+      "upstream_sha256": "499fe3326cda789be314963ebe34c70ebc3abbdf5cc81969380df31079769361",
+      "exported_sha256": "499fe3326cda789be314963ebe34c70ebc3abbdf5cc81969380df31079769361"
+    },
+    "aster-cloud/internal/control/admin_create.go": {
+      "upstream_path": "aster-cloud/internal/control/admin_create.go",
+      "upstream_sha256": "e82ad9fc51f8d6df944d18732d6104ffcc645095d3b05aa50d486f92391d116e",
+      "exported_sha256": "e82ad9fc51f8d6df944d18732d6104ffcc645095d3b05aa50d486f92391d116e"
+    },
+    "aster-cloud/internal/control/audit_migration.go": {
+      "upstream_path": "aster-cloud/internal/control/audit_migration.go",
+      "upstream_sha256": "97558a8223dce4ae2cafcc67adeadd8c70afa19c902b96da49f8b93e32523487",
+      "exported_sha256": "97558a8223dce4ae2cafcc67adeadd8c70afa19c902b96da49f8b93e32523487"
+    },
+    "aster-cloud/internal/control/audit_migration_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/audit_migration_mysql_test.go",
+      "upstream_sha256": "d2ad560489962106c102a817f51df9fe17a2f22d5b9aeeacb6507c70a6767477",
+      "exported_sha256": "d2ad560489962106c102a817f51df9fe17a2f22d5b9aeeacb6507c70a6767477"
+    },
+    "aster-cloud/internal/control/audit_query.go": {
+      "upstream_path": "aster-cloud/internal/control/audit_query.go",
+      "upstream_sha256": "d39d39abf423338a1fda2eab8f2476d52ae06cc7b85a5497171cea30addd0d41",
+      "exported_sha256": "d39d39abf423338a1fda2eab8f2476d52ae06cc7b85a5497171cea30addd0d41"
+    },
+    "aster-cloud/internal/control/audit_query_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/audit_query_mysql_test.go",
+      "upstream_sha256": "6dcc07ee081d08fe6ece32799df1f6290d93493ea78469782411b8577a7b102e",
+      "exported_sha256": "6dcc07ee081d08fe6ece32799df1f6290d93493ea78469782411b8577a7b102e"
+    },
+    "aster-cloud/internal/control/audit_query_test.go": {
+      "upstream_path": "aster-cloud/internal/control/audit_query_test.go",
+      "upstream_sha256": "2bd98721bc55fb56dcdcaf26ecaf006bb4969c417709295c3ee24f70abae04a1",
+      "exported_sha256": "2bd98721bc55fb56dcdcaf26ecaf006bb4969c417709295c3ee24f70abae04a1"
+    },
+    "aster-cloud/internal/control/claim_test.go": {
+      "upstream_path": "aster-cloud/internal/control/claim_test.go",
+      "upstream_sha256": "313e5c1b42e5925e42e60ffde12fc3f58619488b7ac0b2d8b2badeda670573b0",
+      "exported_sha256": "313e5c1b42e5925e42e60ffde12fc3f58619488b7ac0b2d8b2badeda670573b0"
+    },
+    "aster-cloud/internal/control/config.go": {
+      "upstream_path": "aster-cloud/internal/control/config.go",
+      "upstream_sha256": "3942e60aaef16f120c035295b66d4eb45f94fe5a7d9b152fbda95052af247e8c",
+      "exported_sha256": "3942e60aaef16f120c035295b66d4eb45f94fe5a7d9b152fbda95052af247e8c"
+    },
+    "aster-cloud/internal/control/console.go": {
+      "upstream_path": "aster-cloud/internal/control/console.go",
+      "upstream_sha256": "3cfe59a003545582c34266b2c4d62c054b790085267dd71f27143da196b0d08a",
+      "exported_sha256": "3cfe59a003545582c34266b2c4d62c054b790085267dd71f27143da196b0d08a"
+    },
+    "aster-cloud/internal/control/console_http_test.go": {
+      "upstream_path": "aster-cloud/internal/control/console_http_test.go",
+      "upstream_sha256": "07144a14d0b28b222f50f339b5086a0b2e70dfeccecd60c12b3ea5fee735d2d2",
+      "exported_sha256": "07144a14d0b28b222f50f339b5086a0b2e70dfeccecd60c12b3ea5fee735d2d2"
+    },
+    "aster-cloud/internal/control/control_test.go": {
+      "upstream_path": "aster-cloud/internal/control/control_test.go",
+      "upstream_sha256": "833945f48c0f2cf2628e0cc879105d22dcd663d4d5da7e1b89730cdc0ebb9ecb",
+      "exported_sha256": "833945f48c0f2cf2628e0cc879105d22dcd663d4d5da7e1b89730cdc0ebb9ecb"
+    },
+    "aster-cloud/internal/control/diagnostics.go": {
+      "upstream_path": "aster-cloud/internal/control/diagnostics.go",
+      "upstream_sha256": "2d402937db938bd80e4bd27eb749d109f88ad99a5bb82cc9c1a9317853af63a4",
+      "exported_sha256": "2d402937db938bd80e4bd27eb749d109f88ad99a5bb82cc9c1a9317853af63a4"
+    },
+    "aster-cloud/internal/control/diagnostics_test.go": {
+      "upstream_path": "aster-cloud/internal/control/diagnostics_test.go",
+      "upstream_sha256": "9bedecc82ba45ec58a5a0f6aba13f5d359978fe8dd6c732b17e022930e642316",
+      "exported_sha256": "9bedecc82ba45ec58a5a0f6aba13f5d359978fe8dd6c732b17e022930e642316"
+    },
+    "aster-cloud/internal/control/http.go": {
+      "upstream_path": "aster-cloud/internal/control/http.go",
+      "upstream_sha256": "c48eb8f4ae751f173c175cd6dff699376f8caf1c766073bc3a0fa509d891e80d",
+      "exported_sha256": "c48eb8f4ae751f173c175cd6dff699376f8caf1c766073bc3a0fa509d891e80d"
+    },
+    "aster-cloud/internal/control/identity_audit.go": {
+      "upstream_path": "aster-cloud/internal/control/identity_audit.go",
+      "upstream_sha256": "aeef220ec1a0f023f4beea464262bd3dee5702a09d7760e81e40d703dfcbede7",
+      "exported_sha256": "aeef220ec1a0f023f4beea464262bd3dee5702a09d7760e81e40d703dfcbede7"
+    },
+    "aster-cloud/internal/control/identity_console_http_test.go": {
+      "upstream_path": "aster-cloud/internal/control/identity_console_http_test.go",
+      "upstream_sha256": "b17745398a1d852d416b357aea5aa2f7cdbe9936684df38c2b60ae4ace22f765",
+      "exported_sha256": "b17745398a1d852d416b357aea5aa2f7cdbe9936684df38c2b60ae4ace22f765"
+    },
+    "aster-cloud/internal/control/identity_operations_migration_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/identity_operations_migration_mysql_test.go",
+      "upstream_sha256": "934baa5110a054b770e6f206e8f646b7430114dadb93d5812b2575a702e7b540",
+      "exported_sha256": "934baa5110a054b770e6f206e8f646b7430114dadb93d5812b2575a702e7b540"
+    },
+    "aster-cloud/internal/control/json.go": {
+      "upstream_path": "aster-cloud/internal/control/json.go",
+      "upstream_sha256": "05e45cd3a048969d1c597dc413685c3539413c0c7439108dbd6e58207e331f23",
+      "exported_sha256": "05e45cd3a048969d1c597dc413685c3539413c0c7439108dbd6e58207e331f23"
+    },
+    "aster-cloud/internal/control/metrics.go": {
+      "upstream_path": "aster-cloud/internal/control/metrics.go",
+      "upstream_sha256": "ae3a62fa4c931df520d36ace7b3a4f4eac0c2d4461f7156b93299d39f0654db5",
+      "exported_sha256": "ae3a62fa4c931df520d36ace7b3a4f4eac0c2d4461f7156b93299d39f0654db5"
+    },
+    "aster-cloud/internal/control/metrics_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/metrics_mysql_test.go",
+      "upstream_sha256": "32728ca3d31f62bb013965d4f5243addeedcedf5f72fae9b46f4df9828cee702",
+      "exported_sha256": "32728ca3d31f62bb013965d4f5243addeedcedf5f72fae9b46f4df9828cee702"
+    },
+    "aster-cloud/internal/control/metrics_test.go": {
+      "upstream_path": "aster-cloud/internal/control/metrics_test.go",
+      "upstream_sha256": "cca7ab2a963d50b15f9a49cf432fa04b06b20fb425b13c42113ff0912c4e960e",
+      "exported_sha256": "cca7ab2a963d50b15f9a49cf432fa04b06b20fb425b13c42113ff0912c4e960e"
+    },
+    "aster-cloud/internal/control/migration_transfer.go": {
+      "upstream_path": "aster-cloud/internal/control/migration_transfer.go",
+      "upstream_sha256": "4af7ea2ff24b2b5f3eb177025349b93cdce35245b9b5057a83b1cfd525702512",
+      "exported_sha256": "4af7ea2ff24b2b5f3eb177025349b93cdce35245b9b5057a83b1cfd525702512"
+    },
+    "aster-cloud/internal/control/migration_transfer_test.go": {
+      "upstream_path": "aster-cloud/internal/control/migration_transfer_test.go",
+      "upstream_sha256": "cdcc5329134521201d6ca0beb644d9c03e9925969ce9ce245da1545b5b4fa041",
+      "exported_sha256": "cdcc5329134521201d6ca0beb644d9c03e9925969ce9ce245da1545b5b4fa041"
+    },
+    "aster-cloud/internal/control/mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/mysql_test.go",
+      "upstream_sha256": "512473b6110c9a603b1e75a9fa07b25e37fb7a79ae57f3eb6f553e179fad55af",
+      "exported_sha256": "512473b6110c9a603b1e75a9fa07b25e37fb7a79ae57f3eb6f553e179fad55af"
+    },
+    "aster-cloud/internal/control/network_console_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/network_console_mysql_test.go",
+      "upstream_sha256": "146e273617f8bc97f909425d0ac5c36094f12d893ea85fd61a676e4b71c19064",
+      "exported_sha256": "146e273617f8bc97f909425d0ac5c36094f12d893ea85fd61a676e4b71c19064"
+    },
+    "aster-cloud/internal/control/network_tasks.go": {
+      "upstream_path": "aster-cloud/internal/control/network_tasks.go",
+      "upstream_sha256": "0058a3ad841fa2581680d0b03abdcb4dd11c3c0c3e8b9bc7f48b5393beb4d732",
+      "exported_sha256": "0058a3ad841fa2581680d0b03abdcb4dd11c3c0c3e8b9bc7f48b5393beb4d732"
+    },
+    "aster-cloud/internal/control/network_tasks_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/network_tasks_mysql_test.go",
+      "upstream_sha256": "8696acf4dc8f2d241ff13891a20750bed70f5b609b588f7dca4be4a795c2e12d",
+      "exported_sha256": "8696acf4dc8f2d241ff13891a20750bed70f5b609b588f7dca4be4a795c2e12d"
+    },
+    "aster-cloud/internal/control/network_tasks_test.go": {
+      "upstream_path": "aster-cloud/internal/control/network_tasks_test.go",
+      "upstream_sha256": "89b3777b211633ecf55f2e674889f87f1db7c63c26611b431499586f7a187711",
+      "exported_sha256": "89b3777b211633ecf55f2e674889f87f1db7c63c26611b431499586f7a187711"
+    },
+    "aster-cloud/internal/control/network_worker_test.go": {
+      "upstream_path": "aster-cloud/internal/control/network_worker_test.go",
+      "upstream_sha256": "ee957e9fa5a167c0ad5320b99e76599b9765591d7f03f83f8edaf087278f2e49",
+      "exported_sha256": "ee957e9fa5a167c0ad5320b99e76599b9765591d7f03f83f8edaf087278f2e49"
+    },
+    "aster-cloud/internal/control/node_client.go": {
+      "upstream_path": "aster-cloud/internal/control/node_client.go",
+      "upstream_sha256": "44488a491cbc99e03cea6a6fdfef7d6825f4dfcbd58391f4a5d277b9da3347a5",
+      "exported_sha256": "44488a491cbc99e03cea6a6fdfef7d6825f4dfcbd58391f4a5d277b9da3347a5"
+    },
+    "aster-cloud/internal/control/observation.go": {
+      "upstream_path": "aster-cloud/internal/control/observation.go",
+      "upstream_sha256": "2ce97003b362c12e015d52a561e731e6f5738fe5630244b1b7ab6d777ccfa39f",
+      "exported_sha256": "2ce97003b362c12e015d52a561e731e6f5738fe5630244b1b7ab6d777ccfa39f"
+    },
+    "aster-cloud/internal/control/observation_test.go": {
+      "upstream_path": "aster-cloud/internal/control/observation_test.go",
+      "upstream_sha256": "14cd202e4c66cae646da3307526ede9174a8b9d891e4fe54ea302a1c703a265d",
+      "exported_sha256": "14cd202e4c66cae646da3307526ede9174a8b9d891e4fe54ea302a1c703a265d"
+    },
+    "aster-cloud/internal/control/operation_audit.go": {
+      "upstream_path": "aster-cloud/internal/control/operation_audit.go",
+      "upstream_sha256": "dc564b2992f1a731721a9f80cd19cb590bbc675b103967be9c827e7cfaa4aafd",
+      "exported_sha256": "dc564b2992f1a731721a9f80cd19cb590bbc675b103967be9c827e7cfaa4aafd"
+    },
+    "aster-cloud/internal/control/operation_runner.go": {
+      "upstream_path": "aster-cloud/internal/control/operation_runner.go",
+      "upstream_sha256": "cbc12ab52fff2ef44d0683131b452279dc77d2f121ce8f77fe8be0f0301a8393",
+      "exported_sha256": "cbc12ab52fff2ef44d0683131b452279dc77d2f121ce8f77fe8be0f0301a8393"
+    },
+    "aster-cloud/internal/control/operation_runner_test.go": {
+      "upstream_path": "aster-cloud/internal/control/operation_runner_test.go",
+      "upstream_sha256": "0d21a16f218bcb24ccdd0f98dcc2b275a4ae6a6218bfbcb3a3c71785a9fc2005",
+      "exported_sha256": "0d21a16f218bcb24ccdd0f98dcc2b275a4ae6a6218bfbcb3a3c71785a9fc2005"
+    },
+    "aster-cloud/internal/control/operation_worker.go": {
+      "upstream_path": "aster-cloud/internal/control/operation_worker.go",
+      "upstream_sha256": "9ef840e0dc77542c685b577df1d046fb5ed96a1e7ac0006899258681845ca2ea",
+      "exported_sha256": "9ef840e0dc77542c685b577df1d046fb5ed96a1e7ac0006899258681845ca2ea"
+    },
+    "aster-cloud/internal/control/operations.go": {
+      "upstream_path": "aster-cloud/internal/control/operations.go",
+      "upstream_sha256": "e9a657edc2c60739fdba593e85de959d3b0bfcfe89f48c1a2efa58a76520d441",
+      "exported_sha256": "e9a657edc2c60739fdba593e85de959d3b0bfcfe89f48c1a2efa58a76520d441"
+    },
+    "aster-cloud/internal/control/operations_test.go": {
+      "upstream_path": "aster-cloud/internal/control/operations_test.go",
+      "upstream_sha256": "72ec8fdf8ba51191e635dc8f8c96bfa31c12baa70371a5a7d9234b62beff3d78",
+      "exported_sha256": "72ec8fdf8ba51191e635dc8f8c96bfa31c12baa70371a5a7d9234b62beff3d78"
+    },
+    "aster-cloud/internal/control/overlay_admission.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_admission.go",
+      "upstream_sha256": "31996b74d220933379b13a4430ed409efa5c86d4770230be11cb7d88ee4c6eb4",
+      "exported_sha256": "31996b74d220933379b13a4430ed409efa5c86d4770230be11cb7d88ee4c6eb4"
+    },
+    "aster-cloud/internal/control/overlay_client_test.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_client_test.go",
+      "upstream_sha256": "ad01f9b0b50b1075c8c82eb62746a1cca78b781c6cede6ea9959def78382bcc9",
+      "exported_sha256": "ad01f9b0b50b1075c8c82eb62746a1cca78b781c6cede6ea9959def78382bcc9"
+    },
+    "aster-cloud/internal/control/overlay_console.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_console.go",
+      "upstream_sha256": "0555a2b048f3fba16d7e872269c9777abd9f9ebd51f10ebd30df07e4e79d24b8",
+      "exported_sha256": "0555a2b048f3fba16d7e872269c9777abd9f9ebd51f10ebd30df07e4e79d24b8"
+    },
+    "aster-cloud/internal/control/overlay_input.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_input.go",
+      "upstream_sha256": "f467936ce01b6e43ef09a5931c01ecd4c55d621b234e4d52f6ce71e1ed3ba6f8",
+      "exported_sha256": "f467936ce01b6e43ef09a5931c01ecd4c55d621b234e4d52f6ce71e1ed3ba6f8"
+    },
+    "aster-cloud/internal/control/overlay_internet_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_internet_mysql_test.go",
+      "upstream_sha256": "4f732c861af3fed64ed39a977364de0878139a65eb31a66c32aed3eee98042f5",
+      "exported_sha256": "4f732c861af3fed64ed39a977364de0878139a65eb31a66c32aed3eee98042f5"
+    },
+    "aster-cloud/internal/control/overlay_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_mysql_test.go",
+      "upstream_sha256": "f4af24b9cdd008f859e790dd45aca6067626beba24deaf8cf9e90de9e3264970",
+      "exported_sha256": "f4af24b9cdd008f859e790dd45aca6067626beba24deaf8cf9e90de9e3264970"
+    },
+    "aster-cloud/internal/control/overlay_options.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_options.go",
+      "upstream_sha256": "28eab0c3829039dc595b78455af03cbba06d0b4e004296c9274f8abef30ab327",
+      "exported_sha256": "28eab0c3829039dc595b78455af03cbba06d0b4e004296c9274f8abef30ab327"
+    },
+    "aster-cloud/internal/control/overlay_policy.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_policy.go",
+      "upstream_sha256": "6fa9ae52061158853a1cc504f861af33b11b14bd91358d0548e432ccd367ba45",
+      "exported_sha256": "6fa9ae52061158853a1cc504f861af33b11b14bd91358d0548e432ccd367ba45"
+    },
+    "aster-cloud/internal/control/overlay_policy_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_policy_mysql_test.go",
+      "upstream_sha256": "7903d6e27acabf6d07705d6f4e8c24b07d15d554934a696c2f0e5d4259f597f4",
+      "exported_sha256": "7903d6e27acabf6d07705d6f4e8c24b07d15d554934a696c2f0e5d4259f597f4"
+    },
+    "aster-cloud/internal/control/overlay_policy_test.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_policy_test.go",
+      "upstream_sha256": "163679fae05ff63d853bda7c8f76bc58f67c884c3546c997b5b1173f7d1b1464",
+      "exported_sha256": "163679fae05ff63d853bda7c8f76bc58f67c884c3546c997b5b1173f7d1b1464"
+    },
+    "aster-cloud/internal/control/overlay_recovery.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_recovery.go",
+      "upstream_sha256": "b48182b50acb9085922722275746f916fa20714e01ef1a5005f11f798a675e17",
+      "exported_sha256": "b48182b50acb9085922722275746f916fa20714e01ef1a5005f11f798a675e17"
+    },
+    "aster-cloud/internal/control/overlay_runner.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_runner.go",
+      "upstream_sha256": "7db406232db0c1c6019eb57b9e02b4804c5daaaadc301e643713799be9552bd0",
+      "exported_sha256": "7db406232db0c1c6019eb57b9e02b4804c5daaaadc301e643713799be9552bd0"
+    },
+    "aster-cloud/internal/control/overlay_store.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_store.go",
+      "upstream_sha256": "c62e4b9d658df78fbe98609f6a947753d59d725db1dfb66e530e5e49efec8792",
+      "exported_sha256": "c62e4b9d658df78fbe98609f6a947753d59d725db1dfb66e530e5e49efec8792"
+    },
+    "aster-cloud/internal/control/overlay_test.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_test.go",
+      "upstream_sha256": "87e34e46ddfeb4801cbf76c0e5dad752e870aaac9f1d22c050b877db1c458aa7",
+      "exported_sha256": "87e34e46ddfeb4801cbf76c0e5dad752e870aaac9f1d22c050b877db1c458aa7"
+    },
+    "aster-cloud/internal/control/overlay_worker.go": {
+      "upstream_path": "aster-cloud/internal/control/overlay_worker.go",
+      "upstream_sha256": "dc8b18afc2b3760da7bbebe603392dce2a394291a8544dda011757fbbeda9386",
+      "exported_sha256": "dc8b18afc2b3760da7bbebe603392dce2a394291a8544dda011757fbbeda9386"
+    },
+    "aster-cloud/internal/control/preset_views.go": {
+      "upstream_path": "aster-cloud/internal/control/preset_views.go",
+      "upstream_sha256": "2b5e0db6c2ea5839225187ba02ac57a5babf90807fd3788d673b2092f78cfbb3",
+      "exported_sha256": "2b5e0db6c2ea5839225187ba02ac57a5babf90807fd3788d673b2092f78cfbb3"
+    },
+    "aster-cloud/internal/control/public_ingress_capability_test.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ingress_capability_test.go",
+      "upstream_sha256": "6300546aead7555bc0d38e012f7cdb675ba66866816885f315d0d846e42a6033",
+      "exported_sha256": "6300546aead7555bc0d38e012f7cdb675ba66866816885f315d0d846e42a6033"
+    },
+    "aster-cloud/internal/control/public_ingress_console.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ingress_console.go",
+      "upstream_sha256": "3407524358d4626488a92ee7d1660ed18794cafd4eec57734c8ae27539a047f1",
+      "exported_sha256": "3407524358d4626488a92ee7d1660ed18794cafd4eec57734c8ae27539a047f1"
+    },
+    "aster-cloud/internal/control/public_ingress_epoch.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ingress_epoch.go",
+      "upstream_sha256": "6e4f05441a5117f7489084ac8845aebe9ffea87dcb9f54c723a24f94516b815b",
+      "exported_sha256": "6e4f05441a5117f7489084ac8845aebe9ffea87dcb9f54c723a24f94516b815b"
+    },
+    "aster-cloud/internal/control/public_ingress_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ingress_mysql_test.go",
+      "upstream_sha256": "6d173ebc1f36fd13cd8dd46c1a301729bec45c53a81a1773d514119d7fa7f4ef",
+      "exported_sha256": "6d173ebc1f36fd13cd8dd46c1a301729bec45c53a81a1773d514119d7fa7f4ef"
+    },
+    "aster-cloud/internal/control/public_ingress_query.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ingress_query.go",
+      "upstream_sha256": "0aff64eb6576ae67e8dd918b1835e00ec601f061a79ef43b878662cc29c50e93",
+      "exported_sha256": "0aff64eb6576ae67e8dd918b1835e00ec601f061a79ef43b878662cc29c50e93"
+    },
+    "aster-cloud/internal/control/public_ingress_store.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ingress_store.go",
+      "upstream_sha256": "26cb93a87e9f1914a32f8c6ec669daf9d37bd9b0a49a3d3e209055f4a19852c5",
+      "exported_sha256": "26cb93a87e9f1914a32f8c6ec669daf9d37bd9b0a49a3d3e209055f4a19852c5"
+    },
+    "aster-cloud/internal/control/public_ingress_test.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ingress_test.go",
+      "upstream_sha256": "e7d0cbeee209707ea442ad9c8a3204325cbd6bce9daf3312e131cb5238ebbb91",
+      "exported_sha256": "e7d0cbeee209707ea442ad9c8a3204325cbd6bce9daf3312e131cb5238ebbb91"
+    },
+    "aster-cloud/internal/control/public_ingress_types.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ingress_types.go",
+      "upstream_sha256": "008f7e9c3d3c8edcf1eb1a994bdce12f93cf51781ab5200a1cf69d99d5b57b3a",
+      "exported_sha256": "008f7e9c3d3c8edcf1eb1a994bdce12f93cf51781ab5200a1cf69d99d5b57b3a"
+    },
+    "aster-cloud/internal/control/public_ip_admission_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_admission_mysql_test.go",
+      "upstream_sha256": "7117463c57678a8886560d4e526fc4d422dec90887a3a8e25a62c447fd7611e3",
+      "exported_sha256": "7117463c57678a8886560d4e526fc4d422dec90887a3a8e25a62c447fd7611e3"
+    },
+    "aster-cloud/internal/control/public_ip_binding_dispatch_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_binding_dispatch_mysql_test.go",
+      "upstream_sha256": "ebcba5ee56736ff0c13ede12ec22d2592615141c295227b976a9587d5de62a45",
+      "exported_sha256": "ebcba5ee56736ff0c13ede12ec22d2592615141c295227b976a9587d5de62a45"
+    },
+    "aster-cloud/internal/control/public_ip_binding_dispatch_test.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_binding_dispatch_test.go",
+      "upstream_sha256": "8a8e9b75078dab110902072f9df6539db3559eaeacf63776b35c3cfc9e1b20b2",
+      "exported_sha256": "8a8e9b75078dab110902072f9df6539db3559eaeacf63776b35c3cfc9e1b20b2"
+    },
+    "aster-cloud/internal/control/public_ip_bindings.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_bindings.go",
+      "upstream_sha256": "33db5f3aa6d7c03d62e028fe5df9f0bfdc584eff05509cfe60fbd5648d9d84bd",
+      "exported_sha256": "33db5f3aa6d7c03d62e028fe5df9f0bfdc584eff05509cfe60fbd5648d9d84bd"
+    },
+    "aster-cloud/internal/control/public_ip_budget.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_budget.go",
+      "upstream_sha256": "db89f26d1e5a825da8715a7ed9d30c5d21e21e7495db018fe9e9e9da210d756e",
+      "exported_sha256": "db89f26d1e5a825da8715a7ed9d30c5d21e21e7495db018fe9e9e9da210d756e"
+    },
+    "aster-cloud/internal/control/public_ip_console.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_console.go",
+      "upstream_sha256": "75c5f766b0db4bed3371d0722040f559d84cb9ecd8735219fa2d6dd080118aac",
+      "exported_sha256": "75c5f766b0db4bed3371d0722040f559d84cb9ecd8735219fa2d6dd080118aac"
+    },
+    "aster-cloud/internal/control/public_ip_direct_adopt.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_direct_adopt.go",
+      "upstream_sha256": "44e0e7d41f09c0f9b034cdf693e37ca84225035f503adab2df83a68e5a0400c7",
+      "exported_sha256": "44e0e7d41f09c0f9b034cdf693e37ca84225035f503adab2df83a68e5a0400c7"
+    },
+    "aster-cloud/internal/control/public_ip_direct_migration.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_direct_migration.go",
+      "upstream_sha256": "2eb61453316bc7e58aa2ea3b161292a1dc6bd98b897364c411ccad06e6e43413",
+      "exported_sha256": "2eb61453316bc7e58aa2ea3b161292a1dc6bd98b897364c411ccad06e6e43413"
+    },
+    "aster-cloud/internal/control/public_ip_direct_retire.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_direct_retire.go",
+      "upstream_sha256": "5e3b05fc7a6928a32f19bd61e2ddc6416949f090008752be30dec43d71e464be",
+      "exported_sha256": "5e3b05fc7a6928a32f19bd61e2ddc6416949f090008752be30dec43d71e464be"
+    },
+    "aster-cloud/internal/control/public_ip_direct_tasks.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_direct_tasks.go",
+      "upstream_sha256": "da75d77ad84d22c7ba2ee49004d0e764407fc964acc6b202ced37874aca2f53b",
+      "exported_sha256": "da75d77ad84d22c7ba2ee49004d0e764407fc964acc6b202ced37874aca2f53b"
+    },
+    "aster-cloud/internal/control/public_ip_evidence.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_evidence.go",
+      "upstream_sha256": "e662b6b1ac35e3fb36c5c6f4dffd52c3267060b91c7684d583b78482f61d0875",
+      "exported_sha256": "e662b6b1ac35e3fb36c5c6f4dffd52c3267060b91c7684d583b78482f61d0875"
+    },
+    "aster-cloud/internal/control/public_ip_json.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_json.go",
+      "upstream_sha256": "cddf373d0b9ab8995444d98ca4943854cf737cf2fefdc106d9f2c7a14dd8b332",
+      "exported_sha256": "cddf373d0b9ab8995444d98ca4943854cf737cf2fefdc106d9f2c7a14dd8b332"
+    },
+    "aster-cloud/internal/control/public_ip_migration_targets.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_migration_targets.go",
+      "upstream_sha256": "095786ad2bbcfa21e2e3877ac67cca193bd922d3b8c5688d2e74626a7db8b2ff",
+      "exported_sha256": "095786ad2bbcfa21e2e3877ac67cca193bd922d3b8c5688d2e74626a7db8b2ff"
+    },
+    "aster-cloud/internal/control/public_ip_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_mysql_test.go",
+      "upstream_sha256": "5a78b4dda7a02b8601918c762a8fa6a7fe8eb1d0deeb2ae14b009f9f01657e43",
+      "exported_sha256": "5a78b4dda7a02b8601918c762a8fa6a7fe8eb1d0deeb2ae14b009f9f01657e43"
+    },
+    "aster-cloud/internal/control/public_ip_query.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_query.go",
+      "upstream_sha256": "f5cc3851bc991eef9d610920e44eaed048b773050183d04e55a7a6269d1fb9cb",
+      "exported_sha256": "f5cc3851bc991eef9d610920e44eaed048b773050183d04e55a7a6269d1fb9cb"
+    },
+    "aster-cloud/internal/control/public_ip_resource_approval.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_resource_approval.go",
+      "upstream_sha256": "cf2964e1b1809641d93ef29742874fb8024e90fde680529dc5c9b577b5cd9d07",
+      "exported_sha256": "cf2964e1b1809641d93ef29742874fb8024e90fde680529dc5c9b577b5cd9d07"
+    },
+    "aster-cloud/internal/control/public_ip_resource_bind.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_resource_bind.go",
+      "upstream_sha256": "ef883f90bcce47de567f5fa4fd9828bdcd60088b1d36a6a5646c932bd8cc4a87",
+      "exported_sha256": "ef883f90bcce47de567f5fa4fd9828bdcd60088b1d36a6a5646c932bd8cc4a87"
+    },
+    "aster-cloud/internal/control/public_ip_resource_console.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_resource_console.go",
+      "upstream_sha256": "e10f864f098a5145d2c51d01ee6874dabcb90d1c072b6b0ac3f45687c6f46363",
+      "exported_sha256": "e10f864f098a5145d2c51d01ee6874dabcb90d1c072b6b0ac3f45687c6f46363"
+    },
+    "aster-cloud/internal/control/public_ip_resource_floating.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_resource_floating.go",
+      "upstream_sha256": "2557e422744fc26133e7ff8bfc73e1a687258e20d5d57797ce62f6a034749871",
+      "exported_sha256": "2557e422744fc26133e7ff8bfc73e1a687258e20d5d57797ce62f6a034749871"
+    },
+    "aster-cloud/internal/control/public_ip_resource_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_resource_mysql_test.go",
+      "upstream_sha256": "3f999cde4aa6823dcd70f5ca8f56b0f7d63e69da06ecb335b500513bd3c32c8b",
+      "exported_sha256": "3f999cde4aa6823dcd70f5ca8f56b0f7d63e69da06ecb335b500513bd3c32c8b"
+    },
+    "aster-cloud/internal/control/public_ip_resource_options.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_resource_options.go",
+      "upstream_sha256": "5e5b677409880fd27b9b68645eddf5d56e71a3a43fd63babf022ac7658b5e7d6",
+      "exported_sha256": "5e5b677409880fd27b9b68645eddf5d56e71a3a43fd63babf022ac7658b5e7d6"
+    },
+    "aster-cloud/internal/control/public_ip_resource_query.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_resource_query.go",
+      "upstream_sha256": "eefa896ff02db5420db55ee89c4285382c997e55ec7856887f427d179470dd3c",
+      "exported_sha256": "eefa896ff02db5420db55ee89c4285382c997e55ec7856887f427d179470dd3c"
+    },
+    "aster-cloud/internal/control/public_ip_resource_recovery.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_resource_recovery.go",
+      "upstream_sha256": "fbaf1c9b34e40f8d49ca850140b15ae8e4a89ef6e7bdac70870a622bfcc557ae",
+      "exported_sha256": "fbaf1c9b34e40f8d49ca850140b15ae8e4a89ef6e7bdac70870a622bfcc557ae"
+    },
+    "aster-cloud/internal/control/public_ip_resource_recovery_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_resource_recovery_mysql_test.go",
+      "upstream_sha256": "8775c50305ac45cb8b4412959784afeb2503b4b32d0a8839b8a49a1d61ebb93d",
+      "exported_sha256": "8775c50305ac45cb8b4412959784afeb2503b4b32d0a8839b8a49a1d61ebb93d"
+    },
+    "aster-cloud/internal/control/public_ip_resource_recovery_test.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_resource_recovery_test.go",
+      "upstream_sha256": "1364f62cbafbfa3e0a8341328f6cc09a004c9d8f08743558a4eb6c013db5521a",
+      "exported_sha256": "1364f62cbafbfa3e0a8341328f6cc09a004c9d8f08743558a4eb6c013db5521a"
+    },
+    "aster-cloud/internal/control/public_ip_resource_store.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_resource_store.go",
+      "upstream_sha256": "f76d8764689a2f9f8711cd10b6b2aee4151466d15e3abb34bccd5833d8aeb7df",
+      "exported_sha256": "f76d8764689a2f9f8711cd10b6b2aee4151466d15e3abb34bccd5833d8aeb7df"
+    },
+    "aster-cloud/internal/control/public_ip_resource_test.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_resource_test.go",
+      "upstream_sha256": "818a6c177bbab0b85f3bc60b0cc1089dd2be597c52772fadc35e034b60b70aaf",
+      "exported_sha256": "818a6c177bbab0b85f3bc60b0cc1089dd2be597c52772fadc35e034b60b70aaf"
+    },
+    "aster-cloud/internal/control/public_ip_resource_types.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_resource_types.go",
+      "upstream_sha256": "923afdf81cd4474fc21e8a5e54cf988e29fc3356498cf23ccbf9460bd8c1d91c",
+      "exported_sha256": "923afdf81cd4474fc21e8a5e54cf988e29fc3356498cf23ccbf9460bd8c1d91c"
+    },
+    "aster-cloud/internal/control/public_ip_retirement_view.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_retirement_view.go",
+      "upstream_sha256": "dd00cfcb8df6fc3c969809ccfac362f41cf10da994f53f005c2766fd39472059",
+      "exported_sha256": "dd00cfcb8df6fc3c969809ccfac362f41cf10da994f53f005c2766fd39472059"
+    },
+    "aster-cloud/internal/control/public_ip_store.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_store.go",
+      "upstream_sha256": "10758a7d32b9bb942718c197873f4006fc842b1d986e5eb42594ec1d5a21a062",
+      "exported_sha256": "10758a7d32b9bb942718c197873f4006fc842b1d986e5eb42594ec1d5a21a062"
+    },
+    "aster-cloud/internal/control/public_ip_test.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_test.go",
+      "upstream_sha256": "1fde9a2350da6186c66c8e5ea24e5c2cdda6ec657a4313453828a290a5f62dd8",
+      "exported_sha256": "1fde9a2350da6186c66c8e5ea24e5c2cdda6ec657a4313453828a290a5f62dd8"
+    },
+    "aster-cloud/internal/control/public_ip_types.go": {
+      "upstream_path": "aster-cloud/internal/control/public_ip_types.go",
+      "upstream_sha256": "91bf0150e19ab89146bf38148fbe019aced66346acbcc4b222abed24427d061a",
+      "exported_sha256": "91bf0150e19ab89146bf38148fbe019aced66346acbcc4b222abed24427d061a"
+    },
+    "aster-cloud/internal/control/resource_view.go": {
+      "upstream_path": "aster-cloud/internal/control/resource_view.go",
+      "upstream_sha256": "5f502475c08f6b1f382f6ac5e99329ca47d29a66547190c9ca330796c8dace2d",
+      "exported_sha256": "5f502475c08f6b1f382f6ac5e99329ca47d29a66547190c9ca330796c8dace2d"
+    },
+    "aster-cloud/internal/control/resource_view_test.go": {
+      "upstream_path": "aster-cloud/internal/control/resource_view_test.go",
+      "upstream_sha256": "e8b85c4107e2c6ac99f91de6550c17cd249ab2b7c5dc7e24d694d84904904237",
+      "exported_sha256": "e8b85c4107e2c6ac99f91de6550c17cd249ab2b7c5dc7e24d694d84904904237"
+    },
+    "aster-cloud/internal/control/store.go": {
+      "upstream_path": "aster-cloud/internal/control/store.go",
+      "upstream_sha256": "3ec04fb7417a4c4b19f593f5f564651898a1fac0b5af04c22583d0007c1be5a6",
+      "exported_sha256": "3ec04fb7417a4c4b19f593f5f564651898a1fac0b5af04c22583d0007c1be5a6"
+    },
+    "aster-cloud/internal/control/testdata/capabilities-approved-static-ipv4.json": {
+      "upstream_path": "aster-cloud/internal/control/testdata/capabilities-approved-static-ipv4.json",
+      "upstream_sha256": "a81084aa1405ab0e160311b026a001b46578cf96110d5675c482c1ee6c3738ee",
+      "exported_sha256": "a81084aa1405ab0e160311b026a001b46578cf96110d5675c482c1ee6c3738ee"
+    },
+    "aster-cloud/internal/control/tls_test.go": {
+      "upstream_path": "aster-cloud/internal/control/tls_test.go",
+      "upstream_sha256": "fd311036fd520b599e55c1aff95cd3e760e4f7cc4679e80d7bab2d05fa6e07b6",
+      "exported_sha256": "fd311036fd520b599e55c1aff95cd3e760e4f7cc4679e80d7bab2d05fa6e07b6"
+    },
+    "aster-cloud/internal/control/types.go": {
+      "upstream_path": "aster-cloud/internal/control/types.go",
+      "upstream_sha256": "c8e8ec8c9d67946499a10fd98c9e511ddcbde286cb2de8222877f6b371bf8aa4",
+      "exported_sha256": "c8e8ec8c9d67946499a10fd98c9e511ddcbde286cb2de8222877f6b371bf8aa4"
+    },
+    "aster-cloud/internal/control/users_pagination_migration.go": {
+      "upstream_path": "aster-cloud/internal/control/users_pagination_migration.go",
+      "upstream_sha256": "02c7439a7a1a658368dde39829319a52239453208817974d96e8fcf04961271c",
+      "exported_sha256": "02c7439a7a1a658368dde39829319a52239453208817974d96e8fcf04961271c"
+    },
+    "aster-cloud/internal/control/users_pagination_migration_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/control/users_pagination_migration_mysql_test.go",
+      "upstream_sha256": "9c5e3c4c48c79991edba12d25289e20eee3e3283a4ad97faaf37a39c86739f78",
+      "exported_sha256": "9c5e3c4c48c79991edba12d25289e20eee3e3283a4ad97faaf37a39c86739f78"
+    },
+    "aster-cloud/internal/control/web.go": {
+      "upstream_path": "aster-cloud/internal/control/web.go",
+      "upstream_sha256": "56262eceb406c2c5ee2f226c8fc8a33882a40c655991d6e79f4418f10a4f91a3",
+      "exported_sha256": "56262eceb406c2c5ee2f226c8fc8a33882a40c655991d6e79f4418f10a4f91a3"
+    },
+    "aster-cloud/internal/control/web_test.go": {
+      "upstream_path": "aster-cloud/internal/control/web_test.go",
+      "upstream_sha256": "b78efe1aae7dbc5ceb0cf33b5ff29f8e30f437848c4b3b18cff4e8118b14a0d4",
+      "exported_sha256": "b78efe1aae7dbc5ceb0cf33b5ff29f8e30f437848c4b3b18cff4e8118b14a0d4"
+    },
+    "aster-cloud/internal/diagnostics/logging.go": {
+      "upstream_path": "aster-cloud/internal/diagnostics/logging.go",
+      "upstream_sha256": "a4184d3c18ae355554b8f8a412d2c4df113f89abd241b2c6f939f9e7323e6d42",
+      "exported_sha256": "a4184d3c18ae355554b8f8a412d2c4df113f89abd241b2c6f939f9e7323e6d42"
+    },
+    "aster-cloud/internal/diagnostics/logging_test.go": {
+      "upstream_path": "aster-cloud/internal/diagnostics/logging_test.go",
+      "upstream_sha256": "1f3d2c59d7b0e64d4eeec479dbb7645d9a1bfd3417ebc24ee3d51a2e5687ccbe",
+      "exported_sha256": "1f3d2c59d7b0e64d4eeec479dbb7645d9a1bfd3417ebc24ee3d51a2e5687ccbe"
+    },
+    "aster-cloud/internal/fabric/NAT.md": {
+      "upstream_path": "aster-cloud/internal/fabric/NAT.md",
+      "upstream_sha256": "d7ad19141209874b757cf7d05189c06dc9b1569e9945b64bcf2672a5d9d043a8",
+      "exported_sha256": "d7ad19141209874b757cf7d05189c06dc9b1569e9945b64bcf2672a5d9d043a8"
+    },
+    "aster-cloud/internal/fabric/OVERLAY.md": {
+      "upstream_path": "aster-cloud/internal/fabric/OVERLAY.md",
+      "upstream_sha256": "280a90277ac0f963738426b5da84a9ef1f790d0045eff58fae6f3f95a452eb92",
+      "exported_sha256": "280a90277ac0f963738426b5da84a9ef1f790d0045eff58fae6f3f95a452eb92"
+    },
+    "aster-cloud/internal/fabric/README.md": {
+      "upstream_path": "aster-cloud/internal/fabric/README.md",
+      "upstream_sha256": "f6f61ef568913e63f65fd01e704bb9ba0e17b30b05b70eb8df001da0e39478b8",
+      "exported_sha256": "f6f61ef568913e63f65fd01e704bb9ba0e17b30b05b70eb8df001da0e39478b8"
+    },
+    "aster-cloud/internal/fabric/RECOVERY.md": {
+      "upstream_path": "aster-cloud/internal/fabric/RECOVERY.md",
+      "upstream_sha256": "ae0697b9c18613e7166c521c94ba63275f2a543580eb3e1b3d27ed6e56452c95",
+      "exported_sha256": "ae0697b9c18613e7166c521c94ba63275f2a543580eb3e1b3d27ed6e56452c95"
+    },
+    "aster-cloud/internal/fabric/activation.go": {
+      "upstream_path": "aster-cloud/internal/fabric/activation.go",
+      "upstream_sha256": "bba229dc276835244338f4bb8aef9608c19ab207e4da64e7ff69bcc578a9fc2c",
+      "exported_sha256": "bba229dc276835244338f4bb8aef9608c19ab207e4da64e7ff69bcc578a9fc2c"
+    },
+    "aster-cloud/internal/fabric/activation_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/activation_test.go",
+      "upstream_sha256": "6a7d4da9afefbc56520f74f26f0b939761804597d6921a2dc29a5ad27af32ac3",
+      "exported_sha256": "6a7d4da9afefbc56520f74f26f0b939761804597d6921a2dc29a5ad27af32ac3"
+    },
+    "aster-cloud/internal/fabric/archive.go": {
+      "upstream_path": "aster-cloud/internal/fabric/archive.go",
+      "upstream_sha256": "9da6e0583a3939b050e080bf508b77132e1bfb7020656ab9790f9f22b681c9c1",
+      "exported_sha256": "9da6e0583a3939b050e080bf508b77132e1bfb7020656ab9790f9f22b681c9c1"
+    },
+    "aster-cloud/internal/fabric/archive_recovery_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/archive_recovery_test.go",
+      "upstream_sha256": "46f292f4aa7fb38cf2d7a8b34ab0b04f59d9fbd0726767122ee1bca738ab3616",
+      "exported_sha256": "46f292f4aa7fb38cf2d7a8b34ab0b04f59d9fbd0726767122ee1bca738ab3616"
+    },
+    "aster-cloud/internal/fabric/executor.go": {
+      "upstream_path": "aster-cloud/internal/fabric/executor.go",
+      "upstream_sha256": "d4cf01610eb4cbd716229cb5d8dca5b9a1e9a7344547c8a780518c324a0edcdd",
+      "exported_sha256": "d4cf01610eb4cbd716229cb5d8dca5b9a1e9a7344547c8a780518c324a0edcdd"
+    },
+    "aster-cloud/internal/fabric/fabric_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/fabric_test.go",
+      "upstream_sha256": "7eb69d0f757360ad15d7538221df552affc61a8a7ce5ec57f99146a6b18899b1",
+      "exported_sha256": "7eb69d0f757360ad15d7538221df552affc61a8a7ce5ec57f99146a6b18899b1"
+    },
+    "aster-cloud/internal/fabric/files.go": {
+      "upstream_path": "aster-cloud/internal/fabric/files.go",
+      "upstream_sha256": "aa3533b5793540c5a0d7571c93f6899a66f5d4bace421a1acd852ed020ad0548",
+      "exported_sha256": "aa3533b5793540c5a0d7571c93f6899a66f5d4bace421a1acd852ed020ad0548"
+    },
+    "aster-cloud/internal/fabric/floating_ip.go": {
+      "upstream_path": "aster-cloud/internal/fabric/floating_ip.go",
+      "upstream_sha256": "f762f12cf6ba89820444fb005bcfa6b2825f7f8b5798ebbd5d658fe1b0d2b5f4",
+      "exported_sha256": "f762f12cf6ba89820444fb005bcfa6b2825f7f8b5798ebbd5d658fe1b0d2b5f4"
+    },
+    "aster-cloud/internal/fabric/floating_ip_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/floating_ip_test.go",
+      "upstream_sha256": "bb5e579c67dc2374ca4954811d601ec4ff92f1d5714ede74bb573c754cfe4998",
+      "exported_sha256": "bb5e579c67dc2374ca4954811d601ec4ff92f1d5714ede74bb573c754cfe4998"
+    },
+    "aster-cloud/internal/fabric/floating_overlay_packet_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/floating_overlay_packet_test.go",
+      "upstream_sha256": "bfc8a9014b37ad5e1a825acaac22af875dc154836d2304b928f4f369a251ee77",
+      "exported_sha256": "bfc8a9014b37ad5e1a825acaac22af875dc154836d2304b928f4f369a251ee77"
+    },
+    "aster-cloud/internal/fabric/internet_guest.go": {
+      "upstream_path": "aster-cloud/internal/fabric/internet_guest.go",
+      "upstream_sha256": "6b97ae68cc3ef8a760b1e335426829f3b62595c0d8b022513f97e98b50e90522",
+      "exported_sha256": "6b97ae68cc3ef8a760b1e335426829f3b62595c0d8b022513f97e98b50e90522"
+    },
+    "aster-cloud/internal/fabric/internet_guest_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/internet_guest_test.go",
+      "upstream_sha256": "a690ac753534ee0c52de5c4295fb87c5238a9212f72f7c7e47be13d31c1ac41f",
+      "exported_sha256": "a690ac753534ee0c52de5c4295fb87c5238a9212f72f7c7e47be13d31c1ac41f"
+    },
+    "aster-cloud/internal/fabric/nat_config.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_config.go",
+      "upstream_sha256": "5ec96726259fa26cb757dc5bfa580758e463326a30ac7343ddb6d4d20fd7f1d2",
+      "exported_sha256": "5ec96726259fa26cb757dc5bfa580758e463326a30ac7343ddb6d4d20fd7f1d2"
+    },
+    "aster-cloud/internal/fabric/nat_executor.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_executor.go",
+      "upstream_sha256": "f82523e3d83b1e036d9780555c8d656e3857314a13826f7b41306295a0530370",
+      "exported_sha256": "f82523e3d83b1e036d9780555c8d656e3857314a13826f7b41306295a0530370"
+    },
+    "aster-cloud/internal/fabric/nat_internet.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_internet.go",
+      "upstream_sha256": "42c34e5ccd966dc8a905fcc02a938df8fd185cdbde94d39884e7759b10cf7cb3",
+      "exported_sha256": "42c34e5ccd966dc8a905fcc02a938df8fd185cdbde94d39884e7759b10cf7cb3"
+    },
+    "aster-cloud/internal/fabric/nat_internet_migration_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_internet_migration_test.go",
+      "upstream_sha256": "dacce7114732769d22b8b24300d1c8e1ba71280d2ed38c086fb07dc5323580e0",
+      "exported_sha256": "dacce7114732769d22b8b24300d1c8e1ba71280d2ed38c086fb07dc5323580e0"
+    },
+    "aster-cloud/internal/fabric/nat_internet_native_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_internet_native_test.go",
+      "upstream_sha256": "d139228a6d9e62bb4d68556d3c95a5b3df8f2cb41f65e3bd8cb00b9b70d2914a",
+      "exported_sha256": "d139228a6d9e62bb4d68556d3c95a5b3df8f2cb41f65e3bd8cb00b9b70d2914a"
+    },
+    "aster-cloud/internal/fabric/nat_internet_readback_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_internet_readback_test.go",
+      "upstream_sha256": "dca8251ff61a0f64baae67a5310dc86eacf751dd0de98bda36c3cbb10fbf6b21",
+      "exported_sha256": "dca8251ff61a0f64baae67a5310dc86eacf751dd0de98bda36c3cbb10fbf6b21"
+    },
+    "aster-cloud/internal/fabric/nat_internet_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_internet_test.go",
+      "upstream_sha256": "0dee9944cc6f366d3b49ae35fd21421dd2e6fd74d42ab478192b0a68ad10276a",
+      "exported_sha256": "0dee9944cc6f366d3b49ae35fd21421dd2e6fd74d42ab478192b0a68ad10276a"
+    },
+    "aster-cloud/internal/fabric/nat_namespace_linux.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_namespace_linux.go",
+      "upstream_sha256": "debd2dfd59257b657116956f454ee98bde2bd54ba47e72ac3410faf2c8f4ff9b",
+      "exported_sha256": "debd2dfd59257b657116956f454ee98bde2bd54ba47e72ac3410faf2c8f4ff9b"
+    },
+    "aster-cloud/internal/fabric/nat_namespace_other.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_namespace_other.go",
+      "upstream_sha256": "b9bf374d54067c4fc150461f881f4ba3f2fabd9eaf1294f90de17436734b408a",
+      "exported_sha256": "b9bf374d54067c4fc150461f881f4ba3f2fabd9eaf1294f90de17436734b408a"
+    },
+    "aster-cloud/internal/fabric/nat_native_icmp_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_native_icmp_test.go",
+      "upstream_sha256": "97a04f7b99be879c85bd222baa0d323bcba14402736df486720a709a71f61934",
+      "exported_sha256": "97a04f7b99be879c85bd222baa0d323bcba14402736df486720a709a71f61934"
+    },
+    "aster-cloud/internal/fabric/nat_native_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_native_test.go",
+      "upstream_sha256": "53adab34a9aaa9e3c53517108aef2b18df60597087a55fabd421942f4724881e",
+      "exported_sha256": "53adab34a9aaa9e3c53517108aef2b18df60597087a55fabd421942f4724881e"
+    },
+    "aster-cloud/internal/fabric/nat_owner.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_owner.go",
+      "upstream_sha256": "9d9cf11d843bff9ac579c3decd20b06321860f440768a432a144314591e2c690",
+      "exported_sha256": "9d9cf11d843bff9ac579c3decd20b06321860f440768a432a144314591e2c690"
+    },
+    "aster-cloud/internal/fabric/nat_plan.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_plan.go",
+      "upstream_sha256": "b41e783c8cab0248a78e30dd3002716dddc56b55914c6f92d163c017283bd69a",
+      "exported_sha256": "b41e783c8cab0248a78e30dd3002716dddc56b55914c6f92d163c017283bd69a"
+    },
+    "aster-cloud/internal/fabric/nat_probe.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_probe.go",
+      "upstream_sha256": "9b08b9873f42db5079f5f2d5e1116e27a98340a132cd25c617fbd322b48312ed",
+      "exported_sha256": "9b08b9873f42db5079f5f2d5e1116e27a98340a132cd25c617fbd322b48312ed"
+    },
+    "aster-cloud/internal/fabric/nat_public_ipv4_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_public_ipv4_test.go",
+      "upstream_sha256": "41a16b0deb1719da1b945b2f2151ce7433951a908482afe200caae87d53dd5ad",
+      "exported_sha256": "41a16b0deb1719da1b945b2f2151ce7433951a908482afe200caae87d53dd5ad"
+    },
+    "aster-cloud/internal/fabric/nat_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/nat_test.go",
+      "upstream_sha256": "fb5d9e9b64fb57ea8872b5848021d9879e21807bf66338f6de235db4579c0809",
+      "exported_sha256": "fb5d9e9b64fb57ea8872b5848021d9879e21807bf66338f6de235db4579c0809"
+    },
+    "aster-cloud/internal/fabric/overlay_config.go": {
+      "upstream_path": "aster-cloud/internal/fabric/overlay_config.go",
+      "upstream_sha256": "b3276c717fb4572eb356797658b33e79d8f94f88306471c9fe368b348b7bd50a",
+      "exported_sha256": "b3276c717fb4572eb356797658b33e79d8f94f88306471c9fe368b348b7bd50a"
+    },
+    "aster-cloud/internal/fabric/overlay_executor.go": {
+      "upstream_path": "aster-cloud/internal/fabric/overlay_executor.go",
+      "upstream_sha256": "e446d9606b943d9dc207151b918817e138b770adcd86f398e497193db80c51e8",
+      "exported_sha256": "e446d9606b943d9dc207151b918817e138b770adcd86f398e497193db80c51e8"
+    },
+    "aster-cloud/internal/fabric/overlay_internet_packet_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/overlay_internet_packet_test.go",
+      "upstream_sha256": "e226e94eb66f6649be7bb2f871cfd87b4a63d8a99a191c0df25005fbf77d7940",
+      "exported_sha256": "e226e94eb66f6649be7bb2f871cfd87b4a63d8a99a191c0df25005fbf77d7940"
+    },
+    "aster-cloud/internal/fabric/overlay_lifecycle.go": {
+      "upstream_path": "aster-cloud/internal/fabric/overlay_lifecycle.go",
+      "upstream_sha256": "1e6bd31e771d6d5c2202d65162fb86439a39b1101d3e536dbd71daa9c985a47c",
+      "exported_sha256": "1e6bd31e771d6d5c2202d65162fb86439a39b1101d3e536dbd71daa9c985a47c"
+    },
+    "aster-cloud/internal/fabric/overlay_native_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/overlay_native_test.go",
+      "upstream_sha256": "5a4c3305f465d55e23fbcb80b19b8ea2722d64c73c7c2e10bf6ad53f40494083",
+      "exported_sha256": "5a4c3305f465d55e23fbcb80b19b8ea2722d64c73c7c2e10bf6ad53f40494083"
+    },
+    "aster-cloud/internal/fabric/overlay_packet_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/overlay_packet_test.go",
+      "upstream_sha256": "6c09c7caf1d927fb824dc1decd06d0f87b710782768755bb1a5fc7ff2f5251fd",
+      "exported_sha256": "6c09c7caf1d927fb824dc1decd06d0f87b710782768755bb1a5fc7ff2f5251fd"
+    },
+    "aster-cloud/internal/fabric/overlay_plan.go": {
+      "upstream_path": "aster-cloud/internal/fabric/overlay_plan.go",
+      "upstream_sha256": "ae45fe80aed8bd058c9552743642205516f0ae4dc507fff9ffd7fcacc00bad72",
+      "exported_sha256": "ae45fe80aed8bd058c9552743642205516f0ae4dc507fff9ffd7fcacc00bad72"
+    },
+    "aster-cloud/internal/fabric/overlay_probe.go": {
+      "upstream_path": "aster-cloud/internal/fabric/overlay_probe.go",
+      "upstream_sha256": "bc38e3d6659fb58d65767270290011c331398737a15b3955e96468530d2aaebc",
+      "exported_sha256": "bc38e3d6659fb58d65767270290011c331398737a15b3955e96468530d2aaebc"
+    },
+    "aster-cloud/internal/fabric/overlay_profile_migration.go": {
+      "upstream_path": "aster-cloud/internal/fabric/overlay_profile_migration.go",
+      "upstream_sha256": "c294127c566ef76ede48d8c470223a150c9255112adf0abb15632c596e6d8a74",
+      "exported_sha256": "c294127c566ef76ede48d8c470223a150c9255112adf0abb15632c596e6d8a74"
+    },
+    "aster-cloud/internal/fabric/overlay_profile_migration_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/overlay_profile_migration_test.go",
+      "upstream_sha256": "6c938f0edf0b15544aa7a535ba2860fa8a3e9d042dacf0a01ffbfc446730b6dc",
+      "exported_sha256": "6c938f0edf0b15544aa7a535ba2860fa8a3e9d042dacf0a01ffbfc446730b6dc"
+    },
+    "aster-cloud/internal/fabric/overlay_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/overlay_test.go",
+      "upstream_sha256": "d9cdfb51ee12c95d9a4c2962edbf6c029cf37e82331e504df5e62e33bd91457c",
+      "exported_sha256": "d9cdfb51ee12c95d9a4c2962edbf6c029cf37e82331e504df5e62e33bd91457c"
+    },
+    "aster-cloud/internal/fabric/probe.go": {
+      "upstream_path": "aster-cloud/internal/fabric/probe.go",
+      "upstream_sha256": "ba4b756dea859f7b419a8fad58640be16431038d67981ea2f1148bb92e21c549",
+      "exported_sha256": "ba4b756dea859f7b419a8fad58640be16431038d67981ea2f1148bb92e21c549"
+    },
+    "aster-cloud/internal/fabric/public_ingress_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/public_ingress_test.go",
+      "upstream_sha256": "85a6afb354aa4640733369a1bdb33de42d028ab3e94fb6b57825af3f1a71d77c",
+      "exported_sha256": "85a6afb354aa4640733369a1bdb33de42d028ab3e94fb6b57825af3f1a71d77c"
+    },
+    "aster-cloud/internal/fabric/recovery.go": {
+      "upstream_path": "aster-cloud/internal/fabric/recovery.go",
+      "upstream_sha256": "15ff15b4b4760fdec1095e3308dacc981e5e010eb9fe906698e63f1da15ea97e",
+      "exported_sha256": "15ff15b4b4760fdec1095e3308dacc981e5e010eb9fe906698e63f1da15ea97e"
+    },
+    "aster-cloud/internal/fabric/testdata/INTERNET_NAT_READBACK.md": {
+      "upstream_path": "aster-cloud/internal/fabric/testdata/INTERNET_NAT_READBACK.md",
+      "upstream_sha256": "69ad4e0fa4ad5008de578a1a666cad331534e1da13fe9c01329aa39db16d146a",
+      "exported_sha256": "69ad4e0fa4ad5008de578a1a666cad331534e1da13fe9c01329aa39db16d146a"
+    },
+    "aster-cloud/internal/fabric/testdata/internet-nat-nft-1.0.2-ubuntu22.json": {
+      "upstream_path": "aster-cloud/internal/fabric/testdata/internet-nat-nft-1.0.2-ubuntu22.json",
+      "upstream_sha256": "262152d4d9695f769c2b02a4c5f3fd1a979ab02d321b4bf8082a8023a555ab6a",
+      "exported_sha256": "262152d4d9695f769c2b02a4c5f3fd1a979ab02d321b4bf8082a8023a555ab6a"
+    },
+    "aster-cloud/internal/fabric/testdata/internet-nat-nft-1.0.9-ubuntu24.json": {
+      "upstream_path": "aster-cloud/internal/fabric/testdata/internet-nat-nft-1.0.9-ubuntu24.json",
+      "upstream_sha256": "0ce0cbb8c94e27e1289bfac913c290fcccfbce9b8b61596aff2f6364623f880d",
+      "exported_sha256": "0ce0cbb8c94e27e1289bfac913c290fcccfbce9b8b61596aff2f6364623f880d"
+    },
+    "aster-cloud/internal/fabric/types.go": {
+      "upstream_path": "aster-cloud/internal/fabric/types.go",
+      "upstream_sha256": "a78f28d62d721f96db603fccbd2d505c90c8b7ff9d6ba05f2867dd6d7586a4c6",
+      "exported_sha256": "a78f28d62d721f96db603fccbd2d505c90c8b7ff9d6ba05f2867dd6d7586a4c6"
+    },
+    "aster-cloud/internal/fabric/verify.go": {
+      "upstream_path": "aster-cloud/internal/fabric/verify.go",
+      "upstream_sha256": "afc51cb5509dfcf2617d99760d29d5829ced92e550c12bfa25b1b6c0328718f3",
+      "exported_sha256": "afc51cb5509dfcf2617d99760d29d5829ced92e550c12bfa25b1b6c0328718f3"
+    },
+    "aster-cloud/internal/fabric/verify_test.go": {
+      "upstream_path": "aster-cloud/internal/fabric/verify_test.go",
+      "upstream_sha256": "825a4292dd01eaf5837bb6a7f2365336d45e087a8c5d58327f1fd8616c75a617",
+      "exported_sha256": "825a4292dd01eaf5837bb6a7f2365336d45e087a8c5d58327f1fd8616c75a617"
+    },
+    "aster-cloud/internal/hypervisor/config.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/config.go",
+      "upstream_sha256": "6538bef58db45949c92a507513f6fd53c2d1719103f8e554bd4e43e53e24c7e9",
+      "exported_sha256": "6538bef58db45949c92a507513f6fd53c2d1719103f8e554bd4e43e53e24c7e9"
+    },
+    "aster-cloud/internal/hypervisor/diagnostics_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/diagnostics_test.go",
+      "upstream_sha256": "81d058451bf6ed05372135c6f8c2eba86ab5b8343ffa2ddd141d17b372a427fe",
+      "exported_sha256": "81d058451bf6ed05372135c6f8c2eba86ab5b8343ffa2ddd141d17b372a427fe"
+    },
+    "aster-cloud/internal/hypervisor/direct_filter.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/direct_filter.go",
+      "upstream_sha256": "918e6d16f45bdbc994ca5902af39d3ae2bc2f6bcf4660b0fb11b8d9b7d75094d",
+      "exported_sha256": "918e6d16f45bdbc994ca5902af39d3ae2bc2f6bcf4660b0fb11b8d9b7d75094d"
+    },
+    "aster-cloud/internal/hypervisor/direct_filter_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/direct_filter_test.go",
+      "upstream_sha256": "92cf10ef120e6954f60255dd0fc0c3e38050d5155de8b0cfdb04bf0dbf55fcd5",
+      "exported_sha256": "92cf10ef120e6954f60255dd0fc0c3e38050d5155de8b0cfdb04bf0dbf55fcd5"
+    },
+    "aster-cloud/internal/hypervisor/direct_public.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/direct_public.go",
+      "upstream_sha256": "43fb3affd2cd4921cbfd3a54018ad8511d434b4c6e4eb4e63e2b1acf64297793",
+      "exported_sha256": "43fb3affd2cd4921cbfd3a54018ad8511d434b4c6e4eb4e63e2b1acf64297793"
+    },
+    "aster-cloud/internal/hypervisor/direct_public_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/direct_public_test.go",
+      "upstream_sha256": "1ba4dd10af2f946dd0ce6441951616ba652434df4cbcc3d5767df480440c2ef6",
+      "exported_sha256": "1ba4dd10af2f946dd0ce6441951616ba652434df4cbcc3d5767df480440c2ef6"
+    },
+    "aster-cloud/internal/hypervisor/direct_retire.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/direct_retire.go",
+      "upstream_sha256": "0a809d58564b49ecafd23556f7c2eafbd33caff346c3b499ca7ce9c58aacd2da",
+      "exported_sha256": "0a809d58564b49ecafd23556f7c2eafbd33caff346c3b499ca7ce9c58aacd2da"
+    },
+    "aster-cloud/internal/hypervisor/doctor.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/doctor.go",
+      "upstream_sha256": "d6d0ac4aeaf08c1a75638d389463fad11608425fc89344ac0528c4de1bf6ad67",
+      "exported_sha256": "d6d0ac4aeaf08c1a75638d389463fad11608425fc89344ac0528c4de1bf6ad67"
+    },
+    "aster-cloud/internal/hypervisor/engine.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/engine.go",
+      "upstream_sha256": "92ae46447eb8e1553a16799531fc47c4a91d0a47d5bceda797d32da9d28009a8",
+      "exported_sha256": "92ae46447eb8e1553a16799531fc47c4a91d0a47d5bceda797d32da9d28009a8"
+    },
+    "aster-cloud/internal/hypervisor/engine_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/engine_test.go",
+      "upstream_sha256": "0285adcc87ab9811457d0cb5169767080ae97423b344da244d4d6a36a02bd481",
+      "exported_sha256": "0285adcc87ab9811457d0cb5169767080ae97423b344da244d4d6a36a02bd481"
+    },
+    "aster-cloud/internal/hypervisor/internet_seed_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/internet_seed_test.go",
+      "upstream_sha256": "56a12a362016e323b3e2309ceaf59f42959c756bed9d24a0d8ee1703edd46b7e",
+      "exported_sha256": "56a12a362016e323b3e2309ceaf59f42959c756bed9d24a0d8ee1703edd46b7e"
+    },
+    "aster-cloud/internal/hypervisor/ledger.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/ledger.go",
+      "upstream_sha256": "a1b2cc737cb92af70ac3dffa3e9bf7d66ef5e272b00b46b452626ed9da8ebd97",
+      "exported_sha256": "a1b2cc737cb92af70ac3dffa3e9bf7d66ef5e272b00b46b452626ed9da8ebd97"
+    },
+    "aster-cloud/internal/hypervisor/metrics.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/metrics.go",
+      "upstream_sha256": "b52f7c00d426dd73285ee007acde7ceb8b7b74acfe7a8f7816ec6b165f4eee2c",
+      "exported_sha256": "b52f7c00d426dd73285ee007acde7ceb8b7b74acfe7a8f7816ec6b165f4eee2c"
+    },
+    "aster-cloud/internal/hypervisor/metrics_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/metrics_test.go",
+      "upstream_sha256": "21b831c1940b0f6f74d653cfcfe0b93e2b683687dc7085e67ce1f57febe59ea7",
+      "exported_sha256": "21b831c1940b0f6f74d653cfcfe0b93e2b683687dc7085e67ce1f57febe59ea7"
+    },
+    "aster-cloud/internal/hypervisor/network.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/network.go",
+      "upstream_sha256": "e187f1fb75f31e5a0122d02d7064a8157e109e3f7dc425778c7baa531e8119b6",
+      "exported_sha256": "e187f1fb75f31e5a0122d02d7064a8157e109e3f7dc425778c7baa531e8119b6"
+    },
+    "aster-cloud/internal/hypervisor/network_admission.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/network_admission.go",
+      "upstream_sha256": "719e00894e734ccbadca980f57c6d9da0531f4239533229a9dc129095a6cad6d",
+      "exported_sha256": "719e00894e734ccbadca980f57c6d9da0531f4239533229a9dc129095a6cad6d"
+    },
+    "aster-cloud/internal/hypervisor/network_recovery.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/network_recovery.go",
+      "upstream_sha256": "303ef0a5345af0f2a30996e48cfcf9fbba3eaec7be04f7ae97b907710d61ba02",
+      "exported_sha256": "303ef0a5345af0f2a30996e48cfcf9fbba3eaec7be04f7ae97b907710d61ba02"
+    },
+    "aster-cloud/internal/hypervisor/network_recovery_commit.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/network_recovery_commit.go",
+      "upstream_sha256": "b0bf63353f53a0aa0ef564c06aaf41a935509b0f82b386255f6e45be3c22a8c3",
+      "exported_sha256": "b0bf63353f53a0aa0ef564c06aaf41a935509b0f82b386255f6e45be3c22a8c3"
+    },
+    "aster-cloud/internal/hypervisor/network_recovery_commit_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/network_recovery_commit_test.go",
+      "upstream_sha256": "57364576e098978d5fe02f6f34a1c4e1b642104c9a04bba2458cbcf374ac5bf2",
+      "exported_sha256": "57364576e098978d5fe02f6f34a1c4e1b642104c9a04bba2458cbcf374ac5bf2"
+    },
+    "aster-cloud/internal/hypervisor/network_recovery_group.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/network_recovery_group.go",
+      "upstream_sha256": "e441a01cb89b7143915c91e8ac2a59b6e04649245e3e3d6ce9145c3b96452ef5",
+      "exported_sha256": "e441a01cb89b7143915c91e8ac2a59b6e04649245e3e3d6ce9145c3b96452ef5"
+    },
+    "aster-cloud/internal/hypervisor/network_recovery_group_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/network_recovery_group_test.go",
+      "upstream_sha256": "e24be8b141becd8c6f8e94038b3500c2c70f45bceeb7b5f21ac4d52ca2e149c8",
+      "exported_sha256": "e24be8b141becd8c6f8e94038b3500c2c70f45bceeb7b5f21ac4d52ca2e149c8"
+    },
+    "aster-cloud/internal/hypervisor/network_recovery_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/network_recovery_test.go",
+      "upstream_sha256": "634591484c64f46b1959ae7e7ba4949bdf961278917d209db4ed81b657c38acb",
+      "exported_sha256": "634591484c64f46b1959ae7e7ba4949bdf961278917d209db4ed81b657c38acb"
+    },
+    "aster-cloud/internal/hypervisor/observation.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/observation.go",
+      "upstream_sha256": "1ec4e7fd938ff568297110cf97967a352aafb191ca7166c9eac6fe302b3adad4",
+      "exported_sha256": "1ec4e7fd938ff568297110cf97967a352aafb191ca7166c9eac6fe302b3adad4"
+    },
+    "aster-cloud/internal/hypervisor/overlay.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/overlay.go",
+      "upstream_sha256": "06739bd778d08444881e9146006e208971f021b96ca841cee81d23d7027c2eb2",
+      "exported_sha256": "06739bd778d08444881e9146006e208971f021b96ca841cee81d23d7027c2eb2"
+    },
+    "aster-cloud/internal/hypervisor/overlay_recovery.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/overlay_recovery.go",
+      "upstream_sha256": "3de07620e4bd2c394e708dfbc097f6a1f30619d015d993d4986138ebafc786e8",
+      "exported_sha256": "3de07620e4bd2c394e708dfbc097f6a1f30619d015d993d4986138ebafc786e8"
+    },
+    "aster-cloud/internal/hypervisor/overlay_recovery_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/overlay_recovery_test.go",
+      "upstream_sha256": "5dd5eeea492d8f9b50289ee30d78a5d48e6381d1502ab3088fde24b6bfe6ea90",
+      "exported_sha256": "5dd5eeea492d8f9b50289ee30d78a5d48e6381d1502ab3088fde24b6bfe6ea90"
+    },
+    "aster-cloud/internal/hypervisor/overlay_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/overlay_test.go",
+      "upstream_sha256": "cf450b9a9a861ad626bde5528d89b038fbc3856b7f40c81fbda46d17e33c6f9b",
+      "exported_sha256": "cf450b9a9a861ad626bde5528d89b038fbc3856b7f40c81fbda46d17e33c6f9b"
+    },
+    "aster-cloud/internal/hypervisor/ovs.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/ovs.go",
+      "upstream_sha256": "d449504fb0640d6b258bdce54f2a617a36441159298bee8a3594e6d1b5c29050",
+      "exported_sha256": "d449504fb0640d6b258bdce54f2a617a36441159298bee8a3594e6d1b5c29050"
+    },
+    "aster-cloud/internal/hypervisor/ovs_fence_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/ovs_fence_test.go",
+      "upstream_sha256": "7f09a21b1fe0728ecd50164eefda675178b1a4605f398d36a3de891f4038e88e",
+      "exported_sha256": "7f09a21b1fe0728ecd50164eefda675178b1a4605f398d36a3de891f4038e88e"
+    },
+    "aster-cloud/internal/hypervisor/ovs_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/ovs_test.go",
+      "upstream_sha256": "dc1591cf5790ededd88977f807fdeea862720c5c03231f62b58f58a496c7e9ca",
+      "exported_sha256": "dc1591cf5790ededd88977f807fdeea862720c5c03231f62b58f58a496c7e9ca"
+    },
+    "aster-cloud/internal/hypervisor/public_ingress_capability_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/public_ingress_capability_test.go",
+      "upstream_sha256": "75ccfa641eb993edab732ba2e4729de23e2d1d17ce72d817f9498c23a69fa295",
+      "exported_sha256": "75ccfa641eb993edab732ba2e4729de23e2d1d17ce72d817f9498c23a69fa295"
+    },
+    "aster-cloud/internal/hypervisor/qcow_header.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/qcow_header.go",
+      "upstream_sha256": "0cfe8189fdb0200e7b55e5f4c37be7ff0bf9162f1d310cd796f5af976994d543",
+      "exported_sha256": "0cfe8189fdb0200e7b55e5f4c37be7ff0bf9162f1d310cd796f5af976994d543"
+    },
+    "aster-cloud/internal/hypervisor/reconcile.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/reconcile.go",
+      "upstream_sha256": "057cc574ac6f6fb1883a7bafb18dd7b259218fed915c7518415b09f6ed53f76d",
+      "exported_sha256": "057cc574ac6f6fb1883a7bafb18dd7b259218fed915c7518415b09f6ed53f76d"
+    },
+    "aster-cloud/internal/hypervisor/security_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/security_test.go",
+      "upstream_sha256": "c59a7316d74abfc6c91cd98cf20959a50aecebc23ca9ef1ad67934a759188caf",
+      "exported_sha256": "c59a7316d74abfc6c91cd98cf20959a50aecebc23ca9ef1ad67934a759188caf"
+    },
+    "aster-cloud/internal/hypervisor/server.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/server.go",
+      "upstream_sha256": "8cc1cde807ac5a2c07bfc35ce9a52d6de882a17cef55020eb7990c92f6eb3224",
+      "exported_sha256": "8cc1cde807ac5a2c07bfc35ce9a52d6de882a17cef55020eb7990c92f6eb3224"
+    },
+    "aster-cloud/internal/hypervisor/storage_engine.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/storage_engine.go",
+      "upstream_sha256": "a050c66e47cf436f013d40529aa9a28bf5f5c34b4e2cd77abbbb4d0e7322965c",
+      "exported_sha256": "a050c66e47cf436f013d40529aa9a28bf5f5c34b4e2cd77abbbb4d0e7322965c"
+    },
+    "aster-cloud/internal/hypervisor/storage_ledger.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/storage_ledger.go",
+      "upstream_sha256": "d2051c1a25f8e25c6a21d8e70c3f2100d849158eb99ea41b460e3cacdaebcbca",
+      "exported_sha256": "d2051c1a25f8e25c6a21d8e70c3f2100d849158eb99ea41b460e3cacdaebcbca"
+    },
+    "aster-cloud/internal/hypervisor/storage_manifest.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/storage_manifest.go",
+      "upstream_sha256": "5aac7f96090587a955bd87650573709c2ed166322eae58a561d7489efa7ffa84",
+      "exported_sha256": "5aac7f96090587a955bd87650573709c2ed166322eae58a561d7489efa7ffa84"
+    },
+    "aster-cloud/internal/hypervisor/storage_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/storage_test.go",
+      "upstream_sha256": "3a2e228177cc3cb71d30bfc058cc17852f20e121cbd1ad11f98bbaef06b65d8a",
+      "exported_sha256": "3a2e228177cc3cb71d30bfc058cc17852f20e121cbd1ad11f98bbaef06b65d8a"
+    },
+    "aster-cloud/internal/hypervisor/storage_transport.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/storage_transport.go",
+      "upstream_sha256": "d2dd6709c46cc8a7bf1b8728388301b93fd9e90ad636987c9b7a9f1beced9026",
+      "exported_sha256": "d2dd6709c46cc8a7bf1b8728388301b93fd9e90ad636987c9b7a9f1beced9026"
+    },
+    "aster-cloud/internal/hypervisor/storage_transport_test.go": {
+      "upstream_path": "aster-cloud/internal/hypervisor/storage_transport_test.go",
+      "upstream_sha256": "93deb9fb9e561c5813c1e2b0cf439b4c72a7e9b70c110de7b9e89e71b366c12a",
+      "exported_sha256": "93deb9fb9e561c5813c1e2b0cf439b4c72a7e9b70c110de7b9e89e71b366c12a"
+    },
+    "aster-cloud/internal/identity/README.md": {
+      "upstream_path": "aster-cloud/internal/identity/README.md",
+      "upstream_sha256": "06fa7c70e5201a459151d68472946c2316123cf5becdc7baf846a3bbfcd81cf0",
+      "exported_sha256": "fca63fd74efa7583508e78a93787bb3222af9f3aaedd67cc1f310c5892c889b0",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/internal/identity/http.go": {
+      "upstream_path": "aster-cloud/internal/identity/http.go",
+      "upstream_sha256": "f42f5a114e580f5f7d2776b4eca383a1a388676b07b4ef224ce6f6c3d777644f",
+      "exported_sha256": "f42f5a114e580f5f7d2776b4eca383a1a388676b07b4ef224ce6f6c3d777644f"
+    },
+    "aster-cloud/internal/identity/identity_operations_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/identity/identity_operations_mysql_test.go",
+      "upstream_sha256": "dd7ae4c67d760fdff175312d09629ab3261f7de7b29cf378620a4cc82e635ea4",
+      "exported_sha256": "dd7ae4c67d760fdff175312d09629ab3261f7de7b29cf378620a4cc82e635ea4"
+    },
+    "aster-cloud/internal/identity/identity_test.go": {
+      "upstream_path": "aster-cloud/internal/identity/identity_test.go",
+      "upstream_sha256": "30541e943df5c0ca85d80e182dc396d7803bd01fb1359bdfa012d0e190eac7c8",
+      "exported_sha256": "30541e943df5c0ca85d80e182dc396d7803bd01fb1359bdfa012d0e190eac7c8"
+    },
+    "aster-cloud/internal/identity/manager_fixture_test.go": {
+      "upstream_path": "aster-cloud/internal/identity/manager_fixture_test.go",
+      "upstream_sha256": "c09c1f6314da8e3186981ea3b541c83419b54115142043ff547c079a3286b258",
+      "exported_sha256": "c09c1f6314da8e3186981ea3b541c83419b54115142043ff547c079a3286b258"
+    },
+    "aster-cloud/internal/identity/migration.go": {
+      "upstream_path": "aster-cloud/internal/identity/migration.go",
+      "upstream_sha256": "8fe11e7395b98803cdb2d1fcbd6b29ca4b2f760967c73edfe66d631dc5d17269",
+      "exported_sha256": "8fe11e7395b98803cdb2d1fcbd6b29ca4b2f760967c73edfe66d631dc5d17269"
+    },
+    "aster-cloud/internal/identity/mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/identity/mysql_test.go",
+      "upstream_sha256": "53ddd330c346d32039085802c77662fca3f825df8e6d7cd6d26510c22937352b",
+      "exported_sha256": "53ddd330c346d32039085802c77662fca3f825df8e6d7cd6d26510c22937352b"
+    },
+    "aster-cloud/internal/identity/operations.go": {
+      "upstream_path": "aster-cloud/internal/identity/operations.go",
+      "upstream_sha256": "6f6dcd58a38568ca2e95482303a209e203473d7e27129f2b1627dd410d76985b",
+      "exported_sha256": "6f6dcd58a38568ca2e95482303a209e203473d7e27129f2b1627dd410d76985b"
+    },
+    "aster-cloud/internal/identity/password.go": {
+      "upstream_path": "aster-cloud/internal/identity/password.go",
+      "upstream_sha256": "ce94646fde389a583c4a8bbee9d518bea48074a19bf35b8ca82955943fac3b0d",
+      "exported_sha256": "ce94646fde389a583c4a8bbee9d518bea48074a19bf35b8ca82955943fac3b0d"
+    },
+    "aster-cloud/internal/identity/session_fence.go": {
+      "upstream_path": "aster-cloud/internal/identity/session_fence.go",
+      "upstream_sha256": "5d32ee708dea29ec8e412963bdfe9e012c55a54bf94ede137e167426e607d276",
+      "exported_sha256": "5d32ee708dea29ec8e412963bdfe9e012c55a54bf94ede137e167426e607d276"
+    },
+    "aster-cloud/internal/identity/session_fence_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/identity/session_fence_mysql_test.go",
+      "upstream_sha256": "db011a526974d33825329a7cc61e12eb61ebee0cfd787414b06e333b406a6f29",
+      "exported_sha256": "db011a526974d33825329a7cc61e12eb61ebee0cfd787414b06e333b406a6f29"
+    },
+    "aster-cloud/internal/identity/session_fence_test.go": {
+      "upstream_path": "aster-cloud/internal/identity/session_fence_test.go",
+      "upstream_sha256": "4599bb1e7f500423f524052e383f19edf03d23985969a98d8e6f839bd31ad337",
+      "exported_sha256": "4599bb1e7f500423f524052e383f19edf03d23985969a98d8e6f839bd31ad337"
+    },
+    "aster-cloud/internal/identity/store.go": {
+      "upstream_path": "aster-cloud/internal/identity/store.go",
+      "upstream_sha256": "e8336fb55aecae02716479762a9685f54a6ccbff0ce951bc59297e9e6e65c1ad",
+      "exported_sha256": "e8336fb55aecae02716479762a9685f54a6ccbff0ce951bc59297e9e6e65c1ad"
+    },
+    "aster-cloud/internal/identity/types.go": {
+      "upstream_path": "aster-cloud/internal/identity/types.go",
+      "upstream_sha256": "cd6dcaca84aeba971122c0a1a84666294274e2b100ce9f0e20d1903dcc31679d",
+      "exported_sha256": "cd6dcaca84aeba971122c0a1a84666294274e2b100ce9f0e20d1903dcc31679d"
+    },
+    "aster-cloud/internal/identity/users_page.go": {
+      "upstream_path": "aster-cloud/internal/identity/users_page.go",
+      "upstream_sha256": "99787686f857446c4eca95fa8c2ee25cfa0b4bed41a7707087acce656d7d774b",
+      "exported_sha256": "99787686f857446c4eca95fa8c2ee25cfa0b4bed41a7707087acce656d7d774b"
+    },
+    "aster-cloud/internal/identity/users_page_mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/identity/users_page_mysql_test.go",
+      "upstream_sha256": "f0702938f5e5ec9e47e96c11ea780e6768e13c9af5e922b9e3adc229c2267b50",
+      "exported_sha256": "f0702938f5e5ec9e47e96c11ea780e6768e13c9af5e922b9e3adc229c2267b50"
+    },
+    "aster-cloud/internal/identity/users_page_test.go": {
+      "upstream_path": "aster-cloud/internal/identity/users_page_test.go",
+      "upstream_sha256": "b26ba72a3607f1fdd2d811af1e0bc491a714e147b12de728c7a24091e8635452",
+      "exported_sha256": "b26ba72a3607f1fdd2d811af1e0bc491a714e147b12de728c7a24091e8635452"
+    },
+    "aster-cloud/internal/networking/http.go": {
+      "upstream_path": "aster-cloud/internal/networking/http.go",
+      "upstream_sha256": "ea082c2b413f8e8965018b21b70da314b4914f2fed317a13e7eb4f1121cff8ff",
+      "exported_sha256": "ea082c2b413f8e8965018b21b70da314b4914f2fed317a13e7eb4f1121cff8ff"
+    },
+    "aster-cloud/internal/networking/mysql_test.go": {
+      "upstream_path": "aster-cloud/internal/networking/mysql_test.go",
+      "upstream_sha256": "24beb486988f255dd95e28a1672c3561febfc7cd46a3aa035006cf6495d9b25b",
+      "exported_sha256": "24beb486988f255dd95e28a1672c3561febfc7cd46a3aa035006cf6495d9b25b"
+    },
+    "aster-cloud/internal/networking/public_ingress_namespace_test.go": {
+      "upstream_path": "aster-cloud/internal/networking/public_ingress_namespace_test.go",
+      "upstream_sha256": "aa9b7ee8fababebaa127abf11a683987557a0bd2968b06b8f273e4a0208f2bcb",
+      "exported_sha256": "aa9b7ee8fababebaa127abf11a683987557a0bd2968b06b8f273e4a0208f2bcb"
+    },
+    "aster-cloud/internal/networking/schema.go": {
+      "upstream_path": "aster-cloud/internal/networking/schema.go",
+      "upstream_sha256": "cf16adff70f00d79c695666d3e5f40bb64984fb539cea825ffea17b1b0cf070e",
+      "exported_sha256": "cf16adff70f00d79c695666d3e5f40bb64984fb539cea825ffea17b1b0cf070e"
+    },
+    "aster-cloud/internal/networking/store.go": {
+      "upstream_path": "aster-cloud/internal/networking/store.go",
+      "upstream_sha256": "425e0c40ae035458c08efed4d1ed2dd4276394575110ab78e115ba167c8747e9",
+      "exported_sha256": "425e0c40ae035458c08efed4d1ed2dd4276394575110ab78e115ba167c8747e9"
+    },
+    "aster-cloud/internal/networking/types.go": {
+      "upstream_path": "aster-cloud/internal/networking/types.go",
+      "upstream_sha256": "b0077aef27a31d37f0fe644fcf27cda916822aa3d0000108199e464e2c36acbf",
+      "exported_sha256": "b0077aef27a31d37f0fe644fcf27cda916822aa3d0000108199e464e2c36acbf"
+    },
+    "aster-cloud/internal/networking/types_test.go": {
+      "upstream_path": "aster-cloud/internal/networking/types_test.go",
+      "upstream_sha256": "361922caff10f198d7714c74635071b800954dd726093f98e558bd77b4b7093a",
+      "exported_sha256": "361922caff10f198d7714c74635071b800954dd726093f98e558bd77b4b7093a"
+    },
+    "aster-cloud/internal/nodeproto/capabilities.go": {
+      "upstream_path": "aster-cloud/internal/nodeproto/capabilities.go",
+      "upstream_sha256": "6d598aada753f74734b9b8fc46819609a8377341d1ac8d29c3d4a00b42ef6d01",
+      "exported_sha256": "6d598aada753f74734b9b8fc46819609a8377341d1ac8d29c3d4a00b42ef6d01"
+    },
+    "aster-cloud/internal/nodeproto/contract.go": {
+      "upstream_path": "aster-cloud/internal/nodeproto/contract.go",
+      "upstream_sha256": "ca495d46e0dfcfe7038f648ae2e0bef740f941f663e21866672c7d3ff1600225",
+      "exported_sha256": "ca495d46e0dfcfe7038f648ae2e0bef740f941f663e21866672c7d3ff1600225"
+    },
+    "aster-cloud/internal/nodeproto/contract_test.go": {
+      "upstream_path": "aster-cloud/internal/nodeproto/contract_test.go",
+      "upstream_sha256": "4a516387b5d3a5b0fdc1ec26bad75781c41ce6480258476e0c4816da78864015",
+      "exported_sha256": "4a516387b5d3a5b0fdc1ec26bad75781c41ce6480258476e0c4816da78864015"
+    },
+    "aster-cloud/internal/nodeproto/direct_public.go": {
+      "upstream_path": "aster-cloud/internal/nodeproto/direct_public.go",
+      "upstream_sha256": "b7c0f78d7fcfbf744a2384a2c3d732e55614043c0daa98f4f1264ca5c8a03f11",
+      "exported_sha256": "b7c0f78d7fcfbf744a2384a2c3d732e55614043c0daa98f4f1264ca5c8a03f11"
+    },
+    "aster-cloud/internal/nodeproto/direct_public_test.go": {
+      "upstream_path": "aster-cloud/internal/nodeproto/direct_public_test.go",
+      "upstream_sha256": "aa787ffded9bef3f7b78b0a120e5e3b0518ab500deb1a445c9e0002229e3b8e1",
+      "exported_sha256": "aa787ffded9bef3f7b78b0a120e5e3b0518ab500deb1a445c9e0002229e3b8e1"
+    },
+    "aster-cloud/internal/nodeproto/metrics_contract.go": {
+      "upstream_path": "aster-cloud/internal/nodeproto/metrics_contract.go",
+      "upstream_sha256": "78f1b62cbaf89d0598314bdd386069edb15d401bca0be72cb85332118781e0bc",
+      "exported_sha256": "78f1b62cbaf89d0598314bdd386069edb15d401bca0be72cb85332118781e0bc"
+    },
+    "aster-cloud/internal/nodeproto/metrics_contract_test.go": {
+      "upstream_path": "aster-cloud/internal/nodeproto/metrics_contract_test.go",
+      "upstream_sha256": "ab0dad0d730c13140bbeea0d9a52fea01ea3c07515bef6d0b05b8957ba56dfa4",
+      "exported_sha256": "ab0dad0d730c13140bbeea0d9a52fea01ea3c07515bef6d0b05b8957ba56dfa4"
+    },
+    "aster-cloud/internal/nodeproto/network_binding.go": {
+      "upstream_path": "aster-cloud/internal/nodeproto/network_binding.go",
+      "upstream_sha256": "54bbacf79a1ca17fdffe0fd61b64df024254b16ad658a1643789b17cd6b63c43",
+      "exported_sha256": "54bbacf79a1ca17fdffe0fd61b64df024254b16ad658a1643789b17cd6b63c43"
+    },
+    "aster-cloud/internal/nodeproto/network_binding_test.go": {
+      "upstream_path": "aster-cloud/internal/nodeproto/network_binding_test.go",
+      "upstream_sha256": "524579d4110af116828b29681c44c8ecc149aad9e5db6be2ad440c59593a1132",
+      "exported_sha256": "524579d4110af116828b29681c44c8ecc149aad9e5db6be2ad440c59593a1132"
+    },
+    "aster-cloud/internal/nodeproto/public_ingress_capability.go": {
+      "upstream_path": "aster-cloud/internal/nodeproto/public_ingress_capability.go",
+      "upstream_sha256": "bc0d20deac31724dab146c872639535bfd95150b82fde53d4b9f757f8d6a6506",
+      "exported_sha256": "bc0d20deac31724dab146c872639535bfd95150b82fde53d4b9f757f8d6a6506"
+    },
+    "aster-cloud/internal/nodeproto/storage_contract.go": {
+      "upstream_path": "aster-cloud/internal/nodeproto/storage_contract.go",
+      "upstream_sha256": "10067818ab2966fbc5db04407a48a83e4c6fa1ed4feaf7473fdb2eea780c135b",
+      "exported_sha256": "10067818ab2966fbc5db04407a48a83e4c6fa1ed4feaf7473fdb2eea780c135b"
+    },
+    "aster-cloud/internal/nodeproto/storage_contract_test.go": {
+      "upstream_path": "aster-cloud/internal/nodeproto/storage_contract_test.go",
+      "upstream_sha256": "5b41d26ea55db69683139b0a92d2bb262e4d0068e0d56e8dccba6be875a4ca1c",
+      "exported_sha256": "5b41d26ea55db69683139b0a92d2bb262e4d0068e0d56e8dccba6be875a4ca1c"
+    },
+    "aster-cloud/internal/nodeproto/testdata/capabilities-approved-static-ipv4.json": {
+      "upstream_path": "aster-cloud/internal/nodeproto/testdata/capabilities-approved-static-ipv4.json",
+      "upstream_sha256": "a81084aa1405ab0e160311b026a001b46578cf96110d5675c482c1ee6c3738ee",
+      "exported_sha256": "a81084aa1405ab0e160311b026a001b46578cf96110d5675c482c1ee6c3738ee"
+    },
+    "aster-cloud/internal/overlayproto/floating_ip.go": {
+      "upstream_path": "aster-cloud/internal/overlayproto/floating_ip.go",
+      "upstream_sha256": "95e195bdce9cc85a125bacb0c0881c2ac38969c3f0fce80d23d911d8e585bcad",
+      "exported_sha256": "95e195bdce9cc85a125bacb0c0881c2ac38969c3f0fce80d23d911d8e585bcad"
+    },
+    "aster-cloud/internal/overlayproto/floating_ip_test.go": {
+      "upstream_path": "aster-cloud/internal/overlayproto/floating_ip_test.go",
+      "upstream_sha256": "6b1af145447ed382a42b29455b6f1f3e7bb5bcdc4bdc48cbb8771750b83aca9c",
+      "exported_sha256": "6b1af145447ed382a42b29455b6f1f3e7bb5bcdc4bdc48cbb8771750b83aca9c"
+    },
+    "aster-cloud/internal/overlayproto/internet.go": {
+      "upstream_path": "aster-cloud/internal/overlayproto/internet.go",
+      "upstream_sha256": "47d8bd199f9b9ce4e8e5b560817952233e4233ce461d2d0079a82e5769617b1a",
+      "exported_sha256": "47d8bd199f9b9ce4e8e5b560817952233e4233ce461d2d0079a82e5769617b1a"
+    },
+    "aster-cloud/internal/overlayproto/internet_test.go": {
+      "upstream_path": "aster-cloud/internal/overlayproto/internet_test.go",
+      "upstream_sha256": "67fd0d89246f8d4dc0736b14c868863b0b20f4b8b87c7b5649519539be4f6d7a",
+      "exported_sha256": "67fd0d89246f8d4dc0736b14c868863b0b20f4b8b87c7b5649519539be4f6d7a"
+    },
+    "aster-cloud/internal/overlayproto/json.go": {
+      "upstream_path": "aster-cloud/internal/overlayproto/json.go",
+      "upstream_sha256": "409200e71952db9d11198d62e589da02f04461d767b9a6a55b5999d1afef2e2a",
+      "exported_sha256": "409200e71952db9d11198d62e589da02f04461d767b9a6a55b5999d1afef2e2a"
+    },
+    "aster-cloud/internal/overlayproto/nat.go": {
+      "upstream_path": "aster-cloud/internal/overlayproto/nat.go",
+      "upstream_sha256": "901bd984d62a19185917d6635f102f5d72fd80406ab538678595701d453d0956",
+      "exported_sha256": "901bd984d62a19185917d6635f102f5d72fd80406ab538678595701d453d0956"
+    },
+    "aster-cloud/internal/overlayproto/nat_test.go": {
+      "upstream_path": "aster-cloud/internal/overlayproto/nat_test.go",
+      "upstream_sha256": "1aa2c23dbb9d6373b8423b75d1c5ca616cdced4d8edbe18b2b519a14c9e8534b",
+      "exported_sha256": "1aa2c23dbb9d6373b8423b75d1c5ca616cdced4d8edbe18b2b519a14c9e8534b"
+    },
+    "aster-cloud/internal/overlayproto/public_ingress.go": {
+      "upstream_path": "aster-cloud/internal/overlayproto/public_ingress.go",
+      "upstream_sha256": "db40d67d39ab32934e2e64854bee2b85e9059c43f234349696902a7368129c38",
+      "exported_sha256": "db40d67d39ab32934e2e64854bee2b85e9059c43f234349696902a7368129c38"
+    },
+    "aster-cloud/internal/overlayproto/public_ingress_test.go": {
+      "upstream_path": "aster-cloud/internal/overlayproto/public_ingress_test.go",
+      "upstream_sha256": "596712a838b277284413a7171b91462108f95ee8fe0ece39c24728b2522b8115",
+      "exported_sha256": "596712a838b277284413a7171b91462108f95ee8fe0ece39c24728b2522b8115"
+    },
+    "aster-cloud/internal/overlayproto/public_ipv4_test.go": {
+      "upstream_path": "aster-cloud/internal/overlayproto/public_ipv4_test.go",
+      "upstream_sha256": "f970ebb618c84d73e51ee9e03d8e1217b4d227b749e05318c11ba32657a4dccb",
+      "exported_sha256": "f970ebb618c84d73e51ee9e03d8e1217b4d227b749e05318c11ba32657a4dccb"
+    },
+    "aster-cloud/internal/overlayproto/types.go": {
+      "upstream_path": "aster-cloud/internal/overlayproto/types.go",
+      "upstream_sha256": "0ead08670154350dbf9ab00b77e09b9ce414822034f114fbec6b1bddb2ebd968",
+      "exported_sha256": "0ead08670154350dbf9ab00b77e09b9ce414822034f114fbec6b1bddb2ebd968"
+    },
+    "aster-cloud/internal/overlayproto/types_test.go": {
+      "upstream_path": "aster-cloud/internal/overlayproto/types_test.go",
+      "upstream_sha256": "4ccb10d5028115369f373504e1d44c9cb04f269adac60fd0aab49af0e68353b4",
+      "exported_sha256": "4ccb10d5028115369f373504e1d44c9cb04f269adac60fd0aab49af0e68353b4"
+    },
+    "aster-cloud/migrations/001_controller.sql": {
+      "upstream_path": "aster-cloud/migrations/001_controller.sql",
+      "upstream_sha256": "3638c48ccf1dd8425af7af33b9ddfa4ec2d5df376e562c7f0756a319c5c68223",
+      "exported_sha256": "3638c48ccf1dd8425af7af33b9ddfa4ec2d5df376e562c7f0756a319c5c68223"
+    },
+    "aster-cloud/migrations/002_console_identity.sql": {
+      "upstream_path": "aster-cloud/migrations/002_console_identity.sql",
+      "upstream_sha256": "edd8ea63478ad9314e3a3a2ab06ca4edc5a9390232067a91368b8d784a42cd23",
+      "exported_sha256": "edd8ea63478ad9314e3a3a2ab06ca4edc5a9390232067a91368b8d784a42cd23"
+    },
+    "aster-cloud/migrations/003_resource_operations.sql": {
+      "upstream_path": "aster-cloud/migrations/003_resource_operations.sql",
+      "upstream_sha256": "00f61cb5e6ca121951718157742013884351200f13f97453f61c70454cb67212",
+      "exported_sha256": "00f61cb5e6ca121951718157742013884351200f13f97453f61c70454cb67212"
+    },
+    "aster-cloud/migrations/004_audit_query_indexes.sql": {
+      "upstream_path": "aster-cloud/migrations/004_audit_query_indexes.sql",
+      "upstream_sha256": "e231cf7c7366cb1d3575da6027b50454db72f1eb30abdcacf2a51b8b8692c265",
+      "exported_sha256": "e231cf7c7366cb1d3575da6027b50454db72f1eb30abdcacf2a51b8b8692c265"
+    },
+    "aster-cloud/migrations/005_network_ipam.sql": {
+      "upstream_path": "aster-cloud/migrations/005_network_ipam.sql",
+      "upstream_sha256": "3c83d07ba6aad3d8eef18813978ee81fff2e9704425ba256df4eda16b39e959f",
+      "exported_sha256": "3c83d07ba6aad3d8eef18813978ee81fff2e9704425ba256df4eda16b39e959f"
+    },
+    "aster-cloud/migrations/006_instance_network_bindings.sql": {
+      "upstream_path": "aster-cloud/migrations/006_instance_network_bindings.sql",
+      "upstream_sha256": "6cbdc221207e921cc930ac1394d323842924223855dd5789ee71aabcb25309d3",
+      "exported_sha256": "6cbdc221207e921cc930ac1394d323842924223855dd5789ee71aabcb25309d3"
+    },
+    "aster-cloud/migrations/007_overlay_epochs.sql": {
+      "upstream_path": "aster-cloud/migrations/007_overlay_epochs.sql",
+      "upstream_sha256": "34d2ca95bea8aed5fd8f83d4415b63ce9fd5486c88e9a5bbe5f25504a4f801fd",
+      "exported_sha256": "34d2ca95bea8aed5fd8f83d4415b63ce9fd5486c88e9a5bbe5f25504a4f801fd"
+    },
+    "aster-cloud/migrations/008_public_ips.sql": {
+      "upstream_path": "aster-cloud/migrations/008_public_ips.sql",
+      "upstream_sha256": "85e48d9435e11ea6deadcb77404229030c1b421256e0fc4d05c485eb324ebd16",
+      "exported_sha256": "85e48d9435e11ea6deadcb77404229030c1b421256e0fc4d05c485eb324ebd16"
+    },
+    "aster-cloud/migrations/009_public_ip_resources.sql": {
+      "upstream_path": "aster-cloud/migrations/009_public_ip_resources.sql",
+      "upstream_sha256": "950bc312d7e33b56456f123519d55905fa9752ed1f12b23975de4c01fdfaa094",
+      "exported_sha256": "950bc312d7e33b56456f123519d55905fa9752ed1f12b23975de4c01fdfaa094"
+    },
+    "aster-cloud/migrations/010_public_ingress.sql": {
+      "upstream_path": "aster-cloud/migrations/010_public_ingress.sql",
+      "upstream_sha256": "0f996e8b99de9f76fff760eff6806f72baa0cc6516735f5e90bd7375d256eb45",
+      "exported_sha256": "0f996e8b99de9f76fff760eff6806f72baa0cc6516735f5e90bd7375d256eb45"
+    },
+    "aster-cloud/migrations/011_console_users_pagination.sql": {
+      "upstream_path": "aster-cloud/migrations/011_console_users_pagination.sql",
+      "upstream_sha256": "6f8a6311a5bd87b23f9031efb4247026356af1ecb2e7e94a83670dea37010ecd",
+      "exported_sha256": "6f8a6311a5bd87b23f9031efb4247026356af1ecb2e7e94a83670dea37010ecd"
+    },
+    "aster-cloud/migrations/012_identity_operations.sql": {
+      "upstream_path": "aster-cloud/migrations/012_identity_operations.sql",
+      "upstream_sha256": "480f90c31384c8c09127cec3c3cf7b3fccf86d2268e069e5636f485d186d3af1",
+      "exported_sha256": "480f90c31384c8c09127cec3c3cf7b3fccf86d2268e069e5636f485d186d3af1"
+    },
+    "aster-cloud/migrations/embed.go": {
+      "upstream_path": "aster-cloud/migrations/embed.go",
+      "upstream_sha256": "82462c2e9c7bcebebe73720a64381e462f36f8fae68e93c340834aa015970340",
+      "exported_sha256": "82462c2e9c7bcebebe73720a64381e462f36f8fae68e93c340834aa015970340"
+    },
+    "aster-cloud/plugins/billingconnector/README.md": {
+      "upstream_path": "aster-cloud/plugins/billingconnector/README.md",
+      "upstream_sha256": "e2b7a537b95574ff8df8064f7fcc7bb54033911664ce80e24069a68af4f61e35",
+      "exported_sha256": "0dbfa380bb18a8b197f2057e8d80e0360e9bae14360f0eff7d4303be06e69fe7",
+      "adapted_for_independent_repository": true
+    },
+    "aster-cloud/plugins/billingconnector/connector.go": {
+      "upstream_path": "aster-cloud/plugins/billingconnector/connector.go",
+      "upstream_sha256": "f16cabdfe150ae559799921394343d17538e9eef06a8d66150126fc2665bdee4",
+      "exported_sha256": "f16cabdfe150ae559799921394343d17538e9eef06a8d66150126fc2665bdee4"
+    },
+    "aster-cloud/plugins/billingconnector/connector_test.go": {
+      "upstream_path": "aster-cloud/plugins/billingconnector/connector_test.go",
+      "upstream_sha256": "d73b9aff2c7812c0c778a57b3ed007ce89968556596846df761df38765f20469",
+      "exported_sha256": "d73b9aff2c7812c0c778a57b3ed007ce89968556596846df761df38765f20469"
+    },
+    "aster-cloud/plugins/billingconnector/decode.go": {
+      "upstream_path": "aster-cloud/plugins/billingconnector/decode.go",
+      "upstream_sha256": "15652aa049b7773284dcf083b22571a0f9ce71c728e0a2bc4f65bbaf6447aff3",
+      "exported_sha256": "15652aa049b7773284dcf083b22571a0f9ce71c728e0a2bc4f65bbaf6447aff3"
+    },
+    "aster-cloud/plugins/billingconnector/tls_test.go": {
+      "upstream_path": "aster-cloud/plugins/billingconnector/tls_test.go",
+      "upstream_sha256": "2e2c2352438a24d2e7b754f6db0468e8ddcc9c29bede49085d5647a539e3f633",
+      "exported_sha256": "2e2c2352438a24d2e7b754f6db0468e8ddcc9c29bede49085d5647a539e3f633"
+    },
+    "contracts/billing/controllerapi/contract.go": {
+      "upstream_path": "vps-billing/backend/controllerapi/contract.go",
+      "upstream_sha256": "082fc40c2963971d621d93c1a9dbaf1b0b649441757cd5c0af10656385bd1b0c",
+      "exported_sha256": "082fc40c2963971d621d93c1a9dbaf1b0b649441757cd5c0af10656385bd1b0c"
+    },
+    "contracts/billing/controllerapi/contract_test.go": {
+      "upstream_path": "vps-billing/backend/controllerapi/contract_test.go",
+      "upstream_sha256": "cc167d111fb5adae6d545f39377bec05fd1fb6bfdb13fe69927f41b6c9fff62a",
+      "exported_sha256": "cc167d111fb5adae6d545f39377bec05fd1fb6bfdb13fe69927f41b6c9fff62a"
+    },
+    "contracts/billing/controllerapi/transport.go": {
+      "upstream_path": "vps-billing/backend/controllerapi/transport.go",
+      "upstream_sha256": "0a6c6761e361cb181276bfefce6c6e6b7b535f3c25a73d28c68a7e98060ffcae",
+      "exported_sha256": "0a6c6761e361cb181276bfefce6c6e6b7b535f3c25a73d28c68a7e98060ffcae"
+    },
+    "contracts/billing/controllerapi/transport_test.go": {
+      "upstream_path": "vps-billing/backend/controllerapi/transport_test.go",
+      "upstream_sha256": "8ef84541badee31bd40eced514854cd1cdc03be1232a5d6223229de545febe8b",
+      "exported_sha256": "8ef84541badee31bd40eced514854cd1cdc03be1232a5d6223229de545febe8b"
+    },
+    "contracts/billing/internal/controllers/client.go": {
+      "upstream_path": "vps-billing/backend/internal/controllers/client.go",
+      "upstream_sha256": "0ef1476aa70ecf5efef644fc64c1539d4600c8f4945ca0014b2d2e1ce80469de",
+      "exported_sha256": "0ef1476aa70ecf5efef644fc64c1539d4600c8f4945ca0014b2d2e1ce80469de"
+    },
+    "contracts/billing/internal/controllers/client_test.go": {
+      "upstream_path": "vps-billing/backend/internal/controllers/client_test.go",
+      "upstream_sha256": "44e81c1e3112739a51d2b324888841c4903913085e914ec3c0e7e274576570d5",
+      "exported_sha256": "44e81c1e3112739a51d2b324888841c4903913085e914ec3c0e7e274576570d5"
+    },
+    "contracts/billing/internal/controllers/contract.go": {
+      "upstream_path": "vps-billing/backend/internal/controllers/contract.go",
+      "upstream_sha256": "096fc9b1ca26e69a1396f39a8bbcfd983014a722ef864045b306b88086a7b555",
+      "exported_sha256": "096fc9b1ca26e69a1396f39a8bbcfd983014a722ef864045b306b88086a7b555"
+    },
+    "contracts/billing/internal/controllers/contract_test.go": {
+      "upstream_path": "vps-billing/backend/internal/controllers/contract_test.go",
+      "upstream_sha256": "6094c9ad78648bd17f7c02fa9a51f073148067075481393da43870de6c20d961",
+      "exported_sha256": "6094c9ad78648bd17f7c02fa9a51f073148067075481393da43870de6c20d961"
+    }
+  },
+  "initial_import_only": true,
+  "not_release_attestation": true
+}

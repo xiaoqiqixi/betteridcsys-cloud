@@ -1,0 +1,895 @@
+package control
+
+import (
+	"aster/cloud/internal/identity"
+	"aster/cloud/internal/nodeproto"
+	"aster/cloud/internal/overlayproto"
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// Included only by the CI runner's explicit Go -overlay. This file is not part
+// of ordinary go test ./... or any production executable. Console HTTP, TLS,
+// sessions, RBAC, CSRF, audit, MySQL and the runner are real; node RPC is the
+// deterministic test double. This is NOT KVM/OVS/NAT dataplane acceptance.
+func TestOwnedNATBrowserFixture(t *testing.T) {
+	if os.Getenv("ASTER_BROWSER_CI") != "1" || os.Getenv("ASTER_MYSQL_TEST_DSN") == "" || os.Getenv("ASTER_CLOUD_TEST_DSN") != "" {
+		t.Fatal("explicit disposable MySQL browser fixture required; never skip")
+	}
+	caseDir, dist := os.Getenv("ASTER_BROWSER_CASE"), os.Getenv("ASTER_BROWSER_DIST")
+	if !filepath.IsAbs(caseDir) || !filepath.IsAbs(dist) {
+		t.Fatal("absolute private case and built UI required")
+	}
+	info, err := os.Lstat(caseDir)
+	if err != nil || !info.IsDir() || info.Mode().Perm() != 0700 {
+		t.Fatal("private case required")
+	}
+	if info, err := os.Stat(filepath.Join(dist, "index.html")); err != nil || !info.Mode().IsRegular() {
+		t.Fatal("built UI index required")
+	}
+	// Fixed stage markers are private diagnostics only. No accounts, SQL, TLS
+	// material or dynamic errors enter the exported failure result.
+	phase := func(stage string) {
+		if err := os.WriteFile(filepath.Join(caseDir, "fixture-phase"), []byte(stage), 0600); err != nil {
+			t.Fatal("private fixture phase unavailable")
+		}
+	}
+	phase("OVERLAY_INITIALIZATION")
+	f := mysqlOverlayFixture(t)
+	phase("NAT_APPROVAL")
+	gateway, policies := f.approveNAT(t)
+	// Safe controller projection only: the synthetic public address is never
+	// configured on the runner and the node RPC remains an explicit substitute.
+	// Epoch 1 retains the legacy prefix-only policy; the real UI selects public
+	// Internet mode in epoch 2, disables it in epoch 4 and re-enables it without
+	// any explicit destination prefixes in epoch 5.
+	f.config.OverlayClusters[0].NATProfiles[0].AllowInternetEgress = true
+	f.config.OverlayClusters[0].NATProfiles[0].AllowFloatingIP = true
+	f.config.OverlayClusters[0].NATProfiles[0].PublicIPv4 = "8.8.4.2"
+	f.config.OverlayClusters[0].NATProfiles[0].PublicIPv4s = []string{"8.8.4.3", "8.8.4.4"}
+	// Legal maximum-length unbroken ID exercises real mobile wrapping, not
+	// just a short display fixture or a component-only layout assertion.
+	f.config.OverlayClusters[0].NATProfiles[0].ProfileID = strings.Repeat("w", 64)
+	policies[0].ProfileID = f.config.OverlayClusters[0].NATProfiles[0].ProfileID
+	if !f.config.Valid() {
+		t.Fatal("public Internet browser projection invalid")
+	}
+	ctx := context.Background()
+	// New policy-bearing bindings require every overlay participant to advertise
+	// enforcement support. This only refreshes synthetic heartbeat observations;
+	// it never changes guest networking or immutable financial/node requests.
+	type ingressHeartbeat struct {
+		node NodeProfile
+		caps Capability
+	}
+	phase("PARTICIPANT_CAPABILITIES")
+	ingressHeartbeats := []ingressHeartbeat{}
+	for _, pin := range f.config.OverlayClusters[0].Profiles {
+		p, ok := f.config.Node(pin.NodeID)
+		if !ok {
+			t.Fatal("overlay capability node unavailable")
+		}
+		// A newly observed heartbeat must not replay the helper's identical
+		// timestamp/capability bytes (MySQL changedRows would correctly be zero).
+		observedAt := time.Now().UTC().Truncate(time.Microsecond)
+		caps := vpcTestCapabilities(p, observedAt)
+		caps.OVSNetworkProfiles = []string{pin.ProfileID}
+		if !contains(caps.NetworkProfiles, nodeproto.PublicIngressCapability) {
+			caps.NetworkProfiles = append(caps.NetworkProfiles, nodeproto.PublicIngressCapability)
+		}
+		receivedAt := time.Now().UTC().Truncate(time.Microsecond)
+		if e := f.store.Heartbeat(ctx, p, caps, receivedAt, time.Minute); e != nil {
+			t.Fatal("overlay ingress capability unavailable")
+		}
+		f.now = receivedAt
+		ingressHeartbeats = append(ingressHeartbeats, ingressHeartbeat{p, caps})
+	}
+	// A separate normal-public node/pool cannot overlap the existing NAT stock.
+	// Only deterministic node RPC is substituted; admission, frozen node/3 tasks,
+	// operation dispatch/results, generation and MySQL resource state remain real.
+	phase("DIRECT_NODE_SETUP")
+	directNode, directNow := mysqlNode(t, f.store)
+	directRoot := DirectPublicProfile{ClusterID: "public-direct", NodeID: directNode.ID, ProfileID: nodeproto.DirectPublicProfile, ProfileSHA256: strings.Repeat("c", 64), CIDR: "9.9.9.0/24", GatewayIPv4: "9.9.9.1", PublicIPv4s: []string{"9.9.9.2"}}
+	f.config.Nodes = append(f.config.Nodes, directNode)
+	f.config.Presets = append(f.config.Presets, Preset{ID: "browser-direct-public", NodeID: directNode.ID, Resources: testResources(directNode)})
+	f.config.DirectPublicProfiles = []DirectPublicProfile{directRoot}
+	directCaps := testCapabilities(directNode, directNow)
+	directCaps.NetworkProfiles = append(directCaps.NetworkProfiles, nodeproto.DirectPublicCapability)
+	directCaps.DirectPublicNetwork = &nodeproto.DirectPublicApproval{ProfileID: directRoot.ProfileID, ProfileSHA256: directRoot.ProfileSHA256, CIDR: directRoot.CIDR, Gateway: directRoot.GatewayIPv4, Addresses: directRoot.PublicIPv4s}
+	if !f.config.Valid() {
+		t.Fatal("direct public browser root invalid")
+	}
+	if err = f.store.Heartbeat(ctx, directNode, directCaps, directNow, time.Minute); err != nil {
+		t.Fatal("direct node heartbeat unavailable")
+	}
+	// All later pool/epoch admission times follow every received heartbeat;
+	// previously frozen financial and node task bytes are never rewritten.
+	f.now = time.Now().UTC().Truncate(time.Microsecond)
+	phase("DIRECT_POOL_SETUP")
+	directPool, _, _, err := f.store.CreatePublicIPPool(ctx, f.config, f.actor, id(), PublicIPPoolInput{ClusterID: directRoot.ClusterID, Name: "实例直绑池", CIDR: directRoot.CIDR, Addresses: directRoot.PublicIPv4s, Enabled: true}, f.now)
+	if err != nil {
+		t.Fatal("direct public fixture pool unavailable")
+	}
+	directRPC := &ownedPublicVMRPC{results: map[string]nodeproto.NodeResult{}}
+	directWorker := OperationWorker{Store: f.store, Config: f.config, RPC: func(context.Context, NodeProfile) (NodeRPC, error) { return directRPC, nil }}
+	directRunner := NewOperationRunner(directWorker)
+	defer directRunner.Close()
+	if _, err = f.store.DB.Exec("UPDATE controller_overlay_vpcs SET name=? WHERE id=?", "业务内网", f.vpc.ID); err != nil {
+		t.Fatal("fixture VPC name unavailable")
+	}
+	f.vpc.Name = "业务内网"
+	phase("INITIAL_EPOCH_PLAN")
+	epoch, _, err := f.store.PlanOverlayEpoch(ctx, f.config, f.actor, id(), OverlayEpochInput{ClusterID: f.vpc.ClusterID, Members: f.members, Gateways: []overlayproto.Gateway{gateway}, NATPolicies: &policies}, f.now)
+	if err != nil {
+		t.Fatal("initial epoch unavailable")
+	}
+	rpc := &overlayFakeRPC{}
+	worker := f.worker(rpc)
+	phase("INITIAL_EPOCH_RELEASE")
+	advanceOverlayFixture(t, worker, epoch.ID)
+	const origin = "https://localhost:5447"
+	phase("IDENTITY_SETUP")
+	auth, err := identity.New(f.store.DB, identity.Config{Origin: origin})
+	if err != nil {
+		t.Fatal("fixture identity unavailable")
+	}
+	password, email := "Browser-NAT-"+id()+"!", "network-admin@example.invalid"
+	browserActor, err := auth.Bootstrap(ctx, email, "网络验收管理员", []byte(password))
+	if err != nil {
+		t.Fatal("fixture bootstrap failed")
+	}
+	memberPage := seedOwnedBrowserMembers(t, ctx, f.store, auth, browserActor, password)
+	memberBaseline := auditDataDigest(t, f.store, map[string]string{"controller_console_users": "id"})
+	phase("INITIAL_HISTORY_CAPTURE")
+	initialTasks, err := f.store.OverlayTasks(ctx, epoch.ID)
+	if err != nil {
+		t.Fatal("initial node receipts unavailable")
+	}
+	var initialSnapshot []byte
+	var initialAudit int
+	if err = f.store.DB.QueryRow("SELECT snapshot FROM controller_overlay_epochs WHERE id=?", epoch.ID).Scan(&initialSnapshot); err != nil {
+		t.Fatal("initial snapshot unavailable")
+	}
+	if err = f.store.DB.QueryRow("SELECT COUNT(*) FROM controller_audit").Scan(&initialAudit); err != nil {
+		t.Fatal("initial audit count unavailable")
+	}
+	worker.Now = func() time.Time { return time.Now().UTC() }
+	rpc.lose = "program" // One lost ACK: receipt exists; GET reconcile must not re-POST.
+	runner := NewOverlayRunner(worker)
+	defer runner.Close()
+	mux := http.NewServeMux()
+	console := Console{Store: f.store, Config: f.config, Identity: auth, OverlayWorker: &worker, OverlayRunner: runner, Worker: &directWorker, Runner: directRunner}
+	var publicAllocationACKLost, publicAllocationHeadersFlushed atomic.Bool
+	var publicAllocationPosts atomic.Int32
+	consoleHandler := console.Handler()
+	mux.Handle("/console/v1/", publicBrowserACKFault(t, consoleHandler, &publicAllocationACKLost, &publicAllocationHeadersFlushed, &publicAllocationPosts))
+	files := http.FileServer(http.Dir(dist))
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		files.ServeHTTP(w, r)
+	}))
+	phase("LOOPBACK_LISTENER")
+	listener, err := net.Listen("tcp", "127.0.0.1:5447")
+	if err != nil {
+		t.Fatal("owned loopback listener unavailable")
+	}
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	defer server.Close()
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- server.ServeTLS(listener, filepath.Join(caseDir, "server.pem"), filepath.Join(caseDir, "server.key"))
+	}()
+	phase("CREDENTIAL_HANDOFF")
+	credentials, err := json.Marshal(map[string]any{"email": email, "password": password, "origin": origin, "actor_id": browserActor.ID, "owner_ref": f.vpc.OwnerRef, "vpc_id": f.vpc.ID, "epoch_id": epoch.ID, "members": f.members, "gateway": gateway, "direct_node_id": directNode.ID, "direct_pool_id": directPool.ID, "members_page": memberPage})
+	if err != nil || os.WriteFile(filepath.Join(caseDir, "browser-credentials.json"), credentials, 0600) != nil {
+		t.Fatal("private fixture credentials unavailable")
+	}
+	phase("BROWSER_READY")
+	t.Log("READY: loopback HTTPS, independent MySQL; simulated node RPC, no VM commands")
+	lastDirectHeartbeat := time.Now()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	lifetime := time.NewTimer(18 * time.Minute)
+	defer lifetime.Stop()
+	for {
+		select {
+		case <-lifetime.C:
+			t.Fatal("browser fixture exceeded bounded lifetime")
+		case err := <-serverDone:
+			if !errors.Is(err, http.ErrServerClosed) {
+				t.Fatal("owned HTTPS server failed")
+			}
+			t.Fatal("server stopped before explicit acceptance shutdown")
+		case <-ticker.C:
+			// Long browser workflows must not quietly depend on a stale heartbeat.
+			if time.Since(lastDirectHeartbeat) > 5*time.Second {
+				for _, heartbeat := range ingressHeartbeats {
+					caps := heartbeat.caps
+					caps.ObservedAt = time.Now().UTC().Format(time.RFC3339Nano)
+					if e := f.store.Heartbeat(ctx, heartbeat.node, caps, time.Now().UTC(), time.Minute); e != nil {
+						t.Fatal("overlay ingress heartbeat refresh failed")
+					}
+				}
+				directCaps.ObservedAt = time.Now().UTC().Format(time.RFC3339Nano)
+				if e := f.store.Heartbeat(ctx, directNode, directCaps, time.Now().UTC(), time.Minute); e != nil {
+					t.Fatal("direct browser heartbeat refresh failed")
+				}
+				lastDirectHeartbeat = time.Now()
+			}
+			if _, err := os.Stat(filepath.Join(caseDir, "stop-browser")); err != nil {
+				continue
+			}
+			shutdown, cancel := context.WithTimeout(ctx, 5*time.Second)
+			err := server.Shutdown(shutdown)
+			cancel()
+			if err != nil {
+				t.Fatal("owned HTTPS shutdown failed")
+			}
+			runner.Close()
+			directRunner.Close()
+			var epochs, audit, vpcs, completed int
+			for _, item := range []struct {
+				query string
+				value *int
+			}{
+				{"SELECT COUNT(*) FROM controller_overlay_epochs", &epochs},
+				{"SELECT COUNT(*) FROM controller_audit", &audit},
+				{"SELECT COUNT(*) FROM controller_overlay_vpcs", &vpcs},
+				{"SELECT COUNT(*) FROM controller_overlay_epochs WHERE state='succeeded'", &completed},
+			} {
+				if err := f.store.DB.QueryRow(item.query).Scan(item.value); err != nil {
+					t.Fatal("durable browser evidence unavailable")
+				}
+			}
+			for _, job := range f.jobs {
+				saved, err := f.store.Lookup(ctx, job.OperationID)
+				if err != nil || saved.RequestSHA != job.RequestSHA || saved.NodeRequestSHA != job.NodeRequestSHA || !bytes.Equal(saved.RequestJSON, job.RequestJSON) || !bytes.Equal(saved.NodeRequest, job.NodeRequest) {
+					t.Fatal("financial/node historical snapshot changed")
+				}
+			}
+			var savedSnapshot []byte
+			if err := f.store.DB.QueryRow("SELECT snapshot FROM controller_overlay_epochs WHERE id=?", epoch.ID).Scan(&savedSnapshot); err != nil || !bytes.Equal(savedSnapshot, initialSnapshot) {
+				t.Fatal("initial network snapshot changed")
+			}
+			savedTasks, err := f.store.OverlayTasks(ctx, epoch.ID)
+			if err != nil || !reflect.DeepEqual(savedTasks, initialTasks) {
+				t.Fatal("initial node receipt changed")
+			}
+			rpc.mu.Lock()
+			gets, posts, lostACKConsumed := rpc.gets, len(rpc.posts), rpc.lose == ""
+			uniquePosts := make(map[string]bool, posts)
+			originalPrefixPreserved := true
+			for index, task := range rpc.posts {
+				uniquePosts[task.OperationID] = true
+				if index < 42 && (task.Snapshot.Epoch > 7 || len(task.Snapshot.FloatingIPs) != 0) {
+					originalPrefixPreserved = false
+				}
+				if index < 30 && (task.Snapshot.Epoch > 5 || len(task.Snapshot.NATPolicies) != 1 || task.Snapshot.NATPolicies[0].PublicIPv4 != "") {
+					originalPrefixPreserved = false
+				}
+			}
+			rpc.mu.Unlock()
+			// Thirteen epochs each send exactly six unique tasks; the first seven remain historical. Lost ACK
+			// reconciliation must never resend the original POST.
+			if !originalPrefixPreserved || epochs != 13 || vpcs != 2 || audit <= initialAudit || completed != 12 || gets < 1 || len(initialTasks) != 6 || posts != 13*len(initialTasks) || len(uniquePosts) != posts || !lostACKConsumed {
+				t.Fatal("required browser plan/reconcile/recovery/VPC persistence did not execute")
+			}
+			for version := int64(1); version <= 7; version++ {
+				var operationID string
+				if err := f.store.DB.QueryRow("SELECT id FROM controller_overlay_epochs WHERE cluster_id=? AND epoch=?", f.vpc.ClusterID, version).Scan(&operationID); err != nil {
+					t.Fatal("durable browser evidence unavailable")
+				}
+				saved, err := f.store.OverlayEpoch(ctx, operationID)
+				if err != nil || len(saved.Snapshot.Gateways) != 1 {
+					t.Fatal("required browser plan/reconcile/recovery/VPC persistence did not execute")
+				}
+				if version == 7 {
+					if saved.State != "succeeded" || len(saved.Snapshot.NATPolicies) != 0 || len(saved.Snapshot.Gateways[0].AllowedPrefixes) != 0 {
+						t.Fatal("UI unbinding did not persist a full released epoch without NAT")
+					}
+					if err := publicBrowserReleaseProof(t, ctx, f, saved); err != nil {
+						t.Fatal("every unbinding phase receipt must match the exact immutable intent", err)
+					}
+					continue
+				}
+				if len(saved.Snapshot.NATPolicies) != 1 {
+					t.Fatal("UI epoch lost its required NAT selection")
+				}
+				policy, routes := saved.Snapshot.NATPolicies[0], saved.Snapshot.Gateways[0].AllowedPrefixes
+				if version == 6 && (policy.PublicIPv4 != "8.8.4.3" || !policy.InternetEgressEnabled || !policy.SNATEnabled || len(routes) != 0 || len(policy.Forwardings) != 0 || saved.State != "succeeded") {
+					t.Fatal("UI allocated public-IP selection was not applied by every node")
+				}
+				if version <= 5 && policy.PublicIPv4 != "" {
+					t.Fatal("new allocation rewrote legacy public-IP selections")
+				}
+				wantInternet := version == 2 || version == 3 || version == 5 || version == 6
+				wantSNAT := version != 4
+				if policy.InternetEgressEnabled != wantInternet || policy.SNATEnabled != wantSNAT || routes == nil || version >= 4 && (len(routes) != 0 || len(policy.Forwardings) != 0) || version < 4 && (len(routes) != 1 || len(policy.Forwardings) != 1) || version != 2 && saved.State != "succeeded" || version == 2 && saved.State != "superseded" {
+					t.Fatal("required browser plan/reconcile/recovery/VPC persistence did not execute")
+				}
+			}
+			options, err := f.store.OverlayOptions(ctx, f.config, f.vpc.ClusterID)
+			if err != nil || options.LatestEpoch == nil || options.LatestEpoch.Epoch != 13 || len(options.LatestEpoch.Snapshot.NATPolicies) != 0 || len(options.NATProfiles) != 1 || !options.NATProfiles[0].AllowInternetEgress || options.NATProfiles[0].PublicIPv4 != "8.8.4.2" || !reflect.DeepEqual(options.NATProfiles[0].PublicIPv4s, []string{"8.8.4.3", "8.8.4.4"}) {
+				t.Fatal("required browser plan/reconcile/recovery/VPC persistence did not execute")
+			}
+			pools, next, err := f.store.PublicIPPools(ctx, f.vpc.ClusterID, "")
+			if err != nil || next != "" || len(pools) != 1 || pools[0].Name != "公网出口池" || pools[0].CIDR != "8.8.4.0/24" || !pools[0].Enabled || !reflect.DeepEqual(pools[0].Addresses, []string{"8.8.4.3", "8.8.4.4"}) {
+				t.Fatal("public pool UI creation and disable/re-enable did not persist")
+			}
+			var originalPoolResult []byte
+			if f.store.DB.QueryRow("SELECT result FROM controller_public_ip_operations WHERE id=? AND action='pool.create'", pools[0].ID).Scan(&originalPoolResult) != nil {
+				t.Fatal("immutable pool creation operation missing")
+			}
+			var originalPool PublicIPResult
+			if json.Unmarshal(originalPoolResult, &originalPool) != nil || originalPool.Pool == nil || !reflect.DeepEqual(originalPool.Pool.Addresses, []string{"8.8.4.3"}) {
+				t.Fatal("pool extension rewrote the original inventory creation result")
+			}
+			leases, next, err := f.store.PublicIPLeases(ctx, f.config, f.vpc.ClusterID, pools[0].ID, "")
+			if err != nil || next != "" || len(leases) != 2 {
+				t.Fatal("release must retain the original lease and create a distinct allocation")
+			}
+			released, reserved := 0, 0
+			var activeLease string
+			for _, lease := range leases {
+				if lease.Address != "8.8.4.3" || lease.OwnerRef != f.vpc.OwnerRef || lease.VPCID != f.vpc.ID || lease.NodeID != policies[0].NodeID || lease.ProfileID != policies[0].ProfileID {
+					t.Fatal("public allocation escaped exact tenant/node/profile binding")
+				}
+				if lease.State == "released" && lease.BindingState == "released" && !lease.Releasable {
+					released++
+				} else if lease.State == "reserved" && lease.BindingState == "reserved" && lease.Releasable {
+					reserved++
+					activeLease = lease.ID
+				} else {
+					t.Fatal("final public lease binding state is not safely detached")
+				}
+				var raw []byte
+				if err := f.store.DB.QueryRow("SELECT result FROM controller_public_ip_operations WHERE id=? AND action='lease.allocate'", lease.ID).Scan(&raw); err != nil {
+					t.Fatal("immutable allocation operation missing")
+				}
+				var result PublicIPResult
+				if json.Unmarshal(raw, &result) != nil || result.Lease == nil || result.Lease.State != "reserved" || result.Lease.Address != lease.Address || result.Lease.ID != lease.ID {
+					t.Fatal("reclamation rewrote the historical allocation operation")
+				}
+			}
+			var active, inventory, operationCount, natOperationCount int
+			var savedActive string
+			if !publicAllocationACKLost.Load() || !publicAllocationHeadersFlushed.Load() || publicAllocationPosts.Load() != 2 || released != 1 || reserved != 1 || f.store.DB.QueryRow("SELECT COUNT(*) FROM controller_public_ip_active").Scan(&active) != nil || active != 2 || f.store.DB.QueryRow("SELECT lease_id FROM controller_public_ip_active WHERE address='8.8.4.3'").Scan(&savedActive) != nil || savedActive != activeLease || f.store.DB.QueryRow("SELECT COUNT(*) FROM controller_public_ip_inventory").Scan(&inventory) != nil || inventory != 3 || f.store.DB.QueryRow("SELECT COUNT(*) FROM controller_public_ip_operations").Scan(&operationCount) != nil || operationCount != 8 {
+				t.Fatal("public pool allocation/reclamation inventory is not exclusive and durable")
+			}
+			if f.store.DB.QueryRow("SELECT COUNT(*) FROM controller_public_ip_operations WHERE id<>?", directPool.ID).Scan(&natOperationCount) != nil || natOperationCount != 7 {
+				t.Fatal("original NAT operation count changed")
+			}
+			for action, count := range map[string]int{"pool.create": 2, "pool.extend": 1, "pool.state": 2, "lease.allocate": 2, "lease.release": 1} {
+				var got int
+				if f.store.DB.QueryRow("SELECT COUNT(*) FROM controller_public_ip_operations WHERE action=?", action).Scan(&got) != nil || got != count {
+					t.Fatal("a public-IP UI operation was retried or omitted")
+				}
+			}
+			if err := publicVMBrowserProof(t, ctx, f, directRPC, directPool, browserActor.ID); err != nil {
+				t.Fatal("VM public resource browser proof failed", err)
+			}
+			if !reflect.DeepEqual(memberBaseline, auditDataDigest(t, f.store, map[string]string{"controller_console_users": "id"})) {
+				t.Fatal("member browser changed seeded account or authorization data")
+			}
+			// Fixed schema: no emails, IDs, credentials, DSNs, cookies, SQL or logs.
+			result, err := json.Marshal(map[string]any{"passed": true, "real_mysql": true, "simulated_node_rpc": true, "epochs": epochs, "vpcs": vpcs, "audit_count_increased": true, "financial_and_node_snapshots_unchanged": true, "initial_network_snapshot_and_receipts_unchanged": true, "lost_ack_reconciled": true, "node_posts_unique": true, "node_post_count": posts, "public_egress_enabled": true, "public_egress_disabled": true, "pure_internet_reenabled": true, "original_node_post_prefix_count": 30, "original_nat_node_post_prefix_count": 42, "public_pool_created": true, "public_pool_extended": true, "public_pool_state_managed": true, "public_ip_bound": true, "public_ip_unbound_after_all_release_receipts": true, "public_ip_reclaimed_and_reallocated": true, "public_ip_lease_history_retained": true, "public_ip_post_commit_ack_lost": publicAllocationACKLost.Load(), "public_ip_fault_headers_flushed": publicAllocationHeadersFlushed.Load(), "public_ip_operations": natOperationCount, "total_pool_and_nat_operations": operationCount, "vm_public_resource_operations": 9, "vm_public_resource_history_count": 3, "direct_node_post_count": 3, "floating_bound_moved_unbound": true, "floating_reclaimed_reallocated": true, "direct_created_dispatched_detached_reclaimed": true, "direct_node3_exact_requests_and_results": true, "global_inventory_exclusive": true, "first_seven_epochs_retained": true, "public_ingress_operations": 3, "public_ingress_version_history": 3, "public_ingress_default_deny_move_revoke": true, "public_ingress_immutable_operations": true, "public_ip_lease_count": len(leases), "members_total": 205, "members_unchanged": true})
+			if err != nil || os.WriteFile(filepath.Join(caseDir, "fixture.json"), result, 0600) != nil {
+				t.Fatal("sanitized durable result unavailable")
+			}
+			t.Log("PASS: durable UI operations; financial/node/network history unchanged")
+			return
+		}
+	}
+}
+
+// Owned fixture data only. Browser member acceptance is read-only after this
+// seed and its full account-row baseline; existing resource writes stay unchanged.
+type ownedBrowserMembers struct {
+	Count          int      `json:"count"`
+	IDs            []string `json:"ids"`
+	ViewerEmail    string   `json:"viewer_email"`
+	ViewerPassword string   `json:"viewer_password"`
+}
+
+func seedOwnedBrowserMembers(t *testing.T, ctx context.Context, store *SQLStore, auth *identity.Service, admin identity.User, adminPassword string) ownedBrowserMembers {
+	t.Helper()
+	const origin = "https://localhost:5447"
+	request := func(method, path string, body any, cookie *http.Cookie, csrf string, want int) *httptest.ResponseRecorder {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal("member seed request invalid")
+		}
+		r := httptest.NewRequest(method, origin+"/console/v1"+path, bytes.NewReader(raw))
+		r.RemoteAddr = "127.0.0.1:45455"
+		if method != "GET" {
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("Idempotency-Key", id())
+			r.Header.Set("Origin", origin)
+			r.Header.Set("X-CSRF-Token", csrf)
+		}
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		auth.Handler().ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatal("member seed production identity request rejected")
+		}
+		return w
+	}
+	csrfResponse := request("GET", "/auth/csrf", nil, nil, "", 200)
+	var csrf struct {
+		Token string `json:"csrf_token"`
+	}
+	cookies := csrfResponse.Result().Cookies()
+	if json.Unmarshal(csrfResponse.Body.Bytes(), &csrf) != nil || len(cookies) != 1 || csrf.Token == "" {
+		t.Fatal("member seed anonymous identity unavailable")
+	}
+	login := request("POST", "/auth/login", map[string]string{"email": admin.Email, "password": adminPassword}, cookies[0], csrf.Token, 200)
+	var session struct {
+		User identity.User `json:"user"`
+		CSRF string        `json:"csrf_token"`
+	}
+	cookies = login.Result().Cookies()
+	if json.Unmarshal(login.Body.Bytes(), &session) != nil || len(cookies) != 1 || session.User.ID != admin.ID || session.CSRF == "" {
+		t.Fatal("member seed administrator authentication unavailable")
+	}
+	out := ownedBrowserMembers{Count: 205, IDs: []string{}, ViewerEmail: "members-viewer@example.invalid", ViewerPassword: "Browser-Members-" + id() + "!"}
+	created := request("POST", "/users", identity.CreateUser{Email: out.ViewerEmail, Name: "只读成员验收", Password: out.ViewerPassword, Role: "viewer", Reason: "隔离浏览器成员只读验收准备"}, cookies[0], session.CSRF, 201)
+	var viewer struct {
+		User identity.User `json:"user"`
+	}
+	if json.Unmarshal(created.Body.Bytes(), &viewer) != nil || viewer.User.Role != "viewer" || viewer.User.ID == "" || viewer.User.Can("users.manage") {
+		t.Fatal("member seed viewer invalid")
+	}
+	request("POST", "/auth/logout", map[string]any{}, cookies[0], session.CSRF, 204)
+	tx, err := store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal("member seed transaction unavailable")
+	}
+	defer tx.Rollback()
+	var before int
+	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM controller_console_users").Scan(&before); err != nil || before != 2 {
+		t.Fatal("member seed requires its two owned accounts only")
+	}
+	at := time.Date(2025, 1, 2, 3, 4, 5, 123456000, time.UTC)
+	if _, err = tx.ExecContext(ctx, "UPDATE controller_console_users SET created_at=? WHERE id IN (?,?)", at, admin.ID, viewer.User.ID); err != nil {
+		t.Fatal("member seed equal chronology unavailable")
+	}
+	for i := 0; i < 203; i++ {
+		name := "分页成员 " + strconv.Itoa(i+1)
+		email := "member-" + strconv.Itoa(i+1) + "@example.invalid"
+		if i == 202 {
+			name = "LongMember" + strings.Repeat("x", 70)
+			email = strings.Repeat("l", 63) + "@" + strings.Repeat("d", 63) + ".example.invalid"
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO controller_console_users(id,email,name,password_hash,role,enabled,permissions,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", id(), email, name, "fixture-list-only-unverifiable-hash", "viewer", true, `["instances.read","nodes.read","storage.read"]`, at, at); err != nil {
+			t.Fatal("member seed row unavailable")
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal("member seed commit unavailable")
+	}
+	rows, err := store.DB.QueryContext(ctx, "SELECT id FROM controller_console_users ORDER BY created_at,id")
+	if err != nil {
+		t.Fatal("member seed ordering unavailable")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var memberID string
+		if rows.Scan(&memberID) != nil {
+			t.Fatal("member seed identity unavailable")
+		}
+		out.IDs = append(out.IDs, memberID)
+	}
+	if rows.Err() != nil || len(out.IDs) != 205 {
+		t.Fatal("member seed must contain exactly 205 identities")
+	}
+	var timestamps int
+	if store.DB.QueryRowContext(ctx, "SELECT COUNT(DISTINCT created_at) FROM controller_console_users").Scan(&timestamps) != nil || timestamps != 1 {
+		t.Fatal("member seed timestamps must tie exactly")
+	}
+	return out
+}
+
+// The normal public release guard verifies every exact phase request/receipt.
+func publicBrowserReleaseProof(t *testing.T, ctx context.Context, f overlayFixture, epoch OverlayEpoch) error {
+	t.Helper()
+	tx, err := f.store.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return publicReleaseCompleteTx(ctx, tx, epoch)
+}
+
+// A response fault, not an extra client request: commit through the unchanged
+// real handler first, then flush its actual 201 headers and truncate its JSON.
+// Flushing matters: a close before response headers can be transparently replayed
+// by the browser transport as an apparently unprocessed request. Once headers
+// are received, incomplete JSON remains unknown without an implicit redial.
+func publicBrowserACKFault(t *testing.T, next http.Handler, lost, flushed *atomic.Bool, posts *atomic.Int32) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		allocation := r.Method == http.MethodPost && r.URL.Path == "/console/v1/public-ips/leases"
+		if allocation {
+			posts.Add(1)
+		}
+		if !allocation || lost.Load() {
+			next.ServeHTTP(w, r)
+			return
+		}
+		capture := httptest.NewRecorder()
+		next.ServeHTTP(capture, r)
+		for key, values := range capture.Header() {
+			w.Header()[key] = append([]string{}, values...)
+		}
+		if capture.Code == http.StatusCreated && capture.Body.Len() > 0 && lost.CompareAndSwap(false, true) {
+			w.Header().Set("Content-Length", strconv.Itoa(capture.Body.Len()))
+			w.WriteHeader(capture.Code)
+			if err := http.NewResponseController(w).Flush(); err != nil {
+				t.Error("public allocation response-fault headers could not be flushed")
+				panic(http.ErrAbortHandler)
+			}
+			flushed.Store(true)
+			panic(http.ErrAbortHandler) // HTTP/1 closes or HTTP/2 resets only this body.
+		}
+		w.WriteHeader(capture.Code)
+		_, _ = w.Write(capture.Body.Bytes())
+	})
+}
+
+// This test proves the injection itself over actual HTTP/1.1 and HTTP/2 TLS,
+// independent of MySQL. The main browser fixture still proves the real commit,
+// RBAC/CSRF, exact operation GET and unique allocation against MySQL.
+func TestOwnedPublicIPResponseFault(t *testing.T) {
+	for _, h2 := range []bool{false, true} {
+		name, protocol := "http1", 1
+		if h2 {
+			name, protocol = "http2", 2
+		}
+		t.Run(name, func(t *testing.T) {
+			var lost, flushed, committed atomic.Bool
+			var posts atomic.Int32
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					committed.Store(true)
+					output(w, http.StatusCreated, map[string]bool{"committed": true})
+					return
+				}
+				if !committed.Load() {
+					failure(w, 404, "NOT_COMMITTED")
+					return
+				}
+				output(w, 200, map[string]bool{"committed": true})
+			})
+			server := httptest.NewUnstartedServer(publicBrowserACKFault(t, handler, &lost, &flushed, &posts))
+			server.EnableHTTP2 = h2
+			server.StartTLS()
+			t.Cleanup(server.Close)
+			client := server.Client() // Only this server's explicit CA is trusted.
+			client.Timeout = 3 * time.Second
+			request, err := http.NewRequest(http.MethodPost, server.URL+"/console/v1/public-ips/leases", strings.NewReader(`{}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Idempotency-Key", strings.Repeat("a", 32))
+			response, err := client.Do(request)
+			if err != nil {
+				t.Fatal("original successful headers were not observed", err)
+			}
+			body, readErr := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.ProtoMajor != protocol || response.StatusCode != http.StatusCreated || readErr == nil || len(body) != 0 || !lost.Load() || !flushed.Load() || !committed.Load() || posts.Load() != 1 {
+				t.Fatal("fault must occur after commit and real headers, before complete JSON, without replay", response.ProtoMajor, response.StatusCode, readErr, len(body), posts.Load())
+			}
+			proof, err := client.Get(server.URL + "/console/v1/public-ips/operations/original")
+			if err != nil {
+				t.Fatal("read-only original operation after the completed fault", err)
+			}
+			var result map[string]bool
+			err = json.NewDecoder(proof.Body).Decode(&result)
+			proof.Body.Close()
+			if err != nil || proof.StatusCode != 200 || !result["committed"] || posts.Load() != 1 {
+				t.Fatal("original operation was not available after the response fault", err)
+			}
+		})
+	}
+}
+
+// This small real-MySQL regression preserves the production changedRows guard:
+// identical heartbeat bytes are not a successful refresh, while a newly observed
+// heartbeat is accepted and every subsequent admission clock is non-future.
+func TestOwnedPublicIngressHeartbeatChronology(t *testing.T) {
+	if os.Getenv("ASTER_BROWSER_CI") != "1" || os.Getenv("ASTER_MYSQL_TEST_DSN") == "" || os.Getenv("ASTER_CLOUD_TEST_DSN") != "" {
+		t.Fatal("explicit disposable MySQL heartbeat fixture required; never skip")
+	}
+	f := mysqlOverlayFixture(t)
+	ctx := context.Background()
+	pin := f.config.OverlayClusters[0].Profiles[len(f.config.OverlayClusters[0].Profiles)-1]
+	p, ok := f.config.Node(pin.NodeID)
+	if !ok {
+		t.Fatal("heartbeat chronology node unavailable")
+	}
+	identical := vpcTestCapabilities(p, f.now)
+	identical.OVSNetworkProfiles = []string{pin.ProfileID}
+	if e := f.store.Heartbeat(ctx, p, identical, f.now, time.Minute); !errors.Is(e, ErrConflict) {
+		t.Fatal("identical heartbeat must retain changedRows conflict")
+	}
+	lastReceived := f.now
+	for _, pin := range f.config.OverlayClusters[0].Profiles {
+		p, ok := f.config.Node(pin.NodeID)
+		if !ok {
+			t.Fatal("heartbeat chronology node unavailable")
+		}
+		observedAt := time.Now().UTC().Truncate(time.Microsecond)
+		if !observedAt.After(f.now) {
+			t.Fatal("heartbeat observation clock did not advance")
+		}
+		caps := vpcTestCapabilities(p, observedAt)
+		caps.OVSNetworkProfiles = []string{pin.ProfileID}
+		receivedAt := time.Now().UTC().Truncate(time.Microsecond)
+		if receivedAt.Before(observedAt) {
+			t.Fatal("heartbeat receipt predates observation")
+		}
+		if e := f.store.Heartbeat(ctx, p, caps, receivedAt, time.Minute); e != nil {
+			t.Fatal("fresh observed heartbeat rejected")
+		}
+		lastReceived = receivedAt
+	}
+	admissionAt := time.Now().UTC().Truncate(time.Microsecond)
+	if admissionAt.Before(lastReceived) {
+		t.Fatal("admission clock predates refreshed heartbeat")
+	}
+	tx, e := f.store.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if e != nil {
+		t.Fatal("heartbeat chronology transaction unavailable")
+	}
+	defer tx.Rollback()
+	supported, reason, e := publicIngressCapabilityTx(ctx, tx, f.config, f.config.OverlayClusters[0].Profiles, admissionAt)
+	if e != nil || !supported || reason != "" {
+		t.Fatal("fresh participant capability gate rejected")
+	}
+	if e := tx.Rollback(); e != nil {
+		t.Fatal("heartbeat chronology transaction close failed")
+	}
+	for _, old := range f.jobs {
+		saved, e := f.store.Lookup(ctx, old.OperationID)
+		if e != nil || saved.RequestSHA != old.RequestSHA || saved.NodeRequestSHA != old.NodeRequestSHA || !bytes.Equal(saved.RequestJSON, old.RequestJSON) || !bytes.Equal(saved.NodeRequest, old.NodeRequest) {
+			t.Fatal("heartbeat refresh changed frozen financial or node request")
+		}
+	}
+}
+
+// These are current real MySQL projections and exact frozen requests delivered
+// to the explicit deterministic node substitute, not claimed guest connectivity.
+func publicVMBrowserProof(t *testing.T, ctx context.Context, f overlayFixture, rpc *ownedPublicVMRPC, pool PublicIPPool, actor string) error {
+	t.Helper()
+	fail := func() error { return errors.New("required direct/floating durable proof missing") }
+	for version := int64(8); version <= 13; version++ {
+		var op string
+		if f.store.DB.QueryRow("SELECT id FROM controller_overlay_epochs WHERE cluster_id=? AND epoch=?", f.vpc.ClusterID, version).Scan(&op) != nil {
+			return fail()
+		}
+		epoch, e := f.store.OverlayEpoch(ctx, op)
+		if e != nil || epoch.State != "succeeded" || len(epoch.Snapshot.NATPolicies) != 0 || publicBrowserReleaseProof(t, ctx, f, epoch) != nil {
+			return fail()
+		}
+		if version == 13 {
+			if len(epoch.Snapshot.FloatingIPs) != 0 {
+				return fail()
+			}
+		} else {
+			if len(epoch.Snapshot.FloatingIPs) != 1 {
+				return fail()
+			}
+			ip := epoch.Snapshot.FloatingIPs[0]
+			target := f.jobs[0].InstanceID
+			if version >= 10 {
+				target = f.jobs[1].InstanceID
+			}
+			if ip.InstanceID != target || ip.PublicIPv4 != "8.8.4.4" || ip.OwnerRef != f.vpc.OwnerRef || ip.VPCID != f.vpc.ID {
+				return fail()
+			}
+			if ip.Ingress == nil || ip.Ingress.InstanceID != target || ip.Ingress.OwnerRef != f.vpc.OwnerRef {
+				return fail()
+			}
+			canonical, x := overlayproto.CanonicalPublicIngress(*ip.Ingress)
+			if x != nil || !reflect.DeepEqual(canonical, *ip.Ingress) {
+				return fail()
+			}
+			wantRevision, wantRules := uint64(0), 0
+			switch version {
+			case 9:
+				wantRevision, wantRules = 1, 3
+			case 11:
+				wantRevision, wantRules = 1, 1
+			case 12:
+				wantRevision, wantRules = 2, 0
+			}
+			if ip.Ingress.Revision != wantRevision || len(ip.Ingress.Rules) != wantRules {
+				return fail()
+			}
+			if version == 9 {
+				seen := map[string]bool{}
+				for _, r := range ip.Ingress.Rules {
+					seen[r.Protocol] = true
+				}
+				if !seen["tcp"] || !seen["udp"] || !seen["icmp"] {
+					return fail()
+				}
+			}
+		}
+	}
+	// Every policy mutation is an independent immutable actor/instance intent.
+	// Re-reading it after later revocation must still return the original rules
+	// and pending result, never today's projection or another actor's result.
+	var versions, operations int
+	if f.store.DB.QueryRow("SELECT COUNT(*) FROM controller_public_ingress_versions").Scan(&versions) != nil || versions != 3 || f.store.DB.QueryRow("SELECT COUNT(*) FROM controller_public_ingress_operations").Scan(&operations) != nil || operations != 3 {
+		return fail()
+	}
+	for _, want := range []struct {
+		target   string
+		revision uint64
+		epoch    int64
+		rules    int
+	}{{f.jobs[0].InstanceID, 1, 9, 3}, {f.jobs[1].InstanceID, 1, 11, 1}, {f.jobs[1].InstanceID, 2, 12, 0}} {
+		version, e := scanPublicIngressVersion(f.store.DB.QueryRow("SELECT "+publicIngressVersionColumns+" FROM controller_public_ingress_versions WHERE instance_id=? AND revision=?", want.target, want.revision))
+		if e != nil || version.Policy.OwnerRef != f.vpc.OwnerRef || len(version.Policy.Rules) != want.rules {
+			return fail()
+		}
+		op, e := f.store.PublicIngressOperation(ctx, actor, version.OperationID)
+		if e != nil || !publicIngressResultValid(op) || op.ActorID != actor || op.TargetInstanceID != want.target || !reflect.DeepEqual(publicIngressWire(op.Result.Policy), version.Policy) || op.Result.Policy.State != "pending" {
+			return fail()
+		}
+		epoch, e := f.store.OverlayEpoch(ctx, version.EpochID)
+		if e != nil || epoch.Epoch != want.epoch || epoch.State != "succeeded" || len(epoch.Snapshot.FloatingIPs) != 1 || epoch.Snapshot.FloatingIPs[0].Ingress == nil || !reflect.DeepEqual(*epoch.Snapshot.FloatingIPs[0].Ingress, version.Policy) {
+			return fail()
+		}
+		if _, e = f.store.PublicIngressOperation(ctx, f.actor, op.ID); !errors.Is(e, ErrNotFound) {
+			return fail()
+		}
+	}
+	for index, job := range f.jobs {
+		policy, e := f.store.PublicIngress(ctx, f.config, job.InstanceID, time.Now().UTC())
+		wantRevision, wantRules := uint64(1), 3
+		if index == 1 {
+			wantRevision, wantRules = 2, 0
+		}
+		if e != nil || policy.Revision != wantRevision || len(policy.Rules) != wantRules || policy.EffectiveRevision == nil || *policy.EffectiveRevision != wantRevision || policy.BoundResourceID != "" || policy.State != "active" || policy.LegacyUnrestricted || !policy.Supported {
+			return fail()
+		}
+	}
+	resources, next, e := f.store.PublicIPResourcesFor(ctx, f.config, "", "", "", "", "")
+	if e != nil || next != "" || len(resources) != 3 {
+		return fail()
+	}
+	floatingReleased, floatingReserved, directReleased := 0, 0, 0
+	var direct PublicIPResource
+	for _, r := range resources {
+		if r.Mode == "direct" {
+			direct = r
+			if r.PoolID != pool.ID || r.Address != "9.9.9.2" || r.State != "released" || r.BindingState != "released" || r.BindingGeneration != 2 {
+				return fail()
+			}
+			directReleased++
+		} else {
+			if r.Address != "8.8.4.4" || r.OwnerRef != f.vpc.OwnerRef {
+				return fail()
+			}
+			// Exact generation: 2 bindings + 3 independently verified policy
+			// updates + 1 unbind. Extra writes must never satisfy a range check.
+			if r.State == "released" && r.BindingState == "released" && r.BindingGeneration == 6 {
+				floatingReleased++
+			} else if r.State == "reserved" && r.BindingState == "unbound" && r.BindingGeneration == 0 {
+				floatingReserved++
+			} else {
+				return fail()
+			}
+		}
+	}
+	if floatingReleased != 1 || floatingReserved != 1 || directReleased != 1 {
+		return fail()
+	}
+	var ops int
+	if f.store.DB.QueryRow("SELECT COUNT(*) FROM controller_public_ip_resource_operations").Scan(&ops) != nil || ops != 9 {
+		return fail()
+	}
+	for action, want := range map[string]int{"resource.allocate": 3, "resource.bind": 2, "resource.unbind": 2, "resource.release": 2} {
+		var got int
+		if f.store.DB.QueryRow("SELECT COUNT(*) FROM controller_public_ip_resource_operations WHERE action=?", action).Scan(&got) != nil || got != want {
+			return fail()
+		}
+	}
+	rpc.inner.mu.Lock()
+	defer rpc.inner.mu.Unlock()
+	rpc.mu.Lock()
+	defer rpc.mu.Unlock()
+	if len(rpc.inner.tasks) != 3 || len(rpc.inner.posts) != 3 || len(rpc.results) != 3 {
+		return fail()
+	}
+	seen := map[string]bool{}
+	var instance string
+	for op, task := range rpc.inner.tasks {
+		if rpc.inner.posts[op] != 1 || task.Protocol != nodeproto.DirectPublicProtocol || task.DirectPublic.LeaseID != direct.ID || task.DirectPublic.IPv4 != direct.Address || task.DirectPublic.OwnerRef != direct.OwnerRef || task.DirectPublic.PoolID != pool.ID || task.NodeID != direct.NodeID || task.DirectPublic.Generation != 1 || task.DirectPublic.ProfileSHA256 != strings.Repeat("c", 64) || task.DirectPublic.CIDR != "9.9.9.0/24" || task.DirectPublic.Gateway != "9.9.9.1" || task.DirectPublic.MAC != nodeproto.NetworkMAC(task.NodeID, task.InstanceID) {
+			return fail()
+		}
+		if instance == "" {
+			instance = task.InstanceID
+		}
+		if task.InstanceID != instance {
+			return fail()
+		}
+		raw, sha, e := task.BytesAndDigest()
+		if e != nil {
+			return e
+		}
+		saved, e := f.store.Operation(ctx, op)
+		if e != nil || saved.State != "succeeded" || saved.RequestSHA != sha || !bytes.Equal(saved.Request, raw) || saved.Protocol != nodeproto.DirectPublicProtocol {
+			return fail()
+		}
+		receipt := rpc.results[op]
+		if receipt.Status != "succeeded" || !receipt.Matches(task, sha) {
+			return fail()
+		}
+		seen[task.Action] = true
+	}
+	if !seen["create"] || !seen["shutdown"] || !seen["public_detach"] {
+		return fail()
+	}
+	vm, e := f.store.Instance(ctx, instance)
+	if e != nil || vm.State != "shutoff" || vm.Resources.NetworkType != "normal" {
+		return fail()
+	}
+	// Every active inventory row belongs to precisely one still-reserved NAT or
+	// VM allocation. The released direct address cannot retain a stale claim.
+	var active, valid int
+	if f.store.DB.QueryRow("SELECT COUNT(*) FROM controller_public_ip_active").Scan(&active) != nil || active != 2 {
+		return fail()
+	}
+	if f.store.DB.QueryRow("SELECT COUNT(*) FROM controller_public_ip_active a WHERE (EXISTS(SELECT 1 FROM controller_public_ip_leases l WHERE l.id=a.lease_id AND l.state='reserved' AND l.address=a.address) OR EXISTS(SELECT 1 FROM controller_public_ip_resources r WHERE r.id=a.lease_id AND r.state='reserved' AND r.address=a.address))").Scan(&valid) != nil || valid != active {
+		return fail()
+	}
+	return nil
+}
+
+// Capture the actual substitute response seen by OperationWorker, rather than
+// synthesizing a success result later when proving durable controller state.
+type ownedPublicVMRPC struct {
+	inner   publicVMRPC
+	mu      sync.Mutex
+	results map[string]nodeproto.NodeResult
+}
+
+func (r *ownedPublicVMRPC) Capabilities(ctx context.Context) (Capability, error) {
+	return r.inner.Capabilities(ctx)
+}
+func (r *ownedPublicVMRPC) Send(ctx context.Context, raw []byte, sha string) (nodeproto.NodeResult, error) {
+	result, e := r.inner.Send(ctx, raw, sha)
+	if e == nil {
+		r.mu.Lock()
+		r.results[result.OperationID] = result
+		r.mu.Unlock()
+	}
+	return result, e
+}
+func (r *ownedPublicVMRPC) Lookup(ctx context.Context, op, sha string) (nodeproto.NodeResult, error) {
+	return r.inner.Lookup(ctx, op, sha)
+}

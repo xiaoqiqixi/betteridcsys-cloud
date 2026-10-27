@@ -1,0 +1,10 @@
+# Optional, reviewed installation as /etc/systemd/journald@aster-cloud.conf.
+# Does not affect the default namespace or other applications' financial logs.
+# Requires opt-in LogNamespace=aster-cloud in the reviewed controller/node units.
+# These quotas govern diagnostic journal only, NEVER node journal.json or SQL audit.
+[Journal]
+Storage=persistent
+SystemMaxUse=128M
+RuntimeMaxUse=16M
+SystemKeepFree=256M
+MaxRetentionSec=14day

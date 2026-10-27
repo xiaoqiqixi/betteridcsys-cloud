@@ -1,0 +1,12 @@
+<filter name="aster-static-ipv4" chain="root">
+  <rule action="drop" direction="out" priority="-1000"><mac match="no" srcmacaddr="$MAC"/></rule>
+  <rule action="drop" direction="inout" priority="-990"><mac protocolid="0x8100"/></rule>
+  <rule action="drop" direction="inout" priority="-980"><mac protocolid="0x88a8"/></rule>
+  <rule action="drop" direction="inout" priority="-970"><mac protocolid="ipv6"/></rule>
+  <rule action="drop" direction="out" priority="-900"><ip match="no" srcipaddr="$IP"/></rule>
+  <rule action="drop" direction="out" priority="-890"><arp match="no" arpsrcmacaddr="$MAC"/></rule>
+  <rule action="drop" direction="out" priority="-880"><arp match="no" arpsrcipaddr="$IP"/></rule>
+  <rule action="accept" direction="inout" priority="500"><mac protocolid="arp"/></rule>
+  <rule action="accept" direction="inout" priority="510"><mac protocolid="ipv4"/></rule>
+  <rule action="drop" direction="inout" priority="1000"/>
+</filter>

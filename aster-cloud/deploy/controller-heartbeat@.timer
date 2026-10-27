@@ -1,0 +1,11 @@
+[Unit]
+Description=Observe actual approved Aster node %i capabilities
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=20
+AccuracySec=1
+Unit=controller-heartbeat@%i.service
+
+[Install]
+WantedBy=timers.target

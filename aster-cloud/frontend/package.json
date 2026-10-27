@@ -1,0 +1,30 @@
+{
+  "name": "aster-infrastructure-console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "build": "vue-tsc --noEmit && vite build",
+    "format": "prettier --write src tests *.ts *.json index.html design-spec.md",
+    "format:check": "prettier --check src tests *.ts *.json index.html design-spec.md"
+  },
+  "dependencies": {
+    "@lucide/vue": "1.56.0",
+    "vue": "3.5.44",
+    "vue-router": "4.6.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.0",
+    "@vitejs/plugin-vue": "6.0.10",
+    "@vue/test-utils": "2.5.1",
+    "jsdom": "30.1.2",
+    "prettier": "3.9.10",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vitest": "5.0.4",
+    "vue-tsc": "3.3.13"
+  }
+}

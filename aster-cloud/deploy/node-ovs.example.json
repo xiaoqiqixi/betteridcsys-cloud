@@ -1,0 +1,48 @@
+{
+  "node_id": "node-a",
+  "datacenter_id": "dc-a",
+  "node_group_id": "group-a",
+  "listen": "127.0.0.1:9443",
+  "allow_public_listen": false,
+  "certificate": "/etc/aster-node/server.crt",
+  "private_key": "/etc/aster-node/server.key",
+  "controller_ca": "/etc/aster-node/controller-ca.crt",
+  "expected_controller_certificate_sha256": "REPLACE_WITH_CONTROLLER_LEAF_DER_SHA256_64_LOWERCASE_HEX",
+  "state_directory": "/var/lib/aster-node",
+  "storage_id": "local",
+  "storage_directory": "/var/lib/aster-instances",
+  "images": {
+    "ubuntu22": {
+      "path": "/var/lib/aster-images/ubuntu22.qcow2",
+      "sha256": "REPLACE_WITH_REVIEWED_FLAT_QCOW2_SHA256_64_LOWERCASE_HEX"
+    }
+  },
+  "allow_isolated_no_nic": false,
+  "allow_unmetered_default": false,
+  "allow_delete": false,
+  "maintenance": true,
+  "cpu_allocation_limit": 4,
+  "memory_allocation_limit_mib": 4096,
+  "disk_allocation_limit_gib": 100,
+  "network": {
+    "enabled": false
+  },
+  "storage": {
+    "enabled": false,
+    "directory": "/var/lib/aster-artifacts",
+    "inbox_directory": "/var/lib/aster-inbox",
+    "max_artifact_bytes": 34359738368,
+    "max_total_bytes": 137438953472,
+    "allow_migration": false,
+    "allow_controller_inbox_approval": false,
+    "source_certificate_pins": {}
+  },
+  "ovs_profiles": {
+    "private-v1": {
+      "fabric_config": "/etc/aster-node/fabric/private-v1.json",
+      "ssh_authorized_keys": [
+        "REPLACE_WITH_APPROVED_ED25519_PUBLIC_KEY_NOT_A_PRIVATE_KEY"
+      ]
+    }
+  }
+}

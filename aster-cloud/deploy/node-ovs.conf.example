@@ -1,0 +1,5 @@
+# Optional aster-node.service drop-in for the reviewed OVS profile below.
+# Create the exact root:root 0700 state directory before starting the service.
+# Do not grant broad /run or /var/lib write access. The OVS daemon owns its sockets.
+[Service]
+ReadWritePaths=/var/lib/aster-fabric/private-v1

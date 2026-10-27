@@ -1,0 +1,14 @@
+/bin/
+/aster-controller
+/aster-node
+/artifacts/
+/test-results/
+*.test
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+/secrets/
+*.key
+*.pem

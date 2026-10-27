@@ -1,0 +1,26 @@
+{
+  "protocol": "aster.node/1",
+  "node_id": "node-a",
+  "hypervisor": "libvirt-kvm",
+  "maintenance": false,
+  "observed_at": "2026-10-22T00:00:00Z",
+  "actions": ["create", "start", "shutdown", "reboot", "force_off"],
+  "image_ids": ["ubuntu22"],
+  "storage_ids": ["local"],
+  "network_profiles": ["normal-static-ipv4-dedicated-bridge"],
+  "ipv4_counts": [1],
+  "ipv6_counts": [0],
+  "bandwidth_mbps": [0],
+  "transfer_gib": [0],
+  "capacity": {
+    "cpu_cores_total": 16,
+    "cpu_cores_allocated": 0,
+    "memory_total_mib": 32768,
+    "memory_available_mib": 30000,
+    "memory_allocated_mib": 0,
+    "storage_total_gib": 1000,
+    "storage_available_gib": 900,
+    "storage_allocated_gib": 0
+  },
+  "limitations": ["Synthetic contract fixture only; not a measured host or KVM/network acceptance result."]
+}

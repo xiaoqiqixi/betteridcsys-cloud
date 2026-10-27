@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "base": {
+    "schema": 1,
+    "node_id": "node-a",
+    "bridge": "aster-vpc0",
+    "state_directory": "/var/lib/aster-fabric/private-v1",
+    "dedicated_ack": false
+  },
+  "local_ipv4": "192.0.2.10",
+  "underlay_mtu": 1500,
+  "guest_mtu": 1450,
+  "underlay_trusted_ack": false,
+  "trust_reference": "REPLACE_WITH_REVIEWED_ISOLATED_UNDERLAY_REFERENCE",
+  "protected_cidrs": ["192.0.2.0/24", "198.51.100.0/24"],
+  "peers": [{"node_id": "node-b", "ipv4": "192.0.2.11"}],
+  "gateways": [],
+  "guest_networks": []
+}

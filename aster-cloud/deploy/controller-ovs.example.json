@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "controller_id": "main",
+  "listen": "127.0.0.1:9443",
+  "tls_cert_file": "/etc/aster-controller/server.crt",
+  "tls_key_file": "/etc/aster-controller/server.key",
+  "dsn_file": "/etc/aster-controller/mysql-dsn",
+  "billing_token_file": "/etc/aster-controller/billing.token",
+  "admin_read_token_file": "/etc/aster-controller/admin-read.token",
+  "admin_write_token_file": "/etc/aster-controller/admin-write.token",
+  "heartbeat_ttl_seconds": 60,
+  "nodes": [
+    {
+      "id": "node-a",
+      "datacenter_id": "dc-a",
+      "group_id": "group-a",
+      "endpoint": "https://node-a.example.invalid:9443",
+      "allowed_cidrs": ["192.0.2.0/24"],
+      "ca_file": "/etc/aster-controller/node-ca.crt",
+      "client_cert_file": "/etc/aster-controller/client.crt",
+      "client_key_file": "/etc/aster-controller/client.key",
+      "server_certificate_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "presets": [
+    {
+      "id": "ovs-vpc-private-v1",
+      "node_id": "node-a",
+      "network_profile_id": "private-v1",
+      "resources": {
+        "datacenter_id": "dc-a",
+        "compute_node_id": "node-a",
+        "node_group_id": "group-a",
+        "image_id": "ubuntu22",
+        "cpu_cores": 2,
+        "memory_mib": 512,
+        "system_disk_gib": 10,
+        "system_storage_id": "local",
+        "data_disk_gib": 0,
+        "data_storage_id": "",
+        "network_type": "vpc",
+        "bandwidth_mbps": 100,
+        "inbound_bandwidth_mbps": 200,
+        "transfer_gib": 0,
+        "traffic_direction": "all",
+        "ipv4_count": 1,
+        "ipv6_count": 0
+      }
+    }
+  ],
+  "network_profiles": [
+    {
+      "id": "private-v1",
+      "node_id": "node-a",
+      "pool_id": "22222222222222222222222222222222",
+      "owner_ref": "11111111111111111111111111111111",
+      "profile_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ]
+}

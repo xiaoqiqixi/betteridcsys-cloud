@@ -1,0 +1,41 @@
+# Example only. Review paths, mTLS, storage/libvirt AppArmor and host policy first.
+# Does not install packages, create bridges/filters, or start any VM by itself.
+[Unit]
+Description=Aster local KVM node (mTLS)
+After=network-online.target
+Wants=network-online.target
+# The operator must start the distribution's supported libvirt daemon/socket.
+# Do not hard-code libvirtd versus modular virtqemud across Ubuntu releases.
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/sbin/aster-node --config /etc/aster-node/node.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/aster-node /var/lib/aster-instances /var/lib/aster-artifacts /var/lib/aster-inbox
+ReadOnlyPaths=/etc/aster-node /var/lib/aster-images
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+LockPersonality=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+# The node talks to the host libvirt daemon. Do not use PrivateDevices=true:
+# doctor needs /dev/kvm visibility; no claim is made this unit sandboxes libvirt.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aster-node
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=1000
+
+[Install]
+WantedBy=multi-user.target

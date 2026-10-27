@@ -1,0 +1,367 @@
+// Loaded only through the required browser job's Go overlay. This is a second,
+// independent owned MySQL database, not a relaxation of the 205-member
+// read-only baseline or any financial/node history assertion.
+package control
+
+import (
+	"aster/cloud/internal/identity"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+type ownedIdentitySession struct {
+	User   identity.User `json:"user"`
+	CSRF   string        `json:"csrf_token"`
+	Cookie *http.Cookie  `json:"-"`
+}
+
+func identityBrowserRequest(auth *identity.Service, method, path string, input any, session *ownedIdentitySession, key string) (*httptest.ResponseRecorder, error) {
+	raw, e := json.Marshal(input)
+	if e != nil {
+		return nil, errors.New("fixture input invalid")
+	}
+	r := httptest.NewRequest(method, "https://localhost:5447/console/v1"+path, bytes.NewReader(raw))
+	r.RemoteAddr = "127.0.0.1:49281"
+	if session != nil && session.Cookie != nil {
+		r.AddCookie(session.Cookie)
+	}
+	if method != "GET" {
+		r.Header.Set("Origin", "https://localhost:5447")
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Idempotency-Key", key)
+		if session != nil {
+			r.Header.Set("X-CSRF-Token", session.CSRF)
+		}
+	}
+	w := httptest.NewRecorder()
+	auth.Handler().ServeHTTP(w, r)
+	return w, nil
+}
+func identityBrowserLogin(auth *identity.Service, email, password string) (ownedIdentitySession, error) {
+	var s ownedIdentitySession
+	w, e := identityBrowserRequest(auth, "GET", "/auth/csrf", nil, nil, "")
+	if e != nil || w.Code != 200 {
+		return s, errors.New("fixture anonymous session unavailable")
+	}
+	var csrf struct {
+		Token string `json:"csrf_token"`
+	}
+	c := w.Result().Cookies()
+	if json.Unmarshal(w.Body.Bytes(), &csrf) != nil || len(c) != 1 {
+		return s, errors.New("fixture csrf invalid")
+	}
+	s.Cookie = c[0]
+	s.CSRF = csrf.Token
+	w, e = identityBrowserRequest(auth, "POST", "/auth/login", map[string]string{"email": email, "password": password}, &s, id())
+	if e != nil || w.Code != 200 {
+		return s, errors.New("fixture login unavailable")
+	}
+	c = w.Result().Cookies()
+	if json.Unmarshal(w.Body.Bytes(), &s) != nil || len(c) != 1 || s.CSRF == "" {
+		return s, errors.New("fixture login contract invalid")
+	}
+	s.Cookie = c[0]
+	return s, nil
+}
+func TestOwnedIdentityBrowserFixture(t *testing.T) {
+	if os.Getenv("ASTER_BROWSER_CI") != "1" {
+		t.Skip("private browser runner only")
+	}
+	caseDir, dist := os.Getenv("ASTER_BROWSER_CASE"), os.Getenv("ASTER_BROWSER_DIST")
+	if !filepath.IsAbs(caseDir) || !filepath.IsAbs(dist) || caseDir == "/" || dist == "/" {
+		t.Fatal("identity private paths required")
+	}
+	if info, e := os.Stat(caseDir); e != nil || !info.IsDir() || info.Mode().Perm() != 0700 {
+		t.Fatal("identity private scratch required")
+	}
+	s := consoleHTTPStore(t)
+	ctx := context.Background()
+	// Seed an actual frozen billing admission/node request and all the resulting
+	// reservations. Identity UI actions must not alter any of these rows.
+	node, now := mysqlNode(t, s)
+	request := testRequest(node)
+	if _, _, e := s.Admit(ctx, request, testConfig(node).Candidates(request), now, time.Minute); e != nil {
+		t.Fatal("identity resource baseline unavailable")
+	}
+	resourceTables := map[string]string{}
+	rows, e := s.DB.Query("SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() ORDER BY table_name")
+	if e != nil {
+		t.Fatal("identity table inventory unavailable")
+	}
+	for rows.Next() {
+		var table string
+		if e = rows.Scan(&table); e != nil {
+			t.Fatal("identity table inventory invalid")
+		}
+		switch table {
+		case "controller_console_users", "controller_console_sessions", "controller_console_login_limits", "controller_identity_audit", "controller_identity_operations":
+			continue
+		}
+		if !strings.HasPrefix(table, "controller_") {
+			t.Fatal("identity fixture foreign table")
+		}
+		resourceTables[table] = ""
+	}
+	e = rows.Err()
+	rows.Close()
+	if e != nil {
+		t.Fatal("identity inventory read failed")
+	}
+	// auditDataDigest requires a stable row ordering; exact SELECT column tuples
+	// are sorted by the helper itself when an empty order is supplied below.
+	baseline := ownedIdentityResourceDigest(t, s, resourceTables)
+	auth, e := identity.New(s.DB, identity.Config{Origin: "https://localhost:5447"})
+	if e != nil {
+		t.Fatal("identity service unavailable")
+	}
+	password := "Identity-Browser-" + id() + "!"
+	admin, e := auth.Bootstrap(ctx, "identity-admin@example.invalid", "浏览器验收管理员", []byte(password))
+	if e != nil {
+		t.Fatal("identity bootstrap unavailable")
+	}
+	actor, e := identityBrowserLogin(auth, admin.Email, password)
+	if e != nil {
+		t.Fatal("identity seed login failed")
+	}
+	create := func(email, name, role string) identity.User {
+		w, e := identityBrowserRequest(auth, "POST", "/users", identity.CreateUser{Email: email, Name: name, Password: password, Role: role, Reason: "隔离身份浏览器验收准备"}, &actor, id())
+		if e != nil || w.Code != 201 {
+			t.Fatal("identity seed member rejected")
+		}
+		var result struct {
+			User identity.User `json:"user"`
+		}
+		if json.Unmarshal(w.Body.Bytes(), &result) != nil || result.User.Revision != 1 {
+			t.Fatal("identity seed member contract invalid")
+		}
+		return result.User
+	}
+	second := create("identity-second@example.invalid", "并发修改验收管理员", "admin")
+	target := create("identity-target@example.invalid", "浏览器验收成员", "viewer")
+	secondSession, e := identityBrowserLogin(auth, second.Email, password)
+	if e != nil {
+		t.Fatal("identity second login failed")
+	}
+	targetSessions := []ownedIdentitySession{}
+	for range 2 {
+		v, err := identityBrowserLogin(auth, target.Email, password)
+		if err != nil {
+			t.Fatal("identity target session seed failed")
+		}
+		targetSessions = append(targetSessions, v)
+	}
+
+	var beforeOperations int
+	if e = s.DB.QueryRow("SELECT COUNT(*) FROM controller_identity_operations").Scan(&beforeOperations); e != nil {
+		t.Fatal("identity receipt baseline unavailable")
+	}
+	hashes := map[string]string{}
+	for _, u := range []identity.User{admin, second, target} {
+		var hash string
+		if e = s.DB.QueryRow("SELECT password_hash FROM controller_console_users WHERE id=?", u.ID).Scan(&hash); e != nil {
+			t.Fatal("identity credential baseline unavailable")
+		}
+		hashes[u.ID] = hash
+	}
+	var conflict, ackLost, failed atomic.Bool
+	var writes atomic.Int32
+	console := Console{Store: s, Config: testConfig(node), Identity: auth}
+	handler := console.Handler()
+	mux := http.NewServeMux()
+	mux.Handle("/console/v1/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" || r.Method == "PATCH" {
+			isAuth := strings.HasPrefix(r.URL.Path, "/console/v1/auth/")
+			isTarget := r.Method == "PATCH" && r.URL.Path == "/console/v1/users/"+target.ID
+			isRevoke := r.Method == "POST" && (r.URL.Path == "/console/v1/users/"+target.ID+"/revoke-sessions" || r.URL.Path == "/console/v1/users/"+admin.ID+"/revoke-sessions")
+			if !isAuth && !isTarget && !isRevoke {
+				failed.Store(true)
+				w.WriteHeader(500)
+				return
+			}
+			if !isAuth {
+				writes.Add(1)
+			}
+			if isTarget {
+				raw, e := io.ReadAll(io.LimitReader(r.Body, 16385))
+				if e != nil || len(raw) > 16384 {
+					failed.Store(true)
+					w.WriteHeader(500)
+					return
+				}
+				r.Body = io.NopCloser(bytes.NewReader(raw))
+				var input struct {
+					Reason   string  `json:"reason"`
+					Revision uint64  `json:"revision"`
+					Password *string `json:"password"`
+				}
+				if json.Unmarshal(raw, &input) != nil || input.Password != nil {
+					failed.Store(true)
+					w.WriteHeader(500)
+					return
+				}
+				if input.Reason == "核对并发修改" && conflict.CompareAndSwap(false, true) {
+					result, e := identityBrowserRequest(auth, "PATCH", "/users/"+target.ID, map[string]any{"revision": input.Revision, "name": "另一位管理员已更新", "reason": "隔离并发修改在保存前提交"}, &secondSession, id())
+					if e != nil || result.Code != 200 {
+						failed.Store(true)
+						w.WriteHeader(500)
+						return
+					}
+				}
+				if input.Reason == "核对丢失响应" && ackLost.CompareAndSwap(false, true) {
+					recorded := httptest.NewRecorder()
+					handler.ServeHTTP(recorded, r)
+					if recorded.Code != 200 {
+						failed.Store(true)
+						w.WriteHeader(500)
+						return
+					}
+					// Post-commit response substitution. Server receipt and user change must
+					// both be durable, while the actual browser receives only uncertainty.
+					w.Header().Set("Content-Type", "application/json")
+					w.Header().Set("Cache-Control", "no-store")
+					w.WriteHeader(503)
+					_, _ = w.Write([]byte(`{"error":{"code":"IDENTITY_UNAVAILABLE"}}`))
+					return
+				}
+			}
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	files := http.FileServer(http.Dir(dist))
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		files.ServeHTTP(w, r)
+	}))
+	listener, e := net.Listen("tcp", "127.0.0.1:5447")
+	if e != nil {
+		t.Fatal("identity loopback listener unavailable")
+	}
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	defer server.Close()
+	done := make(chan error, 1)
+	go func() {
+		done <- server.ServeTLS(listener, filepath.Join(caseDir, "server.pem"), filepath.Join(caseDir, "server.key"))
+	}()
+	credentials, e := json.Marshal(map[string]any{"email": admin.Email, "password": password, "actor_id": admin.ID, "target_id": target.ID, "target_email": target.Email, "target_name": target.Name, "second_id": second.ID})
+	if e != nil || os.WriteFile(filepath.Join(caseDir, "browser-credentials.json"), credentials, 0600) != nil {
+		t.Fatal("identity private handoff unavailable")
+	}
+	t.Log("READY: identity loopback HTTPS, independent MySQL; no host actions")
+	timer := time.NewTimer(8 * time.Minute)
+	defer timer.Stop()
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-timer.C:
+			t.Fatal("identity fixture bounded lifetime exceeded")
+		case <-done:
+			t.Fatal("identity HTTPS server stopped early")
+		case <-tick.C:
+			if _, e = os.Stat(filepath.Join(caseDir, "stop-browser")); e != nil {
+				continue
+			}
+			if failed.Load() || !conflict.Load() || !ackLost.Load() || writes.Load() != 5 {
+				t.Fatal("identity required finite writes or response faults missing")
+			}
+			if !reflect.DeepEqual(baseline, ownedIdentityResourceDigest(t, s, resourceTables)) {
+				t.Fatal("identity UI changed resource or financial/node snapshots")
+			}
+			var operations int
+			if e = s.DB.QueryRow("SELECT COUNT(*) FROM controller_identity_operations").Scan(&operations); e != nil || operations != beforeOperations+5 {
+				t.Fatal("identity receipt count mismatch")
+			}
+			for _, u := range []identity.User{admin, second, target} {
+				var hash string
+				var revision uint64
+				var name string
+				if e = s.DB.QueryRow("SELECT password_hash,revision,name FROM controller_console_users WHERE id=?", u.ID).Scan(&hash, &revision, &name); e != nil || hash != hashes[u.ID] {
+					t.Fatal("identity UI changed credentials")
+				}
+				want := uint64(1)
+				if u.ID == admin.ID {
+					want = 2
+				}
+				if u.ID == target.ID {
+					want = 5
+					if name != "响应丢失但已保存" {
+						t.Fatal("identity persisted target name mismatch")
+					}
+				}
+				if revision != want {
+					t.Fatal("identity revision progression mismatch")
+				}
+			}
+
+			for _, old := range targetSessions {
+				w, err := identityBrowserRequest(auth, "GET", "/auth/me", nil, &old, "")
+				if err != nil || w.Code != 401 {
+					t.Fatal("identity pre-revocation target session remained valid")
+				}
+			}
+			result := map[string]any{"schema": 1, "passed": true, "real_mysql": true, "independent_identity_database": true, "identity_browser_writes": 5, "identity_committed_operations": 5, "conflict_rejected": true, "post_commit_response_lost": true, "credential_hashes_unchanged": true, "resource_and_financial_node_snapshots_unchanged": true, "target_revision": 5, "actor_revision": 2, "no_kvm_or_host_actions": true, "pre_revocation_target_sessions_revoked": true}
+			raw, e := json.MarshalIndent(result, "", "  ")
+			if e != nil || os.WriteFile(filepath.Join(caseDir, "identity-fixture.json"), append(raw, '\n'), 0600) != nil {
+				t.Fatal("identity durable evidence unavailable")
+			}
+			return
+		}
+	}
+}
+func ownedIdentityResourceDigest(t *testing.T, s *SQLStore, tables map[string]string) map[string][]string {
+	t.Helper()
+	out := map[string][]string{}
+	for table := range tables {
+		rows, e := s.DB.Query("SELECT * FROM `" + table + "`")
+		if e != nil {
+			t.Fatal("identity baseline read unavailable")
+		}
+		cols, e := rows.Columns()
+		if e != nil {
+			rows.Close()
+			t.Fatal("identity baseline columns unavailable")
+		}
+		values := []string{}
+		for rows.Next() {
+			v := make([]any, len(cols))
+			ptr := make([]any, len(cols))
+			for i := range v {
+				ptr[i] = &v[i]
+			}
+			if e = rows.Scan(ptr...); e != nil {
+				rows.Close()
+				t.Fatal("identity baseline row invalid")
+			}
+			b, e := json.Marshal(v)
+			if e != nil {
+				rows.Close()
+				t.Fatal("identity baseline encode failed")
+			}
+			values = append(values, string(b))
+		}
+		e = rows.Err()
+		rows.Close()
+		if e != nil {
+			t.Fatal("identity baseline scan failed")
+		}
+		// Sorting is independent of primary-key shapes and preserves duplicate rows.
+		sort.Strings(values)
+		out[table] = values
+	}
+	return out
+}

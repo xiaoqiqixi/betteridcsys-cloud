@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "source_commit": "fa4d2139ff5ecfc2802c0825e839134ca488d138",
+  "files": {
+    "contracts/billing/controllerapi/contract.go": "082fc40c2963971d621d93c1a9dbaf1b0b649441757cd5c0af10656385bd1b0c",
+    "contracts/billing/controllerapi/contract_test.go": "cc167d111fb5adae6d545f39377bec05fd1fb6bfdb13fe69927f41b6c9fff62a",
+    "contracts/billing/controllerapi/transport.go": "0a6c6761e361cb181276bfefce6c6e6b7b535f3c25a73d28c68a7e98060ffcae",
+    "contracts/billing/controllerapi/transport_test.go": "8ef84541badee31bd40eced514854cd1cdc03be1232a5d6223229de545febe8b",
+    "contracts/billing/internal/controllers/client.go": "0ef1476aa70ecf5efef644fc64c1539d4600c8f4945ca0014b2d2e1ce80469de",
+    "contracts/billing/internal/controllers/client_test.go": "44e81c1e3112739a51d2b324888841c4903913085e914ec3c0e7e274576570d5",
+    "contracts/billing/internal/controllers/contract.go": "096fc9b1ca26e69a1396f39a8bbcfd983014a722ef864045b306b88086a7b555",
+    "contracts/billing/internal/controllers/contract_test.go": "6094c9ad78648bd17f7c02fa9a51f073148067075481393da43870de6c20d961"
+  }
+}

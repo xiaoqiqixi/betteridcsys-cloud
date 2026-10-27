@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "node_id": "node-a",
+  "bridge": "aster-vpc0",
+  "state_directory": "/var/lib/aster-fabric/private-v1",
+  "dedicated_ack": false
+}
