@@ -77,7 +77,7 @@
 
 封存后普通 `serve`、派发、心跳、数据库迁移、管理员初始化等命令在数据库/被控 I/O 前拒绝执行。源主机的 `migration-cancel`、`migration-fence` 和导出入口不能解除目标封存。截断、损坏、权限错误及不匹配的计划保留原始证据并拒绝继续；没有自动删除、覆盖或 `--force` 解封路径。该机制是**本机准入隔离**，不是跨主机仲裁；此阶段 `database_restored`、`target_restore_approved`、`source_isolated`、`migration_ready` 均保持 false。
 
-目前仍需完成：目标独占 MySQL 创建及最小授权、带标记空库恢复的宿主机编排、配置/材料安全落盘、旧会话撤销、重启恢复、节点单活接管、迁移 UI 和双主机整链验收。不得据此启动新主控或宣称可以完成主控迁移。当前根权限 CI 使用真实安装器/ELF/systemd 查询与独立加密的合成源包，明确**不是**真实源导出、SQL 导入或双主机验收；对应既有原生 MySQL 源导出检查单独保留。
+目标专用库准备及带标记空库导入的宿主机编排见后文；仍需完成配置/材料安全落盘、旧会话撤销、重启恢复、节点单活接管、迁移 UI 和双主机整链验收。不得据此启动新主控或宣称可以完成主控迁移。当前根权限 CI 使用真实安装器/ELF/systemd 查询与独立加密的合成源包，明确**不是**真实源导出、SQL 导入或双主机验收；对应既有原生 MySQL 源导出检查单独保留。
 
 目标准备的 systemd 查询需要区分“没有匹配单元”和“查询失败”。systemd [v249](https://github.com/systemd/systemd/blob/v249/src/systemctl/systemctl-list-unit-files.c) 与 [v255](https://github.com/systemd/systemd/blob/v255/src/systemctl/systemctl-list-unit-files.c) 的 `list-unit-files` 在零匹配时返回 `-ENOENT`。因此查询同时包含标准 `systemd-journald.service` 作为正向对照，仍要求命令退出 0，结果只能含该精确名称；出现控制器单元、空响应或执行失败均拒绝。不会把任意非零退出、超时或系统总线错误当作“目标为空”。已加载单元另以 `list-units --all` 检查，覆盖不活跃但仍已加载的服务。
 
@@ -91,8 +91,27 @@
 
 同一操作显式重入须匹配原始不可变计划、MySQL UUID、账号归属、最小 grants、root 可见的对象清单以及真实的运行/迁移账号连接。创建响应丢失、口令文件丢失、外来对象或未知暂存文件都保留现场并拒绝，不重置账号、不重建数据库。数据库准备成功也不写运行配置、不启动主控、不解除封印、不接管节点。
 
-### 新验收门槛
+### 专用库准备验收
 
-新增两个固定 `controller-provision` 场景，在独立签名的 Ubuntu22/24 TCG guest 内执行真实安装器、APT、systemd、MySQL 和实际主控 ELF。与原有 libvirt 场景共用原镜像来源验证、宿主网络前后不变校验、进程沙箱和仅官方 APT 出口；不接受任意 guest 脚本或模拟 KVM。
+最初新增两个固定 `controller-provision` 场景，在独立签名的 Ubuntu22/24 TCG guest 内执行真实安装器、APT、systemd、MySQL 和实际主控 ELF。与原有 libvirt 场景共用原镜像来源验证、宿主网络前后不变校验、进程沙箱和仅官方 APT 出口；不接受任意 guest 脚本或模拟 KVM。
 
-此场景的源身份及表记录为**合成夹具**，用于验证专用库准备，不是源主机导出或完整数据库迁移。输出明确保留 `source_fixture_synthetic=true`，`database_restored/source_host_export_verified/node_takeover_verified/migration_ready=false`；发布不得挪用该门槛为完整迁移证明。真实数据恢复核心的 MySQL 往返测试仍单独执行。最终 root 导入、提交响应丢失后的只读核验、材料落盘、会话撤销、双机重启隔离与节点单活接管尚需接齐。
+此场景的源身份及表记录为**合成夹具**，用于验证专用库准备，不是源主机导出或完整数据库迁移。输出明确保留 `source_fixture_synthetic=true`，`database_restored/source_host_export_verified/node_takeover_verified/migration_ready=false`；发布不得挪用该门槛为完整迁移证明。真实数据恢复核心的 MySQL 往返测试仍单独执行。root 导入与只读核验的后续合同见下节；材料落盘、会话撤销、双机重启隔离与节点单活接管仍待完成。
+
+
+## 固定目标数据导入与只读结果核验
+
+`target-restore` 与 `target-data-status` 仍只接受固定操作 ID，且必须通过完整受检安装、持续目标封印、精确数据计划和真实双方凭据验证。新增入口不是激活入口；只读状态也必须重新认证完整包，不能依据磁盘上的“成功”字段放行。
+
+首次导入前，root 协调器检查服务器全局账号/角色、其他非系统数据库、精确最小 grants、编码和空库所有权，将审批写入 root 私有 `database/import-approval.json`，绑定目标计划及目标创建回执摘要。Go 数据入口在任何目标 DDL 前以不可覆盖写入及文件/目录 fsync 创建 `import-started.json`。只允许当前内置迁移建立结构，不能执行包提供的 SQL。
+
+DDL 和结构比较完成后、删除任何种子行或写入源数据之前，保存 `database/structure.json`：操作、库名、MySQL UUID、目标所有权、认证归档清单及全部 35 张表（34 张业务表和独立所有权标记）的完整 `SHOW CREATE TABLE` 摘要。包含外键、索引和自增高水位；不能仅以列列表证明结构未变。证明写入失败立即停止数据事务，保留未激活 DDL，不删除、重建或自动续写。
+
+一旦 `import-started.json` 存在，重复 `target-restore` 只执行 `target-data-status` 的核验路径，不重放 DDL/INSERT，也不重置任何口令。该路径先重新检查 root 可见的完整对象/授权，再在同一只读一致性事务锁定表元数据，核对完整结构证明、所有权和全部认证数据字节摘要。任何修改行、缺失/移除外键、缺少证明、回执变化或额外对象都拒绝；网络错误不算成功。成功才报告 `database_restored=true`，目标仍不批准激活且 `migration_ready=false`。
+
+**中断边界**：事务提交响应丢失但数据实际完整时，可通过只读重入确认。若仅写入意图、DDL 部分完成、结构证明不完整或数据事务未提交，则保留封存现场并拒绝自动重导；目前没有自动清空/修复/换操作接管接口，不宣称完整中断恢复。后续旧会话撤销须有独立阶段和转换验证，不能为了通过核验跳过会话表。
+
+### 原生恢复验收场景
+
+Ubuntu22/24 的固定场景扩展为 `controller-restore`，保留原专用库准备的所有拒绝断言。先在无特权宿主临时进程运行校验固定发行摘要的 MySQL，生成真实结构和包含二进制、空值、Unicode、微秒、超有符号范围整数、删除后自增高水位及会话外键的数据快照。清理该源夹具进程后，再进入签名 Ubuntu 目标 guest，用实际安装器和 root 入口导入。
+
+验收要求：独立 SQL 核对源值；开启 MySQL `super_read_only` 后重复恢复和查询状态仍通过；篡改数据及移除外键后必须明确拒绝且不“修复”现场。源主机身份/材料记录仍为合成，报告保留 `source_fixture_synthetic=true`，不得冒称真实源主机导出、节点切换、重启恢复或 KVM 验收。此场景代码及本地合同检查不等于对应 SHA 的 Ubuntu22/24 CI 已通过，实际结果以同 SHA CI 和留存产物为准。

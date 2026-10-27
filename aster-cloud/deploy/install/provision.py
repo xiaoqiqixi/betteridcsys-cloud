@@ -68,8 +68,8 @@ class ProvisionError(Exception):
         self.code = code
 
 
-def fail(message):
-    raise ProvisionError(message)
+def fail(message, *, code=None):
+    raise ProvisionError(message, code=code)
 
 
 def _json(raw):
@@ -403,7 +403,7 @@ def install_dependencies(component, state_dir, *, with_mysql=False, with_libvirt
             if (line.startswith("Remv ") or re.match(r"^Inst \S+ \[", line) or
                     re.match(r"^Inst (?:firewalld|ufw|openvswitch\S*)\b", line) or
                     not with_libvirt and re.match(r"^Inst libvirt-daemon\S*\b", line)):
-                fail("APT plan would upgrade/remove existing software or install unapproved network daemons")
+                fail("APT plan would upgrade/remove existing software or install unapproved network daemons", code="APT_PLAN_UNSAFE")
         receipt["status"] = "package-transaction-pending"
         save_receipt(path, receipt)
         run_fixed([APT_GET, "--assume-yes", *arguments], env=env, timeout=1200)
@@ -898,7 +898,7 @@ def restore_database_names(operation):
     return "aster_cloud_restore_" + operation, "aster_r_" + operation[:23], "aster_m_" + operation[:23]
 
 
-def _restore_server_inventory(state_dir, runtime_user, migration_user):
+def _restore_server_inventory(state_dir, database, runtime_user, migration_user):
     # Root-visible account/role inventory, not a migrator's filtered metadata.
     # Unknown accounts (including anonymous/remote root) are never revoked or
     # adopted. Socket-only MySQL is checked again even on exact-operation resume.
@@ -906,11 +906,12 @@ def _restore_server_inventory(state_dir, runtime_user, migration_user):
         "SELECT JSON_OBJECT('root',CURRENT_USER(),'tcp_disabled',@@skip_networking,"
         "'mysqlx',(SELECT COUNT(*) FROM information_schema.PLUGINS WHERE PLUGIN_NAME='mysqlx' AND PLUGIN_STATUS='ACTIVE'),"
         "'roles',(SELECT COUNT(*) FROM mysql.role_edges),'default_roles',(SELECT COUNT(*) FROM mysql.default_roles),"
+        "'foreign_schemas',(SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME NOT IN ('mysql','sys','information_schema','performance_schema','" + database + "')),"
         "'accounts',(SELECT COUNT(*) FROM mysql.user WHERE NOT (Host='localhost' AND ("
         "(User='root' AND plugin='auth_socket') OR (User IN ('mysql.infoschema','mysql.session','mysql.sys') AND account_locked='Y') OR "
         "(User IN ('" + runtime_user + "','" + migration_user + "') AND plugin='caching_sha2_password')))));\n")
-    if info != {'root': 'root@localhost', 'tcp_disabled': 1, 'mysqlx': 0, 'roles': 0, 'default_roles': 0, 'accounts': 0}:
-        fail("Restore requires a dedicated socket-only server and exact local account inventory")
+    if info != {'root': 'root@localhost', 'tcp_disabled': 1, 'mysqlx': 0, 'roles': 0, 'default_roles': 0, 'accounts': 0, 'foreign_schemas': 0}:
+        fail("Restore requires a dedicated socket-only server and exact local account inventory", code="TARGET_RESTORE_SERVER_INVENTORY_REJECTED")
 
 
 def provision_restore_mysql(operation, charset, collation, *, resume=False):
@@ -941,7 +942,7 @@ def provision_restore_mysql(operation, charset, collation, *, resume=False):
             os.fsync(fd)
         finally:
             os.close(fd)
-    _restore_server_inventory(state_dir, runtime_user, migration_user)
+    _restore_server_inventory(state_dir, database, runtime_user, migration_user)
     # Validate actual encoding support without interpreting arbitrary SQL.
     encoding = _query(state_dir, "SELECT JSON_OBJECT('matches',COUNT(*)) FROM information_schema.COLLATIONS WHERE COLLATION_NAME='" +
                       collation + "' AND CHARACTER_SET_NAME='" + charset + "';\n")
@@ -953,12 +954,12 @@ def provision_restore_mysql(operation, charset, collation, *, resume=False):
     return result
 
 
-def verify_restore_mysql(operation, charset, collation):
-    """Root-visible empty-target check; never permission to activate a service."""
+def verify_restore_mysql(operation, charset, collation, *, restored=False):
+    """Root-visible target inventory; never permission to activate a service."""
     database, runtime_user, migration_user = restore_database_names(operation)
     state_dir = Path('/var/lib/aster-controller-restore') / operation / 'database'
     protected_path(str(state_dir), directory=True, private=True)
-    _restore_server_inventory(state_dir, runtime_user, migration_user)
+    _restore_server_inventory(state_dir, database, runtime_user, migration_user)
     verify_grants(state_dir, runtime_user, database, RUNTIME_PRIVILEGES)
     verify_grants(state_dir, migration_user, database, MIGRATION_PRIVILEGES)
     info = _query(state_dir,
@@ -969,8 +970,8 @@ def verify_restore_mysql(operation, charset, collation):
         "'events',(SELECT COUNT(*) FROM information_schema.EVENTS WHERE EVENT_SCHEMA='" + database + "'),"
         "'triggers',(SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='" + database + "')) "
         "FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='" + database + "';\n")
-    if info != {'charset': charset, 'collation': collation, 'tables': 1, 'marker': 1, 'routines': 0, 'events': 0, 'triggers': 0}:
-        fail("Restore target must retain only its own marker and exact source encoding")
+    if type(restored) is not bool or info != {'charset': charset, 'collation': collation, 'tables': 35 if restored else 1, 'marker': 1, 'routines': 0, 'events': 0, 'triggers': 0}:
+        fail("Restore target object inventory or source encoding changed")
     owner = _json(read_private(str(state_dir / 'mysql-provision.json')))
     if not isinstance(owner.get('nonce'), str) or not re.fullmatch(r'[a-f0-9]{64}', owner['nonce']):
         fail("Malformed target ownership receipt")

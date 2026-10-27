@@ -60,6 +60,10 @@ func SnapshotDatabase(ctx context.Context, db *sql.DB, write func(string, func(i
 }
 
 func snapshotDatabase(ctx context.Context, db *sql.DB, ownership *databaseOwnership, write func(string, func(io.Writer) error) error) (int64, error) {
+	return snapshotDatabaseChecked(ctx, db, ownership, write, nil)
+}
+
+func snapshotDatabaseChecked(ctx context.Context, db *sql.DB, ownership *databaseOwnership, write func(string, func(io.Writer) error) error, check func(sqlReader) error) (int64, error) {
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return 0, ErrInvalid
@@ -79,6 +83,13 @@ func snapshotDatabase(ctx context.Context, db *sql.DB, ownership *databaseOwners
 		defer cancel()
 		_, _ = conn.ExecContext(release, "DO RELEASE_LOCK('aster_controller_schema_v1')")
 	}()
+	if check != nil {
+		for _, q := range []string{"SET SESSION sql_quote_show_create=1", "SET SESSION sql_mode='STRICT_ALL_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION,NO_AUTO_VALUE_ON_ZERO'"} {
+			if _, err = conn.ExecContext(ctx, q); err != nil {
+				return 0, ErrInvalid
+			}
+		}
+	}
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return 0, ErrInvalid
@@ -126,6 +137,9 @@ func snapshotDatabase(ctx context.Context, db *sql.DB, ownership *databaseOwners
 			return 0, ErrInvalid
 		}
 		r.Close()
+	}
+	if check != nil && check(tx) != nil {
+		return 0, ErrInvalid
 	}
 	schema := DatabaseSchema{Schema: 1}
 	if tx.QueryRowContext(ctx, "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=DATABASE()").Scan(&schema.Charset, &schema.Collation) != nil || !sqlName.MatchString(schema.Charset) || !sqlName.MatchString(schema.Collation) {

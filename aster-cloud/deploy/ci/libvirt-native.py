@@ -50,7 +50,7 @@ RELAY_PROOF = {}
 SANDBOX_PROOF = {}
 RELAY_EVENTS = {"spawned", "dns-ok", "dns-failed", "dns-nonpublic", "connect-ok", "connect-failed", "guest-first-bytes", "server-first-bytes", "guest-eof", "server-eof", "timeout", "io-failed"}
 BOOT_STAGES = {"bootcmd", "boot-mask:start", "boot-mask:done", "boot-hosts:start", "boot-hosts:done", "runcmd-enter"}
-GUEST_PHASES = {"preflight", "prepare", "inspect", "resume", "image-and-config", "doctor", "controller-install", "target-plan", "target-provision", "target-credentials", "target-grants", "target-refusals"}
+GUEST_PHASES = {"preflight", "prepare", "inspect", "resume", "image-and-config", "doctor", "controller-install", "target-plan", "target-provision", "target-credentials", "target-grants", "target-refusals", "target-import", "target-readback", "target-data-refusals"}
 DIAGNOSTIC_COMMANDS = {"apt-update", "apt-simulate", "apt-install", "network-rules-readonly", "other-fixed-command"} | {
     "systemd-" + name for name in ("start", "stop", "enable", "disable", "daemon-reload", "show", "is-active")} | {
     "virsh-" + name for name in ("net-list", "list", "capabilities")}
@@ -99,7 +99,7 @@ class Refused(Exception):
     """Only bounded fixed diagnostic codes may leave the private VM harness."""
 
 
-GUEST_ERROR_CODES |= set("TARGET_NATIVE_COMMAND_FAILED TARGET_NATIVE_OUTPUT_BOUND TARGET_NATIVE_ASSERTION_FAILED TARGET_NATIVE_REFUSAL_UNCONFIRMED TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING".split())
+GUEST_ERROR_CODES |= set("TARGET_NATIVE_COMMAND_FAILED TARGET_NATIVE_OUTPUT_BOUND TARGET_NATIVE_ASSERTION_FAILED TARGET_NATIVE_REFUSAL_UNCONFIRMED TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING TARGET_DEPENDENCIES_UNCONFIRMED TARGET_MYSQL_START_UNCONFIRMED TARGET_DATABASE_CREATE_UNCONFIRMED TARGET_DATABASE_INVENTORY_UNCONFIRMED TARGET_RESTORE_SERVER_INVENTORY_REJECTED".split())
 
 
 def require(condition, code):
@@ -123,7 +123,7 @@ def regular(path, maximum):
     return p
 
 
-def run(argv, *, timeout=120, env=None, cwd=None):
+def run(argv, *, timeout=120, env=None, cwd=None, stop_grace=10):
     process = subprocess.Popen(argv, cwd=cwd, env=env or SAFE_ENV, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, start_new_session=True)
     try:
@@ -132,17 +132,17 @@ def run(argv, *, timeout=120, env=None, cwd=None):
         require(process.returncode == 0, "FIXED_COMMAND_FAILED")
         return stdout
     finally:
-        stop_owned(process)
+        stop_owned(process, grace=stop_grace)
 
 
-def stop_owned(process):
+def stop_owned(process, *, grace=10):
     if process.poll() is None:
         try:
             os.killpg(process.pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
         try:
-            process.wait(timeout=10)
+            process.wait(timeout=grace)
         except subprocess.TimeoutExpired:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
@@ -653,7 +653,7 @@ def make_seed(work, root, source_sha, image_provenance, scenario="libvirt"):
     require(go is not None, "GO_TOOLCHAIN_REQUIRED")
     env = dict(SAFE_ENV, PATH=os.environ.get("PATH", SAFE_ENV["PATH"]), HOME=str(work), GOTOOLCHAIN="local", CGO_ENABLED="0", GOOS="linux", GOARCH="amd64")
     require(run([go, "version"], env=env).decode().startswith("go version go1.27.3 "), "PINNED_GO_TOOLCHAIN_REQUIRED")
-    require(scenario in ('libvirt', 'controller-provision'), 'FIXED_GUEST_SCENARIO_REQUIRED')
+    require(scenario in ('libvirt', 'controller-provision', 'controller-restore'), 'FIXED_GUEST_SCENARIO_REQUIRED')
     name = 'aster-node' if scenario == 'libvirt' else 'aster-controller'
     binary = work / name
     run([go, "build", "-mod=readonly", "-trimpath", "-buildvcs=false", "-ldflags=-s -w", "-o", str(binary), "./cmd/" + name], cwd=root / "aster-cloud", env=env, timeout=300)
@@ -665,10 +665,31 @@ def make_seed(work, root, source_sha, image_provenance, scenario="libvirt"):
                    "guest.py": (HERE / "libvirt-native-guest.py").read_bytes(), name: binary.read_bytes()}
     else:
         fixture = work / 'controller-fixture.test'
-        run([go, 'test', '-mod=readonly', '-c', '-o', str(fixture), './cmd/aster-controller'], cwd=root / 'aster-cloud', env=env, timeout=300)
+        run([go, 'test', '-mod=readonly', '-c', '-ldflags=-s -w', '-o', str(fixture), './cmd/aster-controller'], cwd=root / 'aster-cloud', env=env, timeout=300)
         metadata.update(scenario=scenario, controller_binary_sha256=digest(binary), fixture_binary_sha256=digest(fixture))
-        content = {'guest.py': (HERE / 'controller-provision-native-guest.py').read_bytes(),
-                   name: binary.read_bytes(), 'controller-fixture.test': fixture.read_bytes()}
+        content = {'guest.py': (HERE / 'controller-provision-native-guest.py').read_bytes(), name: binary.read_bytes()}
+        if scenario == 'controller-provision':
+            content['controller-fixture.test'] = fixture.read_bytes()
+        if scenario == 'controller-restore':
+            source = work / 'source-fixture'
+            source.mkdir(mode=0o700)
+            # Actual unprivileged, pinned MySQL snapshot, fully stopped and
+            # cleaned before starting the target VM. No host service or root
+            # credential; never publish its log, key, seed or data files.
+            run(['/bin/bash', str(HERE / 'native-mysql/mysql-native.sh'), '--', str(fixture),
+                 '-test.run=^TestControllerSourceValidation$', '-test.timeout=3m'],
+                env={**SAFE_ENV, 'HOME': str(work), 'RUNNER_TEMP': str(work),
+                     'ASTER_SOURCE_CLI_FIXTURE': '1', 'ASTER_FIXTURE_REAL_SQL': '1',
+                     'ASTER_FIXTURE_DIR': str(source), 'ASTER_FIXTURE_CONTROLLER': 'native-target-' + nonce[:12],
+                     'ASTER_FIXTURE_OPERATION': nonce, 'ASTER_FIXTURE_SOURCE': source_sha},
+                timeout=900, stop_grace=120)
+            require(set(p.name for p in source.iterdir()) == {'backup.age', 'recovery.key', 'request.json'},
+                    'SOURCE_SQL_FIXTURE_INVENTORY_REJECTED')
+            for filename in ('backup.age', 'recovery.key', 'request.json'):
+                path = source / filename
+                require(path.is_file() and not path.is_symlink() and path.stat().st_size <= 1024 * 1024,
+                        'SOURCE_SQL_FIXTURE_BOUND_REJECTED')
+                content[filename] = path.read_bytes()
         for filename in ('install.py', 'controller-migration.py', 'provision.py'):
             content[filename] = (root / 'aster-cloud/deploy/install' / filename).read_bytes()
     content['metadata.json'] = json.dumps(metadata).encode()
@@ -741,15 +762,18 @@ def run_vm(arguments, work, metadata):
 
 PROVISION_TRUE = set("passed real_apt real_systemd real_mysql actual_installer actual_controller target_sealed exact_encoding_preserved credentials_verified runtime_ddl_denied foreign_account_refused lost_credential_refused_without_reset same_operation_preserved source_fixture_synthetic".split())
 PROVISION_FALSE = set("database_restored source_host_export_verified node_takeover_verified migration_ready kvm_ready".split())
+RESTORE_TRUE = PROVISION_TRUE | set("database_restored real_source_database_snapshot exact_rows_verified read_only_reentry_verified modified_data_refused removed_constraint_refused foreign_database_refused".split())
+RESTORE_FALSE = PROVISION_FALSE - {'database_restored'}
 
 
 def validate_result(result, metadata):
-    if metadata.get('scenario') == 'controller-provision':
-        require(isinstance(result, dict) and set(result) == PROVISION_TRUE | PROVISION_FALSE |
+    if metadata.get('scenario') in ('controller-provision', 'controller-restore'):
+        true, false = (RESTORE_TRUE, RESTORE_FALSE) if metadata['scenario'] == 'controller-restore' else (PROVISION_TRUE, PROVISION_FALSE)
+        require(isinstance(result, dict) and set(result) == true | false |
                 {'schema', 'scenario', 'source_sha', 'ubuntu', 'image_sha256'}, 'GUEST_RESULT_SCHEMA_REJECTED')
-        require(result['schema'] == 1 and result['scenario'] == 'controller-provision' and
+        require(result['schema'] == 1 and result['scenario'] == metadata['scenario'] and
                 all(result[k] == metadata[k] for k in ('source_sha', 'ubuntu', 'image_sha256')), 'GUEST_RESULT_BINDING_MISMATCH')
-        require(all(result[k] is True for k in PROVISION_TRUE) and all(result[k] is False for k in PROVISION_FALSE),
+        require(all(result[k] is True for k in true) and all(result[k] is False for k in false),
                 'GUEST_PROVISION_ACCEPTANCE_FAILED')
         return
     allowed = {"schema", "passed", "real_apt", "real_systemd", "libvirt_prepared", "kvm_ready", "explicit_kvm_denial",
@@ -862,6 +886,9 @@ def execute(args):
     else:
         summary.update({k: result[k] for k in PROVISION_TRUE | PROVISION_FALSE})
         summary.update(scenario=scenario, scope="Actual target-only APT/MySQL provisioning with synthetic source records; no data restore, source-host export, activation, reboot or node takeover.")
+        if scenario == 'controller-restore':
+            summary.update({k: result[k] for k in RESTORE_TRUE | RESTORE_FALSE})
+            summary['scope'] = 'Real isolated MySQL snapshot and root target import/readback. Source host metadata remains synthetic; no real source-host export, activation, reboot or node takeover.'
     summary.update(schema=1, host_network_unchanged=True, tcg_only=True,
                    host_network_proof=HOST_PROOF, host_network_pre_vm_proof=HOST_PRE_VM_PROOF,
                    host_process_isolation_verified=True, sandbox_selftests_passed=True, relay_cleanup_verified=True,
@@ -874,7 +901,7 @@ def main(argv=None):
     global OUTPUT_CREATED, VM_PROGRESS, HOST_PROOF, HOST_PRE_VM_PROOF, GUEST_RESULT_SEEN, RELAY_PROOF, SANDBOX_PROOF
     OUTPUT_CREATED, VM_PROGRESS, HOST_PROOF, HOST_PRE_VM_PROOF, GUEST_RESULT_SEEN, RELAY_PROOF, SANDBOX_PROOF = None, [], {}, {}, False, {}, {}
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=("libvirt", "controller-provision"), default="libvirt")
+    parser.add_argument("--scenario", choices=("libvirt", "controller-provision", "controller-restore"), default="libvirt")
     parser.add_argument("--ubuntu", choices=sorted(IMAGES), required=True)
     parser.add_argument("--source-root", required=True)
     parser.add_argument("--source-sha", required=True)

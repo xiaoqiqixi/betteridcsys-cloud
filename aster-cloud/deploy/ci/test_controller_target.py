@@ -243,6 +243,8 @@ def main():
         PHASE = 'malformed-data-before-provision'
         entry('target-database-plan', True)
         entry('target-provision', True)
+        entry('target-restore', True)
+        entry('target-data-status', True)
         require(not (inputs / 'database').exists() and not (inputs / 'database-plan.json').exists() and
                 install_state.read_bytes() == original_installation and seal.read_bytes() == seal_raw,
                 'TARGET_INVALID_RECORDS_REACHED_PROVISION')

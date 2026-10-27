@@ -64,11 +64,15 @@ func targetArchive(command string, args []string) error {
 	var err error
 	if command == "migration-target-plan" {
 		report, err = controllerbackup.PlanTarget(*operation)
-	} else if command == "migration-target-database-plan" || command == "migration-target-provision-check" {
+	} else if command == "migration-target-database-plan" || command == "migration-target-provision-check" || command == "migration-target-import" || command == "migration-target-data-status" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		if command == "migration-target-database-plan" {
 			report, err = controllerbackup.PlanTargetDatabase(ctx, *operation)
+		} else if command == "migration-target-import" {
+			report, err = controllerbackup.ImportTargetDatabase(ctx, *operation)
+		} else if command == "migration-target-data-status" {
+			report, err = controllerbackup.VerifyTargetDatabase(ctx, *operation)
 		} else {
 			report, err = controllerbackup.CheckTargetProvision(ctx, *operation)
 		}

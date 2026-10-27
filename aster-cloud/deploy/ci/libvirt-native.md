@@ -206,3 +206,46 @@ Synthetic source metadata/table headers are explicitly identified. No rows are
 restored, no controller starts, and no source host, reboot, node takeover, KVM or
 release acceptance is claimed. Only fixed-schema reports are uploaded; DSNs,
 passwords, SQL responses, seed contents and serial logs remain private scratch.
+
+
+### Actual SQL restore extension
+
+`--scenario controller-restore` is a fixed superset of the provisioning scenario.
+Before the target VM starts, the existing SHA-pinned native MySQL fixture runs
+unprivileged with a private Unix socket. A test-only compiled source helper uses
+actual embedded migrations and the public snapshot API. The source server is
+stopped and cleaned before the target starts; only the encrypted package and
+separate recovery key enter private seed storage. The source host identity and
+materials are still synthetic: `real_source_database_snapshot=true` does NOT
+mean `source_host_export_verified=true`.
+
+The guest keeps every provisioning assertion and then invokes the actual fixed
+root `target-restore`/`target-data-status` entry points. It independently checks
+18 restored rows, binary/empty/NULL values, Unicode, microseconds, unsigned
+integers and deleted auto-increment history. With MySQL `super_read_only` on,
+reentry must verify without any row/DDL replay. Modified rows and a removed FK
+must cause explicit refusal, never an implicit reimport or repair. Installation
+state and target seal stay unchanged; no controller service is created.
+
+The CI job has a 55-minute bound: up to 15 minutes for the isolated source
+fixture, the unchanged 30-minute target VM bound, plus build/download/cleanup.
+A terminated observation is not acceptance. No retry, source-hash relaxation,
+changed original image, or host-network exception is introduced. Serial data,
+credentials and source/target databases are not uploaded. Only validated,
+fixed-schema evidence is public. Full controller migration, activation, reboot,
+node authority and KVM are explicitly not established by this workload.
+
+
+First provisioning run `894e1d7` / `40582502777` did **not** pass: Ubuntu22
+returned `TARGET_PROVISION_UNCONFIRMED` at target provisioning; Ubuntu24 reached
+the fixed VM deadline before `runcmd-enter`. Both before/after host network
+checks were unchanged. The generic 22 error does not establish an account,
+APT, or MySQL root cause. Follow-up code provides fixed stage errors and
+`APT_PLAN_UNSAFE` without printing subprocess output. No database account is
+whitelisted, dropped or reset based on this failure.
+
+The restore workload generates its SQL package on the host and no longer
+embeds the compiled test executable in the cloud-init seed. The actual target
+controller and installer are still delivered and verified. The provisioning-only
+helper is stripped. This removes unnecessary seed work; it is **not yet evidence**
+that slow boot is resolved. The signed images and 30-minute VM bound stay fixed.

@@ -88,72 +88,103 @@ func PlanTargetDatabase(ctx context.Context, operation string) (TargetDatabasePl
 // verifies global account inventory, exact grants and root-visible objects.
 func CheckTargetProvision(ctx context.Context, operation string) (map[string]bool, error) {
 	err := withTargetArchive(operation, func(plan TargetPlan, sha string, a *Archive) error {
-		data, e := a.PlanDatabase(ctx)
+		db, e := loadTargetDatabase(ctx, a, plan, sha)
 		if e != nil {
 			return e
 		}
-		want := TargetDatabasePlan{1, "aster.controller-target-database/1", plan.ControllerID, operation, sha,
-			"aster_cloud_restore_" + operation, "aster_r_" + operation[:23], "aster_m_" + operation[:23], data}
-		dir := filepath.Join(targetRoot, operation)
-		raw, e := targetRead(filepath.Join(dir, "database-plan.json"), 16384)
-		var approved TargetDatabasePlan
-		if e != nil || !exactSourceRecord(raw, &approved) || !reflect.DeepEqual(approved, want) {
-			return ErrInvalid
-		}
-		dir = filepath.Join(dir, "database")
-		ownerRaw, e := targetRead(filepath.Join(dir, "mysql-provision.json"), 65536)
-		if e != nil {
-			return e
-		}
-		var runtimeDSN string
-		for i, user := range []string{want.RuntimeUser, want.MigrationUser} {
-			role := "runtime"
-			if i == 1 {
-				role = "migration"
-			}
-			raw, e := targetRead(filepath.Join(dir, role+"-mysql-dsn"), 4096)
-			if e != nil {
-				return e
-			}
-			dsn := strings.TrimSpace(string(raw))
-			cfg, e := mysql.ParseDSN(dsn)
-			if e != nil || cfg.User != user || cfg.DBName != want.Database || cfg.Net != "unix" || cfg.Addr != "/run/mysqld/mysqld.sock" || len(cfg.Passwd) < 16 ||
-				dsn != user+":"+cfg.Passwd+"@unix(/run/mysqld/mysqld.sock)/"+want.Database {
-				return ErrInvalid
-			}
-			if i == 0 {
-				runtimeDSN = dsn
-			}
-			owner, e := decodeDatabaseOwnership(ownerRaw, runtimeDSN)
-			if e != nil || owner.MigrationUser != want.MigrationUser {
-				return ErrInvalid
-			}
-			store, e := control.OpenDSN(dsn)
-			if e != nil {
-				return ErrInvalid
-			}
-			e = func() error {
-				defer store.DB.Close()
-				conn, e := store.DB.Conn(ctx)
-				if e != nil {
-					return ErrInvalid
-				}
-				defer conn.Close()
-				var account string
-				if conn.QueryRowContext(ctx, "SELECT CURRENT_USER()").Scan(&account) != nil || account != user+"@localhost" {
-					return ErrInvalid
-				}
-				return verifyDatabaseOwnership(ctx, conn, owner, DatabaseSchema{1, data.Charset, data.Collation})
-			}()
-			if e != nil {
-				return ErrInvalid
-			}
-		}
-		return nil
+		return checkTargetAccounts(ctx, db)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return map[string]bool{"database_provisioned": true, "target_credentials_verified": true,
 		"database_restored": false, "target_restore_approved": false, "migration_ready": false}, nil
+}
+
+type targetDatabase struct {
+	plan         TargetDatabasePlan
+	ownerRaw     []byte
+	runtimeDSN   string
+	migrationDSN string
+}
+
+func loadTargetDatabase(ctx context.Context, a *Archive, plan TargetPlan, sha string) (targetDatabase, error) {
+	data, e := a.PlanDatabase(ctx)
+	if e != nil {
+		return targetDatabase{}, e
+	}
+	operation := plan.OperationID
+	want := TargetDatabasePlan{1, "aster.controller-target-database/1", plan.ControllerID, operation, sha,
+		"aster_cloud_restore_" + operation, "aster_r_" + operation[:23], "aster_m_" + operation[:23], data}
+	dir := filepath.Join(targetRoot, operation)
+	raw, e := targetRead(filepath.Join(dir, "database-plan.json"), 16384)
+	var approved TargetDatabasePlan
+	if e != nil || !exactSourceRecord(raw, &approved) || !reflect.DeepEqual(approved, want) {
+		return targetDatabase{}, ErrInvalid
+	}
+	dir = filepath.Join(dir, "database")
+	ownerRaw, e := targetRead(filepath.Join(dir, "mysql-provision.json"), 65536)
+	if e != nil {
+		return targetDatabase{}, e
+	}
+	db := targetDatabase{plan: want, ownerRaw: ownerRaw}
+	for i, user := range []string{want.RuntimeUser, want.MigrationUser} {
+		role := "runtime"
+		if i == 1 {
+			role = "migration"
+		}
+		raw, e := targetRead(filepath.Join(dir, role+"-mysql-dsn"), 4096)
+		if e != nil {
+			return targetDatabase{}, e
+		}
+		dsn := strings.TrimSpace(string(raw))
+		cfg, e := mysql.ParseDSN(dsn)
+		if e != nil || cfg.User != user || cfg.DBName != want.Database || cfg.Net != "unix" || cfg.Addr != "/run/mysqld/mysqld.sock" || len(cfg.Passwd) < 16 ||
+			dsn != user+":"+cfg.Passwd+"@unix(/run/mysqld/mysqld.sock)/"+want.Database {
+			return targetDatabase{}, ErrInvalid
+		}
+		if i == 0 {
+			db.runtimeDSN = dsn
+		} else {
+			db.migrationDSN = dsn
+		}
+	}
+	owner, e := restoreOwner(ownerRaw, db.runtimeDSN)
+	if e != nil || owner.MigrationUser != want.MigrationUser {
+		return targetDatabase{}, ErrInvalid
+	}
+	return db, nil
+}
+func checkTargetAccounts(ctx context.Context, db targetDatabase) error {
+	owner, e := restoreOwner(db.ownerRaw, db.runtimeDSN)
+	if e != nil {
+		return e
+	}
+	for i, dsn := range []string{db.runtimeDSN, db.migrationDSN} {
+		user := db.plan.RuntimeUser
+		if i == 1 {
+			user = db.plan.MigrationUser
+		}
+		store, e := control.OpenDSN(dsn)
+		if e != nil {
+			return ErrInvalid
+		}
+		e = func() error {
+			defer store.DB.Close()
+			conn, e := store.DB.Conn(ctx)
+			if e != nil {
+				return ErrInvalid
+			}
+			defer conn.Close()
+			var account string
+			if conn.QueryRowContext(ctx, "SELECT CURRENT_USER()").Scan(&account) != nil || account != user+"@localhost" {
+				return ErrInvalid
+			}
+			return verifyDatabaseOwnership(ctx, conn, owner, DatabaseSchema{1, db.plan.Data.Charset, db.plan.Data.Collation})
+		}()
+		if e != nil {
+			return ErrInvalid
+		}
+	}
+	return nil
 }

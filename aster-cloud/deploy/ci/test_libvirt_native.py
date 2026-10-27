@@ -78,6 +78,27 @@ class NativeFixtureContract(unittest.TestCase):
         for name in ("libvirt-native.py", "libvirt-native-guest.py", "controller-provision-native-guest.py", "test_libvirt_native.py"):
             ast.parse((HERE / name).read_text(), feature_version=(3, 10))
 
+    def test_controller_restore_report_requires_import_readback_without_claiming_takeover(self):
+        metadata = {**self.metadata(), 'scenario': 'controller-restore'}
+        result = {**metadata, 'schema': 1, **{key: True for key in (
+            'passed', 'real_apt', 'real_systemd', 'real_mysql', 'actual_installer', 'actual_controller',
+            'target_sealed', 'exact_encoding_preserved', 'credentials_verified', 'runtime_ddl_denied',
+            'foreign_account_refused', 'lost_credential_refused_without_reset', 'same_operation_preserved',
+            'source_fixture_synthetic', 'database_restored', 'real_source_database_snapshot',
+            'exact_rows_verified', 'read_only_reentry_verified', 'modified_data_refused',
+            'removed_constraint_refused', 'foreign_database_refused')}, **{key: False for key in (
+            'source_host_export_verified', 'node_takeover_verified', 'migration_ready', 'kvm_ready')}}
+        self.assertEqual(h.public_result(result, metadata), result)
+        for key in ('database_restored', 'real_source_database_snapshot', 'read_only_reentry_verified',
+                    'modified_data_refused', 'removed_constraint_refused', 'foreign_database_refused'):
+            with self.subTest(key=key), self.assertRaises(h.Refused):
+                h.public_result({**result, key: False}, metadata)
+        for key in ('source_host_export_verified', 'node_takeover_verified', 'migration_ready', 'kvm_ready'):
+            with self.subTest(key=key), self.assertRaises(h.Refused):
+                h.public_result({**result, key: True}, metadata)
+        with self.assertRaises(h.Refused):
+            h.public_result(result, {**metadata, 'scenario': 'controller-provision'})
+
     def test_only_fixed_signed_dated_official_images(self):
         self.assertEqual(set(h.IMAGES), {"22.04", "24.04"})
         for ubuntu, (suite, date, sha) in h.IMAGES.items():

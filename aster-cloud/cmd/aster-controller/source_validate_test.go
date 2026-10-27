@@ -405,6 +405,14 @@ func emitSourceFixture(t *testing.T) {
 	t.Helper()
 	dir, controller, operation, source := os.Getenv("ASTER_FIXTURE_DIR"), os.Getenv("ASTER_FIXTURE_CONTROLLER"), os.Getenv("ASTER_FIXTURE_OPERATION"), os.Getenv("ASTER_FIXTURE_SOURCE")
 	files := sourceFixture(t)
+	if os.Getenv("ASTER_FIXTURE_REAL_SQL") == "1" {
+		if os.Getenv("ASTER_FIXTURE_DATA_PLAN") != "" {
+			t.Fatal("ambiguous fixture source")
+		}
+		for name, raw := range realSourceDatabaseFixture(t) {
+			files[name] = raw
+		}
+	}
 	if os.Getenv("ASTER_FIXTURE_DATA_PLAN") == "1" {
 		// Synthetic typed records ONLY. This native fixture tests target DB
 		// provisioning; these headers deliberately are not a full SQL snapshot

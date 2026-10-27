@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Fixed target-provisioning scenario in an owned signed Ubuntu TCG guest.
 
-Source metadata and typed table headers are synthetic: this is NOT database
-restore, real source export, boot recovery, controller activation or takeover.
+Source host metadata is synthetic. The controller-restore scenario additionally
+imports an actual isolated MySQL snapshot, never real source-host authority.
+This is NOT boot recovery, controller activation or node takeover.
 The installer, root APT/systemd/MySQL and target coordinator are actual code.
 """
 import base64
@@ -24,8 +25,8 @@ ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': str(ROOT), 'LANG': 'C.UT
        'MYSQL_TEST_LOGIN_FILE': str(ROOT / 'absent-login-file'), 'MYSQL_HISTFILE': '/dev/null'}
 PHASE = 'preflight'
 NONCE = None
-CODES = set('TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING'.split())
-APT_CODES = set('APT_DNS_FAILURE APT_TLS_FAILURE APT_SIGNATURE_FAILURE APT_METADATA_FAILURE APT_PACKAGE_UNAVAILABLE APT_DEPENDENCY_CONFLICT APT_LOCKED APT_COMMAND_REJECTED APT_COMMAND_UNAVAILABLE APT_COMMAND_TIMEOUT APT_OUTPUT_OVERSIZED'.split())
+CODES = set('TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING TARGET_DEPENDENCIES_UNCONFIRMED TARGET_MYSQL_START_UNCONFIRMED TARGET_DATABASE_CREATE_UNCONFIRMED TARGET_DATABASE_INVENTORY_UNCONFIRMED TARGET_RESTORE_SERVER_INVENTORY_REJECTED'.split())
+APT_CODES = set('APT_PLAN_UNSAFE APT_DNS_FAILURE APT_TLS_FAILURE APT_SIGNATURE_FAILURE APT_METADATA_FAILURE APT_PACKAGE_UNAVAILABLE APT_DEPENDENCY_CONFLICT APT_LOCKED APT_COMMAND_REJECTED APT_COMMAND_UNAVAILABLE APT_COMMAND_TIMEOUT APT_OUTPUT_OVERSIZED'.split())
 
 
 class Refused(Exception):
@@ -85,8 +86,9 @@ def execute(metadata):
     release = dict(line.split('=', 1) for line in Path('/etc/os-release').read_text().splitlines() if '=' in line)
     require(release['ID'].strip('"') == 'ubuntu' and release['VERSION_ID'].strip('"') == metadata['ubuntu'])
     require(not Path('/dev/kvm').exists())
-    require(sha(ROOT / 'aster-controller') == metadata['controller_binary_sha256'] and
-            sha(ROOT / 'controller-fixture.test') == metadata['fixture_binary_sha256'])
+    require(sha(ROOT / 'aster-controller') == metadata['controller_binary_sha256'])
+    if metadata['scenario'] == 'controller-provision':
+        require(sha(ROOT / 'controller-fixture.test') == metadata['fixture_binary_sha256'])
     for path in ('/var/lib/mysql', '/etc/mysql', '/etc/libvirt', '/var/lib/libvirt', '/opt/aster-cloud',
                  '/var/lib/aster-cloud-installer', '/etc/aster-controller', '/var/lib/aster-controller-restore'):
         require(not Path(path).exists() and not Path(path).is_symlink())
@@ -94,10 +96,15 @@ def execute(metadata):
     inputs = Path('/var/lib/aster-controller-restore') / operation
     inputs.parent.mkdir(mode=0o700)
     inputs.mkdir(mode=0o700)
-    run([ROOT / 'controller-fixture.test', '-test.run=^TestControllerSourceValidation$'], env={**ENV,
-        'ASTER_SOURCE_CLI_FIXTURE': '1', 'ASTER_FIXTURE_DATA_PLAN': '1', 'ASTER_FIXTURE_DIR': str(inputs),
-        'ASTER_FIXTURE_CONTROLLER': controller, 'ASTER_FIXTURE_OPERATION': operation,
-        'ASTER_FIXTURE_SOURCE': metadata['source_sha']})
+    restoring = metadata['scenario'] == 'controller-restore'
+    if restoring:
+        for name in ('backup.age', 'recovery.key', 'request.json'):
+            private(inputs / name, (ROOT / name).read_bytes())
+    else:
+        run([ROOT / 'controller-fixture.test', '-test.run=^TestControllerSourceValidation$'], env={**ENV,
+            'ASTER_SOURCE_CLI_FIXTURE': '1', 'ASTER_FIXTURE_DATA_PLAN': '1', 'ASTER_FIXTURE_DIR': str(inputs),
+            'ASTER_FIXTURE_CONTROLLER': controller, 'ASTER_FIXTURE_OPERATION': operation,
+            'ASTER_FIXTURE_SOURCE': metadata['source_sha']})
     files = {'bin/aster-controller': (ROOT / 'aster-controller').read_bytes(),
              'ui/index.html': b'<!doctype html><title>Native provisioning fixture, not UI acceptance</title>'}
     for name in ('install.py', 'controller-migration.py', 'provision.py'):
@@ -125,7 +132,7 @@ def execute(metadata):
     result = json.loads(entry('target-database-plan').stdout)
     require(result['readonly'] and not result['database_restored'] and not result['migration_ready'])
     require(result['plan']['data']['charset'] == 'utf8mb4' and result['plan']['data']['collation'] == 'utf8mb4_bin' and
-            len(result['plan']['data']['tables']) == 34 and result['plan']['data']['rows'] == 12)
+            len(result['plan']['data']['tables']) == 34 and result['plan']['data']['rows'] == (18 if restoring else 12))
     require(not (inputs / 'database').exists())
     seal = Path('/var/lib/aster-controller') / controller / 'target-restore.json'
     state = Path('/var/lib/aster-cloud-installer/controller/state.json')
@@ -170,14 +177,14 @@ def execute(metadata):
     progress('target-refusals')
     # Test-owned locked account: production never removes unknown accounts.
     module.mysql_sql(directory, "CREATE USER 'aster_native_foreign'@'localhost' ACCOUNT LOCK;\n")
-    entry('target-provision', 'TARGET_PROVISION_UNCONFIRMED')
+    entry('target-provision', 'TARGET_RESTORE_SERVER_INVENTORY_REJECTED')
     require({name: sha(directory / name) for name in private_files} == hashes)
     module.mysql_sql(directory, "DROP USER 'aster_native_foreign'@'localhost';\n")
     credentials = directory / 'runtime-mysql-dsn'
     retained = ROOT / 'retained-runtime-dsn'
     before_auth = module.mysql_sql(directory, "SELECT SHA2(authentication_string,256) FROM mysql.user WHERE User='" + runtime_user + "' AND Host='localhost';\n")
     credentials.rename(retained)
-    entry('target-provision', 'TARGET_PROVISION_UNCONFIRMED')
+    entry('target-provision', 'TARGET_DATABASE_CREATE_UNCONFIRMED')
     require(not credentials.exists() and sha(retained) == hashes['runtime-mysql-dsn'])
     require(module.mysql_sql(directory, "SELECT SHA2(authentication_string,256) FROM mysql.user WHERE User='" + runtime_user + "' AND Host='localhost';\n") == before_auth)
     retained.rename(credentials)
@@ -188,8 +195,62 @@ def execute(metadata):
     require(info == {'tables': 1})
     true = 'passed real_apt real_systemd real_mysql actual_installer actual_controller target_sealed exact_encoding_preserved credentials_verified runtime_ddl_denied foreign_account_refused lost_credential_refused_without_reset same_operation_preserved source_fixture_synthetic'.split()
     false = 'database_restored source_host_export_verified node_takeover_verified migration_ready kvm_ready'.split()
-    return {**{k: True for k in true}, **{k: False for k in false}, 'schema': 1, 'scenario': 'controller-provision',
-            **{k: metadata[k] for k in ('source_sha', 'ubuntu', 'image_sha256')}}
+    report = {**{k: True for k in true}, **{k: False for k in false}, 'schema': 1, 'scenario': metadata['scenario'],
+              **{k: metadata[k] for k in ('source_sha', 'ubuntu', 'image_sha256')}}
+    if restoring:
+        # Restore the same owned provisioning operation after the deliberate
+        # lost-credential refusal, without replacing passwords or the marker.
+        require(json.loads(entry('target-provision').stdout) == expected)
+        module.mysql_sql(directory, 'CREATE DATABASE aster_native_foreign;\n')
+        entry('target-restore', 'TARGET_RESTORE_INVENTORY_UNCONFIRMED')
+        require(not (directory / 'import-started.json').exists() and not (directory / 'import-approval.json').exists())
+        require(module._query(directory, "SELECT JSON_OBJECT('schemas',COUNT(*)) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='aster_native_foreign';\n") == {'schemas': 1})
+        # Only the fixture removes its own foreign DB; production never does.
+        module.mysql_sql(directory, 'DROP DATABASE aster_native_foreign;\n')
+        progress('target-import')
+        entry('target-data-status', 'TARGET_IMPORT_NOT_STARTED')
+        imported = json.loads(entry('target-restore').stdout)
+        require(imported == {'schema': 1, 'operation_id': operation, 'database_restored': True,
+            'read_only_verification': True, 'target_restore_approved': False, 'migration_ready': False,
+            'root_inventory_verified': True, 'data': {'tables': 34, 'rows': 18, 'exact_rows_verified': True,
+                'declared_constraints_verified': True, 'provisioning_marker_preserved': True,
+                'target_activation_approved': False, 'migration_ready': False}})
+        # Independent SQL assertions: binary/empty/NULL, Unicode, microseconds,
+        # bigint/uint64, deleted high auto increment and the old session row.
+        values = run(runtime_command, data=b"SELECT HEX(capabilities),HEX(datacenter_id),heartbeat_at IS NULL,free_cpu,updated_at FROM controller_nodes WHERE id='node-a';\n").stdout
+        require(values == b'00FF000A225C80\tE9A699E6B8AF\t1\t9223372036854775806\t2026-10-28 01:02:03.123456\n')
+        require(run(runtime_command, data=b"SELECT LENGTH(capabilities) FROM controller_nodes WHERE id='node-b';\n").stdout == b'0\n')
+        require(run(runtime_command, data=b'SELECT revision FROM controller_console_users;\n').stdout == b'18446744073709551614\n')
+        require(run(runtime_command, data=b'SELECT COUNT(*) FROM controller_console_sessions;\n').stdout == b'1\n')
+        require(run(runtime_command, data=b"SELECT AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='controller_audit';\n").stdout == b'42\n')
+        progress('target-readback')
+        records = private_files + ('import-approval.json', 'import-started.json', 'structure.json')
+        committed_hashes = {name: sha(directory / name) for name in records}
+        module.mysql_sql(directory, 'SET GLOBAL super_read_only=ON;\n')
+        try:
+            # MySQL itself rejects writes, including privileged writes. A lost
+            # response/repeated root invocation must do only exact readback.
+            require(json.loads(entry('target-restore').stdout) == imported)
+            require(json.loads(entry('target-data-status').stdout) == imported)
+        finally:
+            module.mysql_sql(directory, 'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
+        require({name: sha(directory / name) for name in records} == committed_hashes)
+        entry('target-provision', 'TARGET_IMPORT_ALREADY_STARTED_USE_DATA_STATUS')
+        progress('target-data-refusals')
+        module.mysql_sql(directory, "UPDATE `" + database + "`.controller_nodes SET datacenter_id='changed' WHERE id='node-a';\n")
+        entry('target-data-status', 'TARGET_COMMAND_REJECTED')
+        entry('target-restore', 'TARGET_COMMAND_REJECTED')
+        require(run(runtime_command, data=b"SELECT datacenter_id FROM controller_nodes WHERE id='node-a';\n").stdout == b'changed\n')
+        module.mysql_sql(directory, "UPDATE `" + database + "`.controller_nodes SET datacenter_id=CONVERT(0xE9A699E6B8AF USING utf8mb4) WHERE id='node-a';\n")
+        require(json.loads(entry('target-data-status').stdout) == imported)
+        module.mysql_sql(directory, "ALTER TABLE `" + database + "`.controller_console_sessions DROP FOREIGN KEY controller_console_sessions_user_fk;\n")
+        entry('target-data-status', 'TARGET_COMMAND_REJECTED')
+        entry('target-restore', 'TARGET_COMMAND_REJECTED')
+        require({name: sha(directory / name) for name in records} == committed_hashes and (sha(seal), sha(state)) == before)
+        require(not Path('/etc/aster-controller').exists() and not Path('/etc/systemd/system/aster-controller.service').exists())
+        report.update({key: True for key in ('database_restored', 'real_source_database_snapshot', 'exact_rows_verified',
+            'read_only_reentry_verified', 'modified_data_refused', 'removed_constraint_refused', 'foreign_database_refused')})
+    return report
 
 
 def main():

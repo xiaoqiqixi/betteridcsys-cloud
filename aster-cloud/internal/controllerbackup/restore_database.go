@@ -147,7 +147,7 @@ func (a *Archive) tableRecords(ctx context.Context, name string, header func(Tab
 // never writes config, starts a process, contacts a node or edits source data.
 // A rejected/partial new schema is retained; never silently deleted/reused.
 func (a *Archive) RestoreEmptyDatabase(ctx context.Context, target *sql.DB) (DatabaseRestoreReport, error) {
-	return a.restoreDatabase(ctx, target, nil)
+	return a.restoreDatabase(ctx, target, nil, nil)
 }
 
 // RestoreMarkedEmptyDatabase is the data-stage variant for the native
@@ -171,7 +171,7 @@ func (a *Archive) RestoreMarkedEmptyDatabase(ctx context.Context, target *sql.DB
 		return DatabaseRestoreReport{}, ErrInvalid
 	}
 	parsed.DB.Close()
-	return a.restoreDatabase(ctx, target, owner)
+	return a.restoreDatabase(ctx, target, owner, nil)
 }
 
 // DatabasePlan is an authenticated, completely parsed data inventory. It is
@@ -226,7 +226,7 @@ func (a *Archive) parseDatabase(ctx context.Context) (DatabasePlan, map[string]T
 	return plan, definitions, counts, nil
 }
 
-func (a *Archive) restoreDatabase(ctx context.Context, target *sql.DB, owner *databaseOwnership) (DatabaseRestoreReport, error) {
+func (a *Archive) restoreDatabase(ctx context.Context, target *sql.DB, owner *databaseOwnership, persist func([]byte) error) (DatabaseRestoreReport, error) {
 	if a == nil || !a.valid || target == nil {
 		return DatabaseRestoreReport{}, ErrInvalid
 	}
@@ -285,6 +285,7 @@ func (a *Archive) restoreDatabase(ctx context.Context, target *sql.DB, owner *da
 	}
 	for _, q := range []string{
 		"SET SESSION information_schema_stats_expiry=0",
+		"SET SESSION sql_quote_show_create=1",
 		"SET SESSION sql_mode='STRICT_ALL_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION,NO_AUTO_VALUE_ON_ZERO'",
 		"SET SESSION foreign_key_checks=1",
 	} {
@@ -345,6 +346,12 @@ func (a *Archive) restoreDatabase(ctx context.Context, target *sql.DB, owner *da
 			}
 		}
 		if count != want {
+			return DatabaseRestoreReport{}, ErrInvalid
+		}
+	}
+	if persist != nil {
+		proof, err := a.prepareStructure(ctx, tx, owner)
+		if err != nil || persist(proof) != nil {
 			return DatabaseRestoreReport{}, ErrInvalid
 		}
 	}
