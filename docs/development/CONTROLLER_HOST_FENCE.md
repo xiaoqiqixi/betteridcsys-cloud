@@ -70,3 +70,7 @@
 `5c0aee3cb8b6bc1876cfd5d027b0d538413d95e4` 的 [CI 40557028613](https://github.com/xiaoqiqixi/betteridcsys-cloud/actions/runs/40557028613) 已验证 Ubuntu22/24 的在途 HTTPS 请求排空、真实 systemd/MySQL 隔离、保留安装器所有权标记的加密导出，以及空专用库的类型化数据往返。仍需原生 OS 重启复核、实际在途节点操作与故障窗口恢复；daemon-reload **不是**操作系统重启。M03 目标主机恢复、M04 双活防护/接管回退、M05 后台、M06 跨主控实例迁移未完成；数据库往返或离线来源校验均不提供“导出后直接导入运行库”的捷径。
 
 实现语义参考：[Linux renameat2](https://man7.org/linux/man-pages/man2/rename.2.html)、[systemd 单元加载与 mask](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html)。Ubuntu22/24 的实际行为仍由分发版测试确认，不以最新版手册替代验收。
+
+## 目标准备隔离
+
+目标主控使用独立的 `target-restore.json` 不可变记录，不能借用源端 `migration-cancel` 解封。任何目标记录 inode（包括损坏的内容）都阻止普通进程准入；状态查询必须核对操作、规范化配置与不可变计划摘要。新目标若残留源隔离/取消历史或未知运行时文件，不得当作空目标收养。具体固定输入和 `target-plan / target-seal / target-status` 边界见[备份格式与目标准备](CONTROLLER_BACKUP_FORMAT.md#目标主机准备与持久封存)。目标数据库、运行配置和节点单活切换尚未由此接口执行。

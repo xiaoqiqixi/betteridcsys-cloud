@@ -56,3 +56,25 @@
 标记不会删除、不从源包复制、不被导入行覆盖。在数据事务开始和提交前复核，SERIALIZABLE 事务持有其读取锁，避免导入期间无声改变。失败后保留目标及原标记；重复导入已填充目标仍拒绝。
 
 这里验证的是数据阶段的实际标记绑定，**不是**新建库来源或独占写入权限的完整证明。调用者必须是持有目标私有 journal 的主机协调器，另行核对创建过程、账号 grants、root 可见的完整对象清单和目标持久封印。不得把包内的 `source/database-ownership.json` 传作目标凭据，也不得把这个 Go 内部方法直接接成普通 HTTP 恢复接口。
+
+## 目标主机准备与持久封存
+
+`controller-migration.py` 的 `target-plan`、`target-seal`、`target-status` 是**目标准备接口**，不是恢复完成或切换入口。使用已安装版本内的 `templates/host-management/controller-migration.py`，仅接受 `--operation <32 位小写十六进制 ID>`，不接受路径、DSN、下载地址、任意命令或跳过验证参数。
+
+目标必须为 Ubuntu 22/24 上仅完成软件安装、尚未批准配置/创建服务的受管主控。初始兼容策略要求目标安装与备份的 `source_commit` 完全一致；不能把另一个版本、当前 `main` 或自行修改的 manifest 当作兼容升级。已配置主控、已有控制器服务/进程、源主机自身、改变的安装文件、未清理的验证中断目录均拒绝接管，不停止或删除现有业务。
+
+输入固定为 `/var/lib/aster-controller-restore/<operation>/`，父目录和操作目录均为 root 所有的 `0700`。管理员在独立核对来源后放入三份 root `0600` 常规文件：
+
+- `backup.age`：源主控导出的完整加密包。
+- `recovery.key`：通过独立安全通道保管的恢复密钥；不放命令行、日志或源码仓库。
+- `request.json`：严格字段 `schema: 1`、`controller_id`、`operation_id`、`source_commit`、`archive_sha256`；身份及摘要须来自已核对的源导出回执，不从待导入包自动采信。
+
+操作语义：
+
+1. **target-plan**：验证已安装文件清单、软件状态、当前可执行文件、目标 machine-id、完整 age 认证和源配置/材料绑定。输出不含秘密的安装/源主机/目标主机/配置/密文摘要。仅产生随后删除的私有验证临时文件，不创建目标运行时状态、不操作 SQL、不连接被控。
+2. **target-seal**：持有安装器锁和操作锁，写入不可覆盖的 `plan.json`，重新核对输入后，在 `/var/lib/aster-controller/<controller_id>/target-restore.json` 写入并 fsync 独立封存记录。只接受全新身份，或相同操作、配置、计划摘要的重入；不收养源隔离历史或未知文件。
+3. **target-status**：重新验证固定输入、完整安装与不可变计划，读取同一封存记录；不能用“没有记录”代替成功。
+
+封存后普通 `serve`、派发、心跳、数据库迁移、管理员初始化等命令在数据库/被控 I/O 前拒绝执行。源主机的 `migration-cancel`、`migration-fence` 和导出入口不能解除目标封存。截断、损坏、权限错误及不匹配的计划保留原始证据并拒绝继续；没有自动删除、覆盖或 `--force` 解封路径。该机制是**本机准入隔离**，不是跨主机仲裁；此阶段 `database_restored`、`target_restore_approved`、`source_isolated`、`migration_ready` 均保持 false。
+
+目前仍需完成：目标独占 MySQL 创建及最小授权、带标记空库恢复的宿主机编排、配置/材料安全落盘、旧会话撤销、重启恢复、节点单活接管、迁移 UI 和双主机整链验收。不得据此启动新主控或宣称可以完成主控迁移。当前根权限 CI 使用真实安装器/ELF/systemd 查询与独立加密的合成源包，明确**不是**真实源导出、SQL 导入或双主机验收；对应既有原生 MySQL 源导出检查单独保留。

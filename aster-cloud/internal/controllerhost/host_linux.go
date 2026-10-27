@@ -153,7 +153,7 @@ func (h *Host) Admit() error {
 
 // Any fence inode (including an incomplete/corrupt one) blocks admission.
 func (h *Host) Check() error {
-	for _, name := range []string{"fence.json", "host-migration.json"} {
+	for _, name := range []string{"target-restore.json", "fence.json", "host-migration.json"} {
 		f, e := h.file(name, false)
 		if errors.Is(e, syscall.ENOENT) {
 			continue
@@ -194,7 +194,7 @@ func (h *Host) read(name string) (intent, error) {
 
 // Immutable files are never overwritten, even after a partial write. Failure
 // leaves a fail-closed record requiring diagnosis, not an automatic retry reset.
-func (h *Host) writeNew(name string, v intent) error {
+func (h *Host) writeNew(name string, v any) error {
 	raw, e := json.Marshal(v)
 	if e != nil {
 		return ErrUnavailable
@@ -231,6 +231,12 @@ func (h *Host) drained() (bool, error) {
 }
 
 func (h *Host) statusLocked() (Status, error) {
+	if v, e := h.readTarget(); !errors.Is(e, syscall.ENOENT) {
+		if e != nil {
+			return Status{}, e
+		}
+		return h.targetStatus(v)
+	}
 	s := Status{Schema: 1, ControllerID: h.id, Phase: "active"}
 	v, e := h.read("fence.json")
 	if errors.Is(e, syscall.ENOENT) {
@@ -270,6 +276,9 @@ func (h *Host) WithSealedSource(operation string, action func() error) error {
 		return e
 	}
 	defer h.unlock()
+	if e := h.noTarget(); e != nil {
+		return e
+	}
 	v, e := h.read("fence.json")
 	if e != nil || v.OperationID != operation || v.ConfigSHA != h.configSHA {
 		return ErrInvalid
@@ -294,6 +303,9 @@ func (h *Host) Fence(operation string) (Status, error) {
 		return Status{}, e
 	}
 	defer h.unlock()
+	if e := h.noTarget(); e != nil {
+		return Status{}, e
+	}
 	if _, e := h.read(operation + ".cancelled.json"); !errors.Is(e, syscall.ENOENT) {
 		return Status{}, ErrInvalid
 	}
@@ -332,6 +344,9 @@ func (h *Host) Cancel(operation string) (Status, error) {
 		return Status{}, e
 	}
 	defer h.unlock()
+	if e := h.noTarget(); e != nil {
+		return Status{}, e
+	}
 	seal, sealError := h.file("host-migration.json", false)
 	if seal != nil {
 		seal.Close()

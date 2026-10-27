@@ -47,6 +47,9 @@ func run(args []string) error {
 		return control.ErrInput
 	}
 	command := args[0]
+	if command == "migration-target-plan" || command == "migration-target-seal" || command == "migration-target-status" {
+		return targetArchive(command, args[1:])
+	}
 	if command == "migration-inspect" {
 		return inspectArchive(args[1:])
 	}
@@ -56,8 +59,9 @@ func run(args []string) error {
 	if command == "migration-capabilities" && len(args) == 1 {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
 			"schema": 1, "protocol": "aster.controller-host/1", "runtime_fence": runtime.GOOS == "linux",
-			"host_migration_seal": runtime.GOOS == "linux",
-			"migration_ready":     false, "export_restore": false,
+			"host_migration_seal":     runtime.GOOS == "linux",
+			"target_preparation_seal": runtime.GOOS == "linux",
+			"migration_ready":         false, "export_restore": false,
 		})
 	}
 	flags := flag.NewFlagSet("aster-controller "+command, flag.ContinueOnError)

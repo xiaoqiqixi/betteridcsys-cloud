@@ -50,3 +50,23 @@ func validateArchiveSource(args []string) error {
 	}
 	return json.NewEncoder(os.Stdout).Encode(report)
 }
+
+func targetArchive(command string, args []string) error {
+	flags := flag.NewFlagSet(command, flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	operation := flags.String("operation", "", "exact target operation identity")
+	if flags.Parse(args) != nil || flags.NArg() != 0 {
+		return controllerbackup.ErrInvalid
+	}
+	var report any
+	var err error
+	if command == "migration-target-plan" {
+		report, err = controllerbackup.PlanTarget(*operation)
+	} else {
+		report, err = controllerbackup.SealTarget(*operation, command == "migration-target-status")
+	}
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(report)
+}

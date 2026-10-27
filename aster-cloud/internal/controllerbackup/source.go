@@ -16,17 +16,19 @@ import (
 )
 
 type SourceReport struct {
-	Schema                      int    `json:"schema"`
-	ControllerID                string `json:"controller_id"`
-	OperationID                 string `json:"operation_id"`
-	SourceCommit                string `json:"source_commit"`
-	MaterialReferences          int    `json:"material_references"`
-	SourceBindingsVerified      bool   `json:"source_bindings_verified"`
-	RuntimeMaterialsVerified    bool   `json:"runtime_materials_verified"`
-	DatabaseSemanticsVerified   bool   `json:"database_semantics_verified"`
-	PublisherProvenanceVerified bool   `json:"publisher_provenance_verified"`
-	TargetRestoreApproved       bool   `json:"target_restore_approved"`
-	MigrationReady              bool   `json:"migration_ready"`
+	CanonicalConfigurationSHA256 string `json:"canonical_configuration_sha256"`
+	SourceMachineIDSHA256        string `json:"source_machine_id_sha256"`
+	Schema                       int    `json:"schema"`
+	ControllerID                 string `json:"controller_id"`
+	OperationID                  string `json:"operation_id"`
+	SourceCommit                 string `json:"source_commit"`
+	MaterialReferences           int    `json:"material_references"`
+	SourceBindingsVerified       bool   `json:"source_bindings_verified"`
+	RuntimeMaterialsVerified     bool   `json:"runtime_materials_verified"`
+	DatabaseSemanticsVerified    bool   `json:"database_semantics_verified"`
+	PublisherProvenanceVerified  bool   `json:"publisher_provenance_verified"`
+	TargetRestoreApproved        bool   `json:"target_restore_approved"`
+	MigrationReady               bool   `json:"migration_ready"`
 }
 
 type sourceIdentity struct {
@@ -231,7 +233,11 @@ func (a *Archive) ValidateSource(expectedCommit string) (SourceReport, error) {
 	if e != nil {
 		return fail()
 	}
-	return SourceReport{Schema: 1, ControllerID: config.ControllerID, OperationID: a.manifest.OperationID, SourceCommit: expectedCommit, MaterialReferences: count, SourceBindingsVerified: true, RuntimeMaterialsVerified: true}, nil
+	canonical, e := json.Marshal(config)
+	if e != nil {
+		return fail()
+	}
+	return SourceReport{CanonicalConfigurationSHA256: digestBytes(canonical), SourceMachineIDSHA256: id.MachineIDSHA256, Schema: 1, ControllerID: config.ControllerID, OperationID: a.manifest.OperationID, SourceCommit: expectedCommit, MaterialReferences: count, SourceBindingsVerified: true, RuntimeMaterialsVerified: true}, nil
 }
 func validSourceUnits(units []sourceUnit, c control.Config) bool {
 	if len(units) < 1 || len(units) > 1+2*len(c.Nodes) {

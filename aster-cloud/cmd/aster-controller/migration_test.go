@@ -25,6 +25,7 @@ func TestControllerMigrationCapabilities(t *testing.T) {
 	if json.Unmarshal(raw, &got) != nil || got["schema"] != float64(1) ||
 		got["protocol"] != "aster.controller-host/1" || got["runtime_fence"] != (runtime.GOOS == "linux") ||
 		got["host_migration_seal"] != (runtime.GOOS == "linux") ||
+		got["target_preparation_seal"] != (runtime.GOOS == "linux") ||
 		got["migration_ready"] != false || got["export_restore"] != false {
 		t.Fatal("capability must distinguish runtime fencing from complete migration", string(raw))
 	}

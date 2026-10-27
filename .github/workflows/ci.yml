@@ -45,6 +45,11 @@ jobs:
         run: |
           go build -mod=readonly -trimpath -buildvcs=false -o "$RUNNER_TEMP/aster-controller-host-test" ./cmd/aster-controller
           sudo /usr/bin/python3 -I deploy/ci/test_controller_host.py --binary "$RUNNER_TEMP/aster-controller-host-test"
+      - name: Installed target preparation and persistent seal (not complete migration)
+        working-directory: aster-cloud
+        run: |
+          go test -mod=readonly -c -o "$RUNNER_TEMP/aster-target-source-fixture.test" ./cmd/aster-controller
+          sudo /usr/bin/python3 -I deploy/ci/test_controller_target.py --binary "$RUNNER_TEMP/aster-controller-host-test" --fixture-binary "$RUNNER_TEMP/aster-target-source-fixture.test" --source "$GITHUB_SHA"
       - name: Published installer commands and proof boundaries
         run: |
           python3 -B aster-cloud/deploy/ci/test_unified_install.py

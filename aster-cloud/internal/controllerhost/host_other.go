@@ -12,3 +12,7 @@ func (*Host) Status() (Status, error)                     { return Status{}, Err
 func (*Host) Fence(string) (Status, error)                { return Status{}, ErrUnavailable }
 func (*Host) Cancel(string) (Status, error)               { return Status{}, ErrUnavailable }
 func (*Host) WithSealedSource(string, func() error) error { return ErrUnavailable }
+
+func (*Host) PrepareTarget(string, string) (Status, error) { return Status{}, ErrUnavailable }
+
+func (*Host) TargetStatus(string, string) (Status, error) { return Status{}, ErrUnavailable }

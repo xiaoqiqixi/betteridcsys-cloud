@@ -18,12 +18,12 @@ class HostMigrationEntry(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         value = json.loads(r.stdout)
         self.assertEqual(value['protocol'], 'aster.controller-migration/1')
-        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export'])
+        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status'])
         self.assertIs(value['export_restore'], False)
         self.assertIs(value['migration_ready'], False)
 
     def test_no_paths_shell_unit_or_implicit_resume_overrides(self):
-        for args in [(), ('isolate',), ('export',), ('export', '--operation', '../escape'), ('isolate', '--operation', '../escape'),
+        for args in [(), ('isolate',), ('export',), ('target-plan',), ('target-seal', '--operation', '../escape'), ('target-status', '--root', '/tmp'), ('export', '--operation', '../escape'), ('isolate', '--operation', '../escape'),
                      ('plan', '--unit', 'ssh.service'), ('plan', '--root', '/tmp'),
                      ('plan', '--config', 'PRIVATE_SENTINEL'), ('plan', '--shell', '/bin/sh'),
                      ('resume-source', '--operation', 'A' * 32)]:

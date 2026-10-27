@@ -77,6 +77,10 @@ func sourceFixture(t *testing.T) map[string][]byte {
 	return files
 }
 func sourceArchive(t *testing.T, files map[string][]byte, key string) []byte {
+	return sourceArchiveFor(t, files, key, "source-one", strings.Repeat("a", 32), strings.Repeat("b", 40))
+}
+
+func sourceArchiveFor(t *testing.T, files map[string][]byte, key, controller, operation, source string) []byte {
 	t.Helper()
 	var names []string
 	for name := range files {
@@ -87,7 +91,7 @@ func sourceArchive(t *testing.T, files map[string][]byte, key string) []byte {
 	for _, name := range names {
 		entries = append(entries, map[string]any{"name": name, "size": len(files[name]), "sha256": sourceHash(files[name])})
 	}
-	manifest := sourceJSON(map[string]any{"schema": 1, "protocol": "aster.controller-backup/1", "controller_id": "source-one", "operation_id": strings.Repeat("a", 32), "source_commit": strings.Repeat("b", 40), "schema_version": 12, "source_plan_sha256": sourceHash(files["source/plan.json"]), "files": entries})
+	manifest := sourceJSON(map[string]any{"schema": 1, "protocol": "aster.controller-backup/1", "controller_id": controller, "operation_id": operation, "source_commit": source, "schema_version": 12, "source_plan_sha256": sourceHash(files["source/plan.json"]), "files": entries})
 	var plaintext bytes.Buffer
 	tw := tar.NewWriter(&plaintext)
 	for _, name := range append([]string{"manifest.json"}, names...) {
@@ -124,6 +128,12 @@ func sourceArchive(t *testing.T, files map[string][]byte, key string) []byte {
 	return ciphertext.Bytes()
 }
 func TestControllerSourceValidation(t *testing.T) {
+	// CI-only independent age fixture writer; not linked into the installed
+	// binary and never used as evidence of database/source-host restoration.
+	if os.Getenv("ASTER_SOURCE_CLI_FIXTURE") == "1" {
+		emitSourceFixture(t)
+		os.Exit(0)
+	}
 	if os.Getenv("ASTER_SOURCE_CLI_HELPER") == "1" {
 		os.Args = append([]string{"aster-controller"}, os.Args[3:]...)
 		main()
@@ -161,6 +171,10 @@ func TestControllerSourceValidation(t *testing.T) {
 	var report map[string]any
 	if json.Unmarshal(out, &report) != nil || report["source_bindings_verified"] != true || report["runtime_materials_verified"] != true || report["material_references"] != float64(6) || report["database_semantics_verified"] != false || report["target_restore_approved"] != false || report["migration_ready"] != false || report["publisher_provenance_verified"] != false {
 		t.Fatalf("overclaimed or missing offline evidence: %s", out)
+	}
+	// Fixed canonical JSON fixture digest, calculated independently with Python.
+	if report["canonical_configuration_sha256"] != "d8bb3d67a219d2a0bd740a59f3e5f31a42cc0b07186bdbd5ec3ce2cb30b6e428" || report["source_machine_id_sha256"] != strings.Repeat("e", 64) {
+		t.Fatalf("missing target identity bindings: %s", out)
 	}
 	for _, secret := range []string{key, "private-password", "/unavailable-source/", strings.Repeat("r", 64)} {
 		if bytes.Contains(out, []byte(secret)) {
@@ -381,4 +395,46 @@ func sourceWithNode(t *testing.T, original map[string][]byte) map[string][]byte 
 	files["controller/materials.json"] = sourceJSON(index)
 	sourceRebind(t, files)
 	return files
+}
+
+func emitSourceFixture(t *testing.T) {
+	t.Helper()
+	dir, controller, operation, source := os.Getenv("ASTER_FIXTURE_DIR"), os.Getenv("ASTER_FIXTURE_CONTROLLER"), os.Getenv("ASTER_FIXTURE_OPERATION"), os.Getenv("ASTER_FIXTURE_SOURCE")
+	files := sourceFixture(t)
+	var config, installation, plan, receipt map[string]any
+	for name, value := range map[string]*map[string]any{"controller/config.json": &config, "source/installation.json": &installation, "source/plan.json": &plan, "source/isolated.json": &receipt} {
+		if json.Unmarshal(files[name], value) != nil {
+			t.Fatal("fixture decode")
+		}
+	}
+	config["controller_id"] = controller
+	installation["source_commit"] = source
+	id := plan["identity"].(map[string]any)
+	id["controller_id"], id["source_commit"] = controller, source
+	if machine := os.Getenv("ASTER_FIXTURE_MACHINE_SHA"); machine != "" {
+		id["machine_id_sha256"] = machine
+	}
+	receipt["operation_id"], receipt["identity"] = operation, id
+	files["controller/config.json"], files["source/installation.json"] = sourceJSON(config), sourceJSON(installation)
+	files["source/plan.json"], files["source/isolated.json"] = sourceJSON(plan), sourceJSON(receipt)
+	sourceRebind(t, files)
+	keyBytes := make([]byte, 32)
+	if _, e := rand.Read(keyBytes); e != nil {
+		t.Fatal(e)
+	}
+	key := "ASTER-CONTROLLER-RECOVERY-1:" + hex.EncodeToString(keyBytes)
+	archive := sourceArchiveFor(t, files, key, controller, operation, source)
+	outputs := map[string][]byte{"backup.age": archive, "recovery.key": []byte(key + "\n"), "request.json": sourceJSON(map[string]any{"schema": 1, "controller_id": controller, "operation_id": operation, "source_commit": source, "archive_sha256": sourceHash(archive)})}
+	for name, raw := range outputs {
+		f, e := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, e = f.Write(raw); e != nil {
+			t.Fatal(e)
+		}
+		if e = f.Close(); e != nil {
+			t.Fatal(e)
+		}
+	}
 }

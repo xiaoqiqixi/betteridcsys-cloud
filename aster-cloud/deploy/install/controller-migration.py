@@ -55,7 +55,7 @@ def install_module():
     return module
 
 
-def run(argv, timeout=60):
+def run(argv, timeout=60, confirmed_errors=False):
     # No shell, inherited environment, user URL, unit override or executable.
     try:
         r = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ENV,
@@ -63,6 +63,19 @@ def run(argv, timeout=60):
     except (OSError, subprocess.SubprocessError):
         raise Refused('FIXED_HOST_COMMAND_UNCONFIRMED') from None
     require(len(r.stdout) <= 1024 * 1024 and len(r.stderr) <= 65536, 'HOST_OUTPUT_BOUND_EXCEEDED')
+    if confirmed_errors and r.returncode != 0:
+        try:
+            error = json.loads(r.stderr)
+        except (ValueError, UnicodeError):
+            raise Refused('TARGET_COMMAND_UNCONFIRMED') from None
+        require(not r.stdout and isinstance(error, dict) and
+                set(error) == {'time', 'level', 'msg', 'component', 'code'} and
+                error['level'] == 'ERROR' and error['msg'] == 'aster_command_failed' and
+                error['component'] == 'controller' and
+                ((r.returncode == 1 and error['code'] in ('COMMAND_FAILED', 'CONTROLLER_MIGRATION_BUSY')) or
+                 (r.returncode == 78 and error['code'] == 'CONTROLLER_MIGRATION_FENCED')),
+                'TARGET_COMMAND_UNCONFIRMED')
+        raise Refused('TARGET_COMMAND_REJECTED')
     require(r.returncode == 0, 'FIXED_HOST_COMMAND_REJECTED')
     return r.stdout
 
@@ -118,6 +131,63 @@ def bundle_bytes(installer, path):
         return raw
 
 
+def verify_installation(self, installer, target=False):
+    state_raw = installer.protected_read(str(INSTALL_STATE), 1024 * 1024)
+    state = installer.strict_json(state_raw)
+    require(state.get('schema') == 1 and state.get('component') == 'controller' and isinstance(state.get('steps'), list),
+            'MANAGED_INSTALLATION_REQUIRED')
+    if target:
+        require(state.get('status') == 'software-installed' and state.get('configuration') == 'waiting-approval' and
+                state.get('service') == 'not-started' and state.get('current_step') is None and
+                'software-installed' in state['steps'] and set(state['steps']) <= {'software-installed', 'native-dependencies'} and
+                not state.get('approval_sha256') and not state.get('wizard_request_sha256'), 'FRESH_SOFTWARE_TARGET_REQUIRED')
+    else:
+        require(state.get('status') in ('configuration-approved', 'service-ready') and
+                {'software-installed', 'configuration-approved', 'inactive-systemd-unit'} <= set(state['steps']),
+                'MANAGED_INSTALLATION_REQUIRED')
+    version, bundle_sha, source = state.get('version'), state.get('bundle_sha256'), state.get('source_commit')
+    require(isinstance(version, str) and re.fullmatch(r'0\.[0-9]+\.[0-9]+-(?:dev(?:\.[0-9]+)?|rc\.[0-9]+)', version) and
+            isinstance(bundle_sha, str) and SHA.fullmatch(bundle_sha) and isinstance(source, str) and
+            re.fullmatch(r'[0-9a-f]{40}', source), 'INSTALLATION_IDENTITY_INVALID')
+    self.version_dir = Path('/opt/aster-cloud/controller/versions') / (version + '-' + bundle_sha[:16])
+    manifest_raw = installer.protected_read(str(self.version_dir / 'manifest.json'), 4 * 1024 * 1024, False)
+    manifest = installer.strict_json(manifest_raw)
+    require(manifest.get('schema') == 1 and manifest.get('component') == 'aster-cloud-controller' and
+            manifest.get('version') == version and manifest.get('source_commit') == source and
+            manifest.get('platform') == 'linux-amd64', 'INSTALLED_MANIFEST_MISMATCH')
+    entries = manifest.get('files')
+    require(isinstance(entries, list) and 1 <= len(entries) <= 10000, 'INSTALLED_INVENTORY_INVALID')
+    names, total = set(), 0
+    for entry in entries:
+        require(isinstance(entry, dict) and set(entry) == {'path', 'sha256', 'size', 'mode'}, 'INSTALLED_ENTRY_INVALID')
+        name = installer.safe_member(entry['path'])
+        require(name not in names and name != 'manifest.json' and type(entry['size']) is int and
+                0 <= entry['size'] <= installer.MAX_FILE_BYTES and entry['mode'] in ('0644', '0755') and
+                isinstance(entry['sha256'], str) and SHA.fullmatch(entry['sha256']), 'INSTALLED_ENTRY_INVALID')
+        raw = bundle_bytes(installer, self.version_dir / name)
+        require(len(raw) == entry['size'] and digest(raw) == entry['sha256'] and
+                stat.S_IMODE((self.version_dir / name).stat().st_mode) == int(entry['mode'], 8), 'INSTALLED_BYTES_CHANGED')
+        names.add(name)
+        total += len(raw)
+        require(total <= installer.MAX_TOTAL_BYTES, 'INSTALLED_TOTAL_EXCEEDED')
+    actual = set()
+    for base, directories, files in os.walk(self.version_dir, followlinks=False):
+        installer.protected_path(str(Path(base)), directory=True)
+        for name in directories:
+            installer.protected_path(str(Path(base) / name), directory=True)
+        for name in files:
+            actual.add((Path(base) / name).relative_to(self.version_dir).as_posix())
+            require(len(actual) <= 10001, 'INSTALLED_TOTAL_EXCEEDED')
+    require(actual == names | {'manifest.json'} and {'bin/aster-controller', 'ui/index.html'} <= names, 'INSTALLED_INVENTORY_CHANGED')
+    self.binary = self.version_dir / 'bin/aster-controller'
+    require(stat.S_IMODE(self.binary.stat().st_mode) == 0o755, 'CONTROLLER_NOT_EXECUTABLE')
+    caps = installer.strict_json(run([str(self.binary), 'migration-capabilities'], 10))
+    require(caps.get('schema') == 1 and caps.get('protocol') == 'aster.controller-host/1' and
+            caps.get('runtime_fence') is True and caps.get('host_migration_seal') is True,
+            'OLD_CONTROLLER_LACKS_HOST_SEAL')
+    return state_raw, manifest_raw, source, bundle_sha
+
+
 class Host:
     def __init__(self, installer):
         self.i = installer
@@ -132,52 +202,7 @@ class Host:
         require(len(ids) == len(self.nodes) and all(isinstance(n, str) and NODE.fullmatch(n) for n in ids) and
                 len(set(ids)) == len(ids), 'APPROVED_NODES_INVALID')
         self.node_ids = sorted(ids)
-        state_raw = installer.protected_read(str(INSTALL_STATE), 1024 * 1024)
-        state = installer.strict_json(state_raw)
-        require(state.get('schema') == 1 and state.get('component') == 'controller' and
-                state.get('status') in ('configuration-approved', 'service-ready') and
-                {'software-installed', 'configuration-approved', 'inactive-systemd-unit'} <= set(state.get('steps', [])),
-                'MANAGED_INSTALLATION_REQUIRED')
-        version, bundle_sha, source = state.get('version'), state.get('bundle_sha256'), state.get('source_commit')
-        require(isinstance(version, str) and re.fullmatch(r'0\.[0-9]+\.[0-9]+-(?:dev(?:\.[0-9]+)?|rc\.[0-9]+)', version) and
-                isinstance(bundle_sha, str) and SHA.fullmatch(bundle_sha) and isinstance(source, str) and
-                re.fullmatch(r'[0-9a-f]{40}', source), 'INSTALLATION_IDENTITY_INVALID')
-        self.version_dir = Path('/opt/aster-cloud/controller/versions') / (version + '-' + bundle_sha[:16])
-        manifest_raw = installer.protected_read(str(self.version_dir / 'manifest.json'), 4 * 1024 * 1024, False)
-        manifest = installer.strict_json(manifest_raw)
-        require(manifest.get('schema') == 1 and manifest.get('component') == 'aster-cloud-controller' and
-                manifest.get('version') == version and manifest.get('source_commit') == source and
-                manifest.get('platform') == 'linux-amd64', 'INSTALLED_MANIFEST_MISMATCH')
-        entries = manifest.get('files')
-        require(isinstance(entries, list) and 1 <= len(entries) <= 10000, 'INSTALLED_INVENTORY_INVALID')
-        names, total = set(), 0
-        for entry in entries:
-            require(isinstance(entry, dict) and set(entry) == {'path', 'sha256', 'size', 'mode'}, 'INSTALLED_ENTRY_INVALID')
-            name = installer.safe_member(entry['path'])
-            require(name not in names and name != 'manifest.json' and type(entry['size']) is int and
-                    0 <= entry['size'] <= installer.MAX_FILE_BYTES and entry['mode'] in ('0644', '0755') and
-                    isinstance(entry['sha256'], str) and SHA.fullmatch(entry['sha256']), 'INSTALLED_ENTRY_INVALID')
-            raw = bundle_bytes(installer, self.version_dir / name)
-            require(len(raw) == entry['size'] and digest(raw) == entry['sha256'] and
-                    stat.S_IMODE((self.version_dir / name).stat().st_mode) == int(entry['mode'], 8), 'INSTALLED_BYTES_CHANGED')
-            names.add(name)
-            total += len(raw)
-            require(total <= installer.MAX_TOTAL_BYTES, 'INSTALLED_TOTAL_EXCEEDED')
-        actual = set()
-        for base, directories, files in os.walk(self.version_dir, followlinks=False):
-            installer.protected_path(str(Path(base)), directory=True)
-            for name in directories:
-                installer.protected_path(str(Path(base) / name), directory=True)
-            for name in files:
-                actual.add((Path(base) / name).relative_to(self.version_dir).as_posix())
-                require(len(actual) <= 10001, 'INSTALLED_TOTAL_EXCEEDED')
-        require(actual == names | {'manifest.json'} and {'bin/aster-controller', 'ui/index.html'} <= names, 'INSTALLED_INVENTORY_CHANGED')
-        self.binary = self.version_dir / 'bin/aster-controller'
-        require(stat.S_IMODE(self.binary.stat().st_mode) == 0o755, 'CONTROLLER_NOT_EXECUTABLE')
-        caps = installer.strict_json(run([str(self.binary), 'migration-capabilities'], 10))
-        require(caps.get('schema') == 1 and caps.get('protocol') == 'aster.controller-host/1' and
-                caps.get('runtime_fence') is True and caps.get('host_migration_seal') is True,
-                'OLD_CONTROLLER_LACKS_HOST_SEAL')
+        state_raw, manifest_raw, source, bundle_sha = verify_installation(self, installer)
         self.root = Path('/var/lib/aster-controller') / self.id
         machine = installer.protected_read('/etc/machine-id', 128, False).strip()
         require(re.fullmatch(b'[0-9a-f]{32}', machine), 'MACHINE_ID_INVALID')
@@ -602,6 +627,92 @@ class Host:
             require(digest(self.i.protected_read(unit['fragment'], 16384, False)) == unit['sha256'], 'RESTORED_FRAGMENT_CHANGED')
 
 
+class Target(Host):
+    """Prepare an inert target; no database provisioning or service activation."""
+    def __init__(self, installer, operation):
+        self.i = installer
+        installer.check_target()
+        self.operation = operation
+        self.root = Path('/var/lib/aster-controller-restore') / operation
+        for path in (self.root.parent, self.root):
+            installer.protected_path(str(path), directory=True, private=True)
+            require(stat.S_IMODE(path.stat().st_mode) == 0o700, 'TARGET_DIRECTORY_NOT_PRIVATE')
+        verify_installation(self, installer, target=True)
+        caps = installer.strict_json(run([str(self.binary), 'migration-capabilities'], 10))
+        require(caps.get('target_preparation_seal') is True, 'TARGET_SEAL_NOT_SUPPORTED')
+
+    @contextlib.contextmanager
+    def installation_lock(self):
+        path = INSTALL_STATE.parent / 'install.lock'
+        self.i.protected_path(str(path), private=True)
+        fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            st = os.fstat(fd)
+            require(st.st_uid == 0 and st.st_nlink == 1 and stat.S_ISREG(st.st_mode) and
+                    stat.S_IMODE(st.st_mode) == 0o600, 'TARGET_INSTALL_LOCK_UNSAFE')
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise Refused('TARGET_INSTALLATION_BUSY') from None
+            yield
+        finally:
+            os.close(fd)
+
+    def unused_host(self):
+        require(set(p.name for p in self.root.iterdir()) <=
+                {'request.json', 'backup.age', 'recovery.key', 'plan.json', 'target.lock'}, 'TARGET_INPUT_INVENTORY_CHANGED')
+        # A killed verification may leave private plaintext. Never silently
+        # discard/reuse it, or turn an unreviewed partial run into success.
+        require(not CONFIG.parent.exists() and not CONFIG.parent.is_symlink(), 'TARGET_CONFIGURATION_ALREADY_EXISTS')
+        for base in ('/etc/systemd/system', '/run/systemd/system', '/usr/lib/systemd/system', '/lib/systemd/system'):
+            for pattern in ('aster-controller*', 'controller-aster*', 'controller-heartbeat*'):
+                require(not list(Path(base).glob(pattern)), 'TARGET_CONTROLLER_UNIT_ALREADY_EXISTS')
+        for command in ('list-units', 'list-unit-files'):
+            require(not run(['/usr/bin/systemctl', command, '--no-pager', '--no-legend',
+                             'aster-controller*', 'controller-aster*', 'controller-heartbeat*'], 30).strip(),
+                    'TARGET_FOREIGN_SYSTEMD_UNIT')
+        # No kill/stop action: an unidentified old controller must be diagnosed,
+        # never adopted or stopped by a target preparation request.
+        for process in Path('/proc').iterdir():
+            if not process.name.isdigit():
+                continue
+            try:
+                executable = os.readlink(process / 'exe')
+            except FileNotFoundError:
+                continue
+            require(not Path(executable).name.startswith('aster-controller'), 'TARGET_CONTROLLER_PROCESS_PRESENT')
+
+    def target_command(self, action):
+        return self.i.strict_json(run([str(self.binary), 'migration-target-' + action,
+                                       '-operation', self.operation], 1860, confirmed_errors=True))
+
+    def prepare(self, action):
+        with self.installation_lock():
+            verify_installation(self, self.i, target=True)
+            self.unused_host()
+            plan = self.target_command('plan')
+            require(plan.get('schema') == 1 and plan.get('protocol') == 'aster.controller-target/1' and
+                    plan.get('operation_id') == self.operation, 'TARGET_PLAN_UNCONFIRMED')
+            if action == 'target-plan':
+                return {'schema': 1, 'protocol': PROTOCOL, 'plan': plan, 'readonly': True,
+                        'database_restored': False, 'target_restore_approved': False, 'migration_ready': False}
+            with self.lock('target.lock'):
+                path = self.root / 'plan.json'
+                if path.exists() or path.is_symlink():
+                    require(self.read(path) == plan, 'TARGET_IMMUTABLE_PLAN_CHANGED')
+                else:
+                    require(action == 'target-seal', 'TARGET_PLAN_NOT_SEALED')
+                    self.write(path, plan)
+                self.unused_host()
+                result = self.target_command('seal' if action == 'target-seal' else 'status')
+                require(result.get('schema') == 1 and result.get('controller_id') == plan['controller_id'] and
+                        result.get('operation_id') == self.operation and result.get('phase') == 'target-sealed' and
+                        result.get('admission_blocked') is True and result.get('guarded_processes_drained') is True and
+                        result.get('source_isolated') is False and result.get('migration_ready') is False,
+                        'TARGET_SEAL_UNCONFIRMED')
+                return {**result, 'database_restored': False, 'target_restore_approved': False}
+
+
 class Arguments(argparse.ArgumentParser):
     def error(self, message):
         raise Refused('INVALID_MIGRATION_ARGUMENTS')
@@ -609,15 +720,17 @@ class Arguments(argparse.ArgumentParser):
 
 def main():
     parser = Arguments(description=__doc__)
-    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export'))
+    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status'))
     parser.add_argument('--operation')
     args = parser.parse_args()
     require((args.action in ('capabilities', 'plan') and args.operation is None) or
             (args.action not in ('capabilities', 'plan') and isinstance(args.operation, str) and OP.fullmatch(args.operation)),
             'EXACT_OPERATION_ID_REQUIRED')
     if args.action == 'capabilities':
-        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export'],
+        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status'],
                 'export_restore': False, 'migration_ready': False}
+    if args.action.startswith('target-'):
+        return Target(install_module(), args.operation).prepare(args.action)
     host = Host(install_module())
     if args.action == 'plan':
         plan = host.plan()
