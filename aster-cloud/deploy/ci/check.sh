@@ -36,6 +36,7 @@ if grep -qE -- '--- (SKIP|FAIL):' "$scratch/root-tls.log"; then
 fi
 go vet -mod=readonly ./...
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -trimpath -buildvcs=false -o "$scratch/aster-controller" ./cmd/aster-controller
+python3 -B "$repo/deploy/ci/test_controller_fence_mysql.py" --binary "$scratch/aster-controller"
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -trimpath -buildvcs=false -o "$scratch/aster-node" ./cmd/aster-node
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -trimpath -buildvcs=false -o "$scratch/aster-network" ./cmd/aster-network
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -trimpath -buildvcs=false -o "$scratch/aster-billing-plugin" ./cmd/aster-billing-plugin

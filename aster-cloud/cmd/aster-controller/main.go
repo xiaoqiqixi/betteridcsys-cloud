@@ -2,13 +2,16 @@ package main
 
 import (
 	"aster/cloud/internal/control"
+	"aster/cloud/internal/controllerhost"
 	"aster/cloud/internal/diagnostics"
 	"aster/cloud/internal/identity"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"io"
 	"log/slog"
@@ -16,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -24,8 +28,17 @@ import (
 func main() {
 	slog.SetDefault(diagnostics.New(os.Stderr, "controller"))
 	if err := run(os.Args[1:]); err != nil {
-		slog.Error("aster_command_failed", "code", "COMMAND_FAILED")
-		os.Exit(1)
+		code := "COMMAND_FAILED"
+		exitCode := 1
+		if errors.Is(err, controllerhost.ErrFenced) {
+			code = "CONTROLLER_MIGRATION_FENCED"
+			exitCode = 78 // a durable fence must not cause a systemd restart loop
+		}
+		if errors.Is(err, controllerhost.ErrBusy) {
+			code = "CONTROLLER_MIGRATION_BUSY"
+		}
+		slog.Error("aster_command_failed", "code", code)
+		os.Exit(exitCode)
 	}
 }
 func run(args []string) error {
@@ -33,6 +46,12 @@ func run(args []string) error {
 		return control.ErrInput
 	}
 	command := args[0]
+	if command == "migration-capabilities" && len(args) == 1 {
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"schema": 1, "protocol": "aster.controller-host/1", "runtime_fence": runtime.GOOS == "linux",
+			"migration_ready": false, "export_restore": false,
+		})
+	}
 	flags := flag.NewFlagSet("aster-controller "+command, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	configPath := flags.String("config", "/etc/aster-controller/config.json", "root protected configuration")
@@ -50,8 +69,52 @@ func run(args []string) error {
 	if command == "init" {
 		return initialize(*configPath)
 	}
+	switch command {
+	case "migrate", "bootstrap-admin", "operation-dispatch", "operation-reconcile", "check", "register-nodes", "heartbeat", "maintenance", "dispatch", "reconcile", "serve":
+	case "migration-status", "migration-fence", "migration-cancel":
+		invalid := false
+		flags.Visit(func(f *flag.Flag) {
+			if f.Name != "config" && !(f.Name == "operation" && command != "migration-status") {
+				invalid = true
+			}
+		})
+		if invalid {
+			return control.ErrInput
+		}
+	default:
+		return control.ErrInput
+	}
 	config, secrets, err := control.LoadConfig(*configPath)
 	if err != nil {
+		return err
+	}
+	canonical, err := json.Marshal(config)
+	if err != nil {
+		return control.ErrInput
+	}
+	digest := sha256.Sum256(canonical)
+	host, err := controllerhost.Open(config.ControllerID, hex.EncodeToString(digest[:]))
+	if err != nil {
+		return err
+	}
+	defer host.Close()
+	write := func(v any) error { return json.NewEncoder(os.Stdout).Encode(v) }
+	if strings.HasPrefix(command, "migration-") {
+		var status controllerhost.Status
+		switch command {
+		case "migration-status":
+			status, err = host.Status()
+		case "migration-fence":
+			status, err = host.Fence(*operation)
+		case "migration-cancel":
+			status, err = host.Cancel(*operation)
+		}
+		if err != nil {
+			return err
+		}
+		return write(status)
+	}
+	if err = host.Admit(); err != nil {
 		return err
 	}
 	raw, err := control.ReadProtected(config.DSNFile, true, 4096)
@@ -65,7 +128,6 @@ func run(args []string) error {
 	defer store.DB.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	write := func(v any) error { return json.NewEncoder(os.Stdout).Encode(v) }
 	if command == "migrate" {
 		if err = store.Migrate(ctx); err != nil {
 			return err
@@ -199,12 +261,40 @@ func run(args []string) error {
 		} else if *uiDirectory != "" {
 			return control.ErrInput
 		}
-		server := &http.Server{Addr: config.Listen, Handler: handler, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}}, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 12 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+		guarded := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if host.Check() != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Cache-Control", "no-store")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = io.WriteString(w, `{"error":{"code":"CONTROLLER_MAINTENANCE","message":"控制台正在维护，请稍后再试。"}}`)
+				return
+			}
+			handler.ServeHTTP(w, r)
+		})
+		server := &http.Server{Addr: config.Listen, Handler: guarded, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}}, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 12 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 		server.ErrorLog = diagnostics.TransportLog(slog.Default())
 		sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 		defer stop()
+		shutdownDone := make(chan struct{})
 		go func() {
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-sigCtx.Done():
+					return
+				case <-ticker.C:
+					if host.Check() != nil {
+						stop()
+						return
+					}
+				}
+			}
+		}()
+		go func() {
+			defer close(shutdownDone)
 			<-sigCtx.Done()
+			stopOverlay()
 			c, done := context.WithTimeout(context.Background(), 10*time.Second)
 			defer done()
 			_ = server.Shutdown(c)
@@ -212,6 +302,7 @@ func run(args []string) error {
 		slog.Info("aster_service_starting")
 		err = server.ListenAndServeTLS("", "")
 		if err == http.ErrServerClosed {
+			<-shutdownDone // Shutdown closes listeners before active handlers finish.
 			slog.Info("aster_service_stopped")
 			return nil
 		}

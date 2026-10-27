@@ -661,7 +661,8 @@ def unit_bytes(component, version_dir, approval=None):
         origin = approval["console_origin"] if approval else None
         extra = f" -console-origin {origin} -ui-dir {version_dir}/ui" if origin else ""
         executable = f"{version_dir}/bin/aster-controller serve -config {config}{extra}"
-        extra_sandbox = "PrivateDevices=true\nCapabilityBoundingSet=\nAmbientCapabilities=\nMemoryMax=256M\nTasksMax=64\n"
+        extra_sandbox = ("PrivateDevices=true\nCapabilityBoundingSet=\nAmbientCapabilities=\nMemoryMax=256M\nTasksMax=64\n"
+                         "StateDirectory=aster-controller\nStateDirectoryMode=0700\nRestartPreventExitStatus=78\n")
     else:
         executable = f"{version_dir}/bin/aster-node --config {config}"
         extra_sandbox = ("ReadWritePaths=/var/lib/aster-node /var/lib/aster-instances /var/lib/aster-artifacts /var/lib/aster-inbox\n"
