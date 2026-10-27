@@ -16,4 +16,5 @@ for name, digest in expected.items():
     assert p.is_file() and not p.is_symlink()
     assert hashlib.sha256(p.read_bytes()).hexdigest() == digest, 'Billing protocol changed without an explicit compatibility update'
 assert (base / 'go.mod').read_text() == 'module aster/billing\n\ngo 1.26.0\n'
+assert (root / 'go.work').read_text() == 'go 1.26.0\n\nuse (\n\t./aster-cloud\n\t./contracts/billing\n)\n', 'Unexpected local workspace membership'
 print('PASS: eight pinned public protocol/transport sources; no financial backend dependency')

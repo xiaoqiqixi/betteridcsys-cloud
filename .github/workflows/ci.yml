@@ -26,10 +26,14 @@ jobs:
           go-version: '1.27.3'
           cache: false
       - name: Verify minimal billing protocol SDK
-        run: python3 scripts/verify-billing-contract.py
+        run: |
+          python3 scripts/verify-billing-contract.py
+          cd contracts/billing
+          go test -mod=readonly -race -count=1 ./...
       - name: Linux unit, vet and build (native MySQL/KVM are separate gates)
         working-directory: aster-cloud
         run: |
+          go mod download
           go mod verify
           go test -mod=readonly -race -count=1 -v -timeout=10m ./...
           go vet -mod=readonly ./...
