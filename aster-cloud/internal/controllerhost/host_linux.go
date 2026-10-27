@@ -259,6 +259,33 @@ func (h *Host) Status() (Status, error) {
 	return h.statusLocked()
 }
 
+// WithSealedSource excludes admission, cancel and host-seal changes for the
+// entire export. It does not claim systemd isolation: the coordinator and the
+// export reader must additionally validate their durable host receipts.
+func (h *Host) WithSealedSource(operation string, action func() error) error {
+	if !operationName.MatchString(operation) || action == nil {
+		return ErrInvalid
+	}
+	if e := h.lock(); e != nil {
+		return e
+	}
+	defer h.unlock()
+	v, e := h.read("fence.json")
+	if e != nil || v.OperationID != operation || v.ConfigSHA != h.configSHA {
+		return ErrInvalid
+	}
+	f, e := h.file("host-migration.json", false)
+	if e != nil {
+		return ErrInvalid
+	}
+	f.Close()
+	drained, e := h.drained()
+	if e != nil || !drained {
+		return ErrBusy
+	}
+	return action()
+}
+
 func (h *Host) Fence(operation string) (Status, error) {
 	if !operationName.MatchString(operation) {
 		return Status{}, ErrInvalid

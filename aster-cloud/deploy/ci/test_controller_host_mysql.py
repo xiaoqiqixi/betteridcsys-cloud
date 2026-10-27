@@ -92,6 +92,7 @@ def worker(binary):
         raise RuntimeError('SYSTEMD_WORKER_INTERRUPTED')
     signal.signal(signal.SIGTERM, interrupted)
     operation = secrets.token_hex(16)
+    operations = [operation]
     owned, created_units, versions, foreign_process = [], [], None, None
     opt_fd, opt_before, opt_hardened = None, None, False
     try:
@@ -249,6 +250,9 @@ def worker(binary):
         PHASE = 'plan'
         planned = migrate('plan')
         require(planned['readonly'] and planned['units'] == names and not planned['source_isolated'], 'SYSTEMD_PLAN_INVALID')
+        refused_export = cli('migration-export', '-operation', operation, denied=True)
+        require(refused_export.returncode == 1 and not refused_export.stdout and
+                json.loads(refused_export.stderr).get('code') == 'COMMAND_FAILED', 'ACTIVE_SOURCE_EXPORT_NOT_REFUSED')
         # Actual unmanaged copy, not a mocked /proc listing or fake daemon.
         copy = case / 'aster-controller'
         shutil.copyfile(exe, copy)
@@ -349,8 +353,39 @@ def worker(binary):
         run(['/usr/bin/systemctl', 'start', names[0]])
         healthy()
         run(['/usr/bin/systemctl', 'stop', names[0]])
+        PHASE = 'encrypted-export'
+        exported_operation = secrets.token_hex(16)
+        operations.append(exported_operation)
+        require(migrate('isolate', exported_operation)['source_isolated'], 'EXPORT_SOURCE_NOT_ISOLATED')
+        refused_export = cli('migration-export', '-operation', exported_operation, denied=True)
+        require(refused_export.returncode == 1 and not refused_export.stdout and
+                json.loads(refused_export.stderr).get('code') == 'COMMAND_FAILED', 'UNAUTHORIZED_EXPORT_NOT_REFUSED')
+        exported = migrate('export', exported_operation)
+        directory = state / 'host-migrations' / exported_operation
+        archive, recovery = directory / 'backup.age', directory / 'recovery.key'
+        raw = archive.read_bytes()
+        require(raw.startswith(b'age-encryption.org/v1\n') and
+                hashlib.sha256(raw).hexdigest() == exported['archive_sha256'] and
+                len(raw) == exported['archive_bytes'] and exported['database_rows'] >= 16 and
+                exported['source_readonly'] and exported['source_isolated'] and not exported['migration_ready'],
+                'ENCRYPTED_EXPORT_UNCONFIRMED')
+        for path in (archive, recovery):
+            st = path.lstat()
+            require(stat.S_ISREG(st.st_mode) and st.st_uid == 0 and st.st_nlink == 1 and
+                    stat.S_IMODE(st.st_mode) == 0o600, 'BACKUP_MATERIAL_NOT_PRIVATE')
+        inspected = json.loads(run([exe, 'migration-inspect', '-archive', archive, '-key-file', recovery,
+                                    '-controller-id', controller, '-operation', exported_operation]).stdout)
+        require(inspected['authenticated'] and inspected['content_integrity_verified'] and
+                not inspected['target_restore_approved'] and not inspected['migration_ready'], 'ACTUAL_ARCHIVE_NOT_AUTHENTICATED')
+        require(not any(directory.glob('.export-*')), 'EXPORT_LEFT_PLAINTEXT_SCRATCH')
+        require(migrate('resume-source', exported_operation, denied=True).get('error') ==
+                'EXPORTED_SOURCE_CANNOT_BE_RESUMED_LOCALLY', 'EXPORTED_SOURCE_RESUMED')
+        require(migrate('export', exported_operation, denied=True).get('error') == 'EXPORT_ALREADY_STARTED' and
+                hashlib.sha256(archive.read_bytes()).hexdigest() == exported['archive_sha256'], 'EXPORT_OVERWROTE_BACKUP')
+        require(migrate('status', exported_operation)['source_isolated'], 'EXPORT_UNSEALED_SOURCE')
         send(sys.stdout.buffer, {'phase': 'complete', 'strict_tls': True, 'same_identity_restart': True,
-                                'hosted_opt_parent_hardened': opt_hardened})
+                                'hosted_opt_parent_hardened': opt_hardened,
+                                'encrypted_export_verified': True, 'exported_source_local_resume_denied': True})
     finally:
         # Fresh-path checks above establish ownership before any installation;
         # only this fixture's role files and exact operation stages are removed.
@@ -373,10 +408,11 @@ def worker(binary):
         for path in [systemd / n for n in names] + created_units:
             if path.exists() or path.is_symlink():
                 path.unlink()
-        for index in range(len(names)):
-            path = systemd / ('.aster-migration-' + operation + '-' + str(index) + '.saved')
-            if path.exists() or path.is_symlink():
-                path.unlink()
+        for owned_operation in operations:
+            for index in range(len(names)):
+                path = systemd / ('.aster-migration-' + owned_operation + '-' + str(index) + '.saved')
+                if path.exists() or path.is_symlink():
+                    path.unlink()
         run(['/usr/bin/systemctl', 'daemon-reload'])
         for path in reversed(owned):
             if path.is_dir() and not path.is_symlink():

@@ -551,6 +551,46 @@ class Host:
             return {'schema': 1, 'operation_id': operation, 'phase': 'source-resumable', 'source_isolated': False,
                     'service_start_requested': False, 'migration_ready': False}
 
+    def export(self, operation):
+        with self.lock('host-operation.lock'):
+            directory, plan = self.bind(operation)
+            require(self.status(operation)['source_isolated'] is True, 'COMPLETE_SOURCE_ISOLATION_REQUIRED')
+            # No implicit retry/resume after a possibly delivered backup. A
+            # failed export remains isolated until the takeover protocol can
+            # prove that no target has activated it.
+            for name in ('export-started.json', 'recovery.key', 'backup.age', 'exported.json'):
+                path = directory / name
+                require(not path.exists() and not path.is_symlink(), 'EXPORT_ALREADY_STARTED')
+            fields = [(key, self.config[key], key != 'tls_cert_file', 65536 if key.startswith('tls_') else 4096)
+                      for key in ('dsn_file', 'tls_cert_file', 'tls_key_file', 'billing_token_file',
+                                  'admin_read_token_file', 'admin_write_token_file')]
+            for node in self.nodes:
+                fields += [(node['id'] + ':' + key, node[key], key == 'client_key_file', 1024 * 1024)
+                           for key in ('ca_file', 'client_cert_file', 'client_key_file')]
+            materials = [{'label': label, 'path': path, 'sha256': digest(self.i.protected_read(path, maximum, private))}
+                         for label, path, private, maximum in sorted(fields)]
+            self.fresh_identity()
+            self.write(directory / 'export-started.json', {
+                'schema': 1, 'controller_id': self.id, 'operation_id': operation,
+                'plan_sha256': digest(self.i.protected_read(str(directory / 'plan.json'), 256 * 1024)),
+                'materials': materials})
+            result = self.i.strict_json(run([str(self.binary), 'migration-export', '-config', str(CONFIG),
+                                            '-operation', operation], 1860))
+            require(set(result) == {'schema', 'controller_id', 'operation_id', 'archive_sha256', 'archive_bytes',
+                                    'database_rows', 'source_readonly', 'source_isolated', 'migration_ready'} and
+                    result.get('schema') == 1 and result.get('controller_id') == self.id and
+                    result.get('operation_id') == operation and result.get('source_readonly') is True and
+                    result.get('source_isolated') is False and result.get('migration_ready') is False and
+                    type(result.get('database_rows')) is int and result['database_rows'] >= 0 and
+                    type(result.get('archive_bytes')) is int and 0 < result['archive_bytes'] <= (8 << 30) + (64 << 20) and
+                    isinstance(result.get('archive_sha256'), str) and SHA.fullmatch(result['archive_sha256']),
+                    'EXPORT_RECEIPT_INVALID')
+            self.fresh_identity()
+            require(self.status(operation)['source_isolated'] is True, 'SOURCE_ISOLATION_CHANGED_DURING_EXPORT')
+            result['source_isolated'] = True
+            self.write(directory / 'exported.json', result)
+            return result
+
     def restored_units(self, operation, units):
         self.fresh_identity()
         for unit in units:
@@ -569,14 +609,14 @@ class Arguments(argparse.ArgumentParser):
 
 def main():
     parser = Arguments(description=__doc__)
-    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source'))
+    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export'))
     parser.add_argument('--operation')
     args = parser.parse_args()
     require((args.action in ('capabilities', 'plan') and args.operation is None) or
             (args.action not in ('capabilities', 'plan') and isinstance(args.operation, str) and OP.fullmatch(args.operation)),
             'EXACT_OPERATION_ID_REQUIRED')
     if args.action == 'capabilities':
-        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source'],
+        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export'],
                 'export_restore': False, 'migration_ready': False}
     host = Host(install_module())
     if args.action == 'plan':
@@ -588,6 +628,8 @@ def main():
         return host.isolate(args.operation)
     if args.action == 'status':
         return host.status(args.operation)
+    if args.action == 'export':
+        return host.export(args.operation)
     return host.resume(args.operation)
 
 

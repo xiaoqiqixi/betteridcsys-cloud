@@ -54,6 +54,7 @@ ROLE_FILES = {
     },
 }
 COMMON_FILES = {
+    "docs/THIRD_PARTY_GO_NOTICES.md": "docs/THIRD_PARTY_GO_NOTICES.md",
     "docs/README.md": "README.md",
     "docs/ARCHITECTURE.md": "docs/ARCHITECTURE.md",
     "docs/LOGGING.md": "docs/LOGGING.md",

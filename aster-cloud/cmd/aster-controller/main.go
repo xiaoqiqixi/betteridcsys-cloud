@@ -2,6 +2,7 @@ package main
 
 import (
 	"aster/cloud/internal/control"
+	"aster/cloud/internal/controllerbackup"
 	"aster/cloud/internal/controllerhost"
 	"aster/cloud/internal/diagnostics"
 	"aster/cloud/internal/identity"
@@ -46,6 +47,9 @@ func run(args []string) error {
 		return control.ErrInput
 	}
 	command := args[0]
+	if command == "migration-inspect" {
+		return inspectArchive(args[1:])
+	}
 	if command == "migration-capabilities" && len(args) == 1 {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
 			"schema": 1, "protocol": "aster.controller-host/1", "runtime_fence": runtime.GOOS == "linux",
@@ -72,7 +76,7 @@ func run(args []string) error {
 	}
 	switch command {
 	case "migrate", "bootstrap-admin", "operation-dispatch", "operation-reconcile", "check", "register-nodes", "heartbeat", "maintenance", "dispatch", "reconcile", "serve":
-	case "migration-status", "migration-fence", "migration-cancel":
+	case "migration-status", "migration-fence", "migration-cancel", "migration-export":
 		invalid := false
 		flags.Visit(func(f *flag.Flag) {
 			if f.Name != "config" && !(f.Name == "operation" && command != "migration-status") {
@@ -100,6 +104,25 @@ func run(args []string) error {
 	}
 	defer host.Close()
 	write := func(v any) error { return json.NewEncoder(os.Stdout).Encode(v) }
+	if command == "migration-export" {
+		// Only the fixed managed installation can export. A custom config flag
+		// must not redirect the protected coordinator's source identity.
+		if *configPath != "/etc/aster-controller/config.json" {
+			return control.ErrInput
+		}
+		var report controllerbackup.ExportReport
+		err = host.WithSealedSource(*operation, func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			defer cancel()
+			var e error
+			report, e = controllerbackup.ExportSealedSource(ctx, config, *operation)
+			return e
+		})
+		if err != nil {
+			return err
+		}
+		return write(report)
+	}
 	if strings.HasPrefix(command, "migration-") {
 		var status controllerhost.Status
 		switch command {

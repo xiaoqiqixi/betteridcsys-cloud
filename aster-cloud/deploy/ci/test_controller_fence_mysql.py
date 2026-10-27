@@ -344,6 +344,8 @@ def supervisor(binary, systemd=False):
             if systemd:
                 require(type(completion.get('hosted_opt_parent_hardened')) is bool, 'HOSTED_PARENT_PREPARATION_UNCONFIRMED')
                 expected['hosted_opt_parent_hardened'] = completion['hosted_opt_parent_hardened']
+                expected['encrypted_export_verified'] = True
+                expected['exported_source_local_resume_denied'] = True
             require(completion == expected, 'CANCEL_PROTOCOL')
             child.stdin.close()
             child.stdin = None
@@ -365,6 +367,7 @@ def supervisor(binary, systemd=False):
                       'hosted_parent_original_mode_restored': systemd,
                       'unmodified_host_image_acceptance': False,
                       'source_isolation_observed_before_resume': systemd,
+                      'encrypted_export_verified': systemd, 'exported_source_local_resume_denied': systemd,
                       'reboot_verified': False, 'source_isolated': False, 'migration_ready': False}
         finally:
             if child is not None:
