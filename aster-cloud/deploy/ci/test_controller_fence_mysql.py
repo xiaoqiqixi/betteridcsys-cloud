@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Real controller process + strict HTTPS + private native MySQL fencing gate.
 
-No node RPC, VM action, systemd mask or full host migration is claimed. The
-unprivileged supervisor owns a fresh nonce-marked database; the root worker only
-runs the real controller against it and owns its private config/process state.
+The unprivileged supervisor owns a fresh nonce-marked database. The default root
+worker checks actual HTTP drain and runtime admission; --systemd delegates to
+the separate managed-host worker. Neither claims node RPC, VM action, OS reboot
+or a completed cross-host migration.
 """
 import argparse
 import contextlib
@@ -67,7 +68,7 @@ def worker(binary):
     state = Path('/var/lib/aster-controller') / controller
     require(not state.exists() and not state.is_symlink(), 'WORKER_STATE_EXISTS')
     case = Path(tempfile.mkdtemp(prefix='aster-fence-mysql-', dir='/tmp'))
-    server = None
+    server, pending = None, None
     env = {'PATH': '/usr/bin:/bin', 'HOME': '/root', 'LANG': 'C.UTF-8'}
     def interrupted(*_):
         raise RuntimeError('WORKER_INTERRUPTED')
@@ -139,9 +140,44 @@ def worker(binary):
         start()
         send(sys.stdout.buffer, {'phase': 'ready', 'controller_id': controller})
         require(receive(sys.stdin.buffer) == {'action': 'fence'}, 'WORKER_FENCE_COMMAND_REQUIRED')
+        # The real handler must read the body to send 100 Continue. This proves
+        # admission before the fence, without sleeps or a fake backend barrier.
+        # Finish with one invalid JSON byte: never submit an actual create.
+        pending = context.wrap_socket(socket.create_connection(('127.0.0.1', port), timeout=5),
+                                      server_hostname='localhost')
+        pending.sendall(('POST /v1/provisioning HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer ' +
+                         tokens['billing'] + '\r\nContent-Type: application/json\r\nContent-Length: 1\r\n'
+                         'Expect: 100-continue\r\nConnection: close\r\n\r\n').encode())
+        interim = bytearray()
+        admission_deadline = time.monotonic() + 5
+        while len(interim) < 4096 and not interim.endswith(b'\r\n\r\n'):
+            remaining = admission_deadline - time.monotonic()
+            require(remaining > 0, 'INFLIGHT_ADMISSION_DEADLINE')
+            pending.settimeout(remaining)
+            part = pending.recv(1)
+            require(bool(part), 'INFLIGHT_REQUEST_CLOSED_BEFORE_ADMISSION')
+            interim.extend(part)
+        require(interim == b'HTTP/1.1 100 Continue\r\n\r\n', 'INFLIGHT_REQUEST_NOT_ADMITTED')
+        pending.settimeout(5)
         operation = secrets.token_hex(16)
         state_before = run('migration-fence', '-operation', operation)
-        require(state_before['admission_blocked'] and not state_before['source_isolated'], 'WORKER_FENCE_STATE')
+        require(state_before['admission_blocked'] and not state_before['source_isolated'] and
+                not state_before['guarded_processes_drained'], 'WORKER_FENCE_STATE')
+        during = run('migration-status')
+        require(server.poll() is None and during['phase'] == 'draining' and
+                not during['guarded_processes_drained'], 'INFLIGHT_HTTP_LOST_RUNTIME_LEASE')
+        run('check', fenced=True)
+        pending.sendall(b']')
+        response = http.client.HTTPResponse(pending)
+        response.begin()
+        body = response.read(65537)
+        require(response.status == 400 and len(body) <= 65536 and response.isclosed() and
+                response.length in (None, 0) and
+                json.loads(body).get('error', {}).get('code') == 'INVALID_PROVISIONING_REQUEST',
+                'INFLIGHT_REQUEST_NOT_FULLY_REJECTED')
+        response.close()
+        pending.close()
+        pending = None
         # This is the actual running HTTPS service noticing the persistent fence;
         # no signal is sent by the test to make this assertion pass.
         server.communicate(timeout=45)
@@ -151,7 +187,8 @@ def worker(binary):
         require(status['guarded_processes_drained'] and status['phase'] == 'fenced', 'WORKER_NOT_DRAINED')
         for command in ('serve', 'check', 'migrate', 'bootstrap-admin', 'dispatch', 'operation-dispatch'):
             run(command, fenced=True)
-        send(sys.stdout.buffer, {'phase': 'fenced', 'automatic_service_exit': True, 'new_commands_denied': True})
+        send(sys.stdout.buffer, {'phase': 'fenced', 'automatic_service_exit': True, 'new_commands_denied': True,
+                                'admitted_http_request_drain_verified': True})
         require(receive(sys.stdin.buffer) == {'action': 'cancel'}, 'WORKER_CANCEL_COMMAND_REQUIRED')
         require(run('migration-cancel', '-operation', operation)['phase'] == 'active', 'WORKER_CANCEL_FAILED')
         start()
@@ -162,6 +199,8 @@ def worker(binary):
         server = None
         send(sys.stdout.buffer, {'phase': 'complete', 'strict_tls': True, 'same_identity_restart': True})
     finally:
+        if pending is not None:
+            pending.close()
         if server is not None:
             server.terminate()
             try:
@@ -293,8 +332,11 @@ def supervisor(binary, systemd=False):
                 return hashlib.sha256(result.stdout).hexdigest()
             before = snapshot()
             send(child.stdin, {'action': 'fence'})
-            require(receive(child.stdout) == {'phase': 'fenced',
-                    'systemd_isolation' if systemd else 'automatic_service_exit': True, 'new_commands_denied': True}, 'FENCE_PROTOCOL')
+            fenced = {'phase': 'fenced', 'systemd_isolation' if systemd else 'automatic_service_exit': True,
+                      'new_commands_denied': True}
+            if not systemd:
+                fenced['admitted_http_request_drain_verified'] = True
+            require(receive(child.stdout) == fenced, 'FENCE_PROTOCOL')
             require(snapshot() == before, 'FENCE_CHANGED_PERSISTED_DATABASE')
             send(child.stdin, {'action': 'cancel'})
             completion = receive(child.stdout)
@@ -312,6 +354,7 @@ def supervisor(binary, systemd=False):
             require(admin.run('SELECT state FROM `' + database + '`.controller_jobs ORDER BY operation_id;').splitlines() == [b'sending', b'uncertain'], 'UNKNOWN_RESULTS_CHANGED')
             report = {'schema': 1, 'passed': True, 'real_mysql': True, 'real_controller_process': True,
                       'strict_tls': True, 'host_trust_modified': False, 'automatic_service_drain': not systemd,
+                      'admitted_http_request_drain_verified': not systemd,
                       'all_database_rows_unchanged': True, 'unknown_receipts_retained': 2,
                       'database_snapshot_sha256': before, 'same_identity_restart': True,
                       'node_rpc_performed': False, 'systemd_isolation_verified': systemd,
