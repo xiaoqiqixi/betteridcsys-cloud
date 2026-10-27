@@ -297,7 +297,12 @@ def supervisor(binary, systemd=False):
                     'systemd_isolation' if systemd else 'automatic_service_exit': True, 'new_commands_denied': True}, 'FENCE_PROTOCOL')
             require(snapshot() == before, 'FENCE_CHANGED_PERSISTED_DATABASE')
             send(child.stdin, {'action': 'cancel'})
-            require(receive(child.stdout) == {'phase': 'complete', 'strict_tls': True, 'same_identity_restart': True}, 'CANCEL_PROTOCOL')
+            completion = receive(child.stdout)
+            expected = {'phase': 'complete', 'strict_tls': True, 'same_identity_restart': True}
+            if systemd:
+                require(type(completion.get('hosted_opt_parent_hardened')) is bool, 'HOSTED_PARENT_PREPARATION_UNCONFIRMED')
+                expected['hosted_opt_parent_hardened'] = completion['hosted_opt_parent_hardened']
+            require(completion == expected, 'CANCEL_PROTOCOL')
             child.stdin.close()
             child.stdin = None
             child.communicate(timeout=90)
@@ -313,6 +318,9 @@ def supervisor(binary, systemd=False):
                       'persistent_masks_reloaded': systemd, 'actual_installer_applied': systemd,
                       'development_fixture_bundle': systemd, 'publisher_authentication_verified': False,
                       'loopback_sql_transport_relay': systemd, 'heartbeat_units_covered': 2 if systemd else 0,
+                      'hosted_opt_parent_hardened': completion.get('hosted_opt_parent_hardened', False),
+                      'hosted_parent_original_mode_restored': systemd,
+                      'unmodified_host_image_acceptance': False,
                       'source_isolation_observed_before_resume': systemd,
                       'reboot_verified': False, 'source_isolated': False, 'migration_ready': False}
         finally:

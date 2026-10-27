@@ -81,7 +81,9 @@ def worker(binary):
     unit = systemd / 'aster-controller.service'
     templates = [systemd / ('controller-heartbeat@.' + s) for s in ('service', 'timer')]
     names = ['aster-controller.service', 'controller-heartbeat@fixture-node.service', 'controller-heartbeat@fixture-node.timer']
-    owned_roots = [config_dir, state, install_state, installed, case]
+    owned_roots = [config_dir, state, install_state.parent, installed.parent, case]
+    require(all(not path.exists() and not path.is_symlink() for path in
+                (Path('/opt/vps-billing'), Path('/opt/aster-billing'))), 'FINANCIAL_HOST_REFUSED')
     for path in owned_roots + [unit] + templates + [systemd / n for n in names[1:]]:
         require(not path.exists() and not path.is_symlink(), 'SYSTEMD_EXISTING_INSTALLATION_REFUSED')
     require(not run(['/usr/bin/systemctl', 'list-units', '--all', '--no-legend', '--plain',
@@ -91,6 +93,7 @@ def worker(binary):
     signal.signal(signal.SIGTERM, interrupted)
     operation = secrets.token_hex(16)
     owned, created_units, versions, foreign_process = [], [], None, None
+    opt_fd, opt_before, opt_hardened = None, None, False
     try:
         for path in (case, config_dir):
             path.mkdir(mode=0o700)
@@ -148,8 +151,23 @@ def worker(binary):
                 archive.addfile(info, io.BytesIO(raw))
         bundle_sha = hashlib.sha256(bundle.read_bytes()).hexdigest()
         PHASE = 'install'
-        # Diagnose hosted-runner ancestry WITHOUT weakening the real installer
-        # or chmod/chown of a foreign parent. Labels and metadata are bounded;
+        # Confirmed hosted image difference (run 40519867358): /opt is root
+        # owned but 0777. Production MUST reject this ancestry. On this fresh,
+        # disposable CI fixture only, hold its exact directory FD, narrow 0777
+        # to 0755, and restore the original mode AFTER all owned services and
+        # role files are removed. No chown, recursive chmod or production bypass.
+        opt_fd = os.open('/opt', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        opt_before = os.fstat(opt_fd)
+        require(opt_before.st_uid == 0 and stat.S_IMODE(opt_before.st_mode) in (0o755, 0o777), 'HOSTED_OPT_PROFILE_UNRECOGNIZED')
+        if stat.S_IMODE(opt_before.st_mode) == 0o777:
+            private(case / 'hosted-opt-preparation.json', json.dumps({'schema': 1, 'source_sha': source,
+                    'device': opt_before.st_dev, 'inode': opt_before.st_ino, 'uid': opt_before.st_uid,
+                    'gid': opt_before.st_gid, 'original_mode': '0777', 'temporary_mode': '0755'}).encode())
+            os.fchmod(opt_fd, 0o755)
+            opt_hardened = True
+        require(stat.S_IMODE(os.fstat(opt_fd).st_mode) == 0o755, 'HOSTED_OPT_PREPARATION_FAILED')
+        # Diagnose all other ancestry read-only, without weakening the installer
+        # or changing any additional parent. Labels and metadata are bounded;
         # no secret paths, file contents or arbitrary stderr leave the fixture.
         paths = {'systemctl': Path('/usr/bin/systemctl'), 'bundle': bundle,
                  'approval': case / 'approval.json', 'source_config': case / 'config.json',
@@ -168,7 +186,7 @@ def worker(binary):
                         '_mode' + oct(stat.S_IMODE(info.st_mode)) + '_link' + str(int(stat.S_ISLNK(info.st_mode))))
         # The explicit development channel is a test trust boundary, not a
         # publisher signature claim. Exercise the real installer, not receipts.
-        owned += [state, install_state, installed]
+        owned += [state, install_state.parent, install_state, installed.parent, installed]
         created_units += [unit]
         run(['/usr/bin/python3', '-I', HERE.parent / 'install/install.py', 'controller', '--bundle', bundle,
              '--sha256', bundle_sha, '--allow-development', '--approval', case / 'approval.json', '--apply'])
@@ -178,7 +196,23 @@ def worker(binary):
         def cli(command, *flags, data=None, denied=False):
             return run([exe, command, '-config', config_file, *flags], data, denied)
         def migrate(action, op=None, denied=False):
-            r = run(['/usr/bin/python3', '-I', helper, action] + (['--operation', op] if op else []), denied=denied)
+            argv = ['/usr/bin/python3', '-I', helper, action] + (['--operation', op] if op else [])
+            # Preserve only reviewed literal error codes from the public helper,
+            # not arbitrary Python stderr, file contents or secret arguments.
+            r = subprocess.run(list(map(str, argv)), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               env=ENV, timeout=90)
+            require(len(r.stdout) <= 65536 and len(r.stderr) <= 2048, 'HOST_COORDINATOR_OUTPUT_BOUND')
+            if r.returncode and not denied:
+                tree = ast.parse(helper.read_text())
+                known = {node.value for node in ast.walk(tree) if isinstance(node, ast.Constant) and
+                         isinstance(node.value, str) and re.fullmatch(r'[A-Z][A-Z0-9_]{2,95}', node.value)}
+                try:
+                    error = json.loads(r.stderr)
+                except (ValueError, UnicodeError):
+                    error = {}
+                if set(error) == {'error'} and error['error'] in known:
+                    raise RuntimeError('HOST_COORDINATOR_REFUSED: ' + error['error'])
+            require((r.returncode != 0) if denied else (r.returncode == 0), 'SYSTEMD_GATE_COMMAND_' + PHASE)
             return json.loads(r.stderr if denied else r.stdout)
         PHASE = 'bootstrap'
         cli('migrate')
@@ -209,6 +243,9 @@ def worker(binary):
         run(['/usr/bin/systemctl', 'daemon-reload'])
         run(['/usr/bin/systemctl', 'start', names[0], names[2]])
         healthy()
+        source_pid = run(['/usr/bin/systemctl', 'show', '--property=MainPID', '--value', names[0]]).stdout.strip().decode()
+        require(source_pid.isdigit() and int(source_pid) > 1, 'REAL_SOURCE_PID_REQUIRED')
+        source_start = Path('/proc', source_pid, 'stat').read_text().rsplit(')', 1)[1].split()[19]
         PHASE = 'plan'
         planned = migrate('plan')
         require(planned['readonly'] and planned['units'] == names and not planned['source_isolated'], 'SYSTEMD_PLAN_INVALID')
@@ -246,11 +283,20 @@ def worker(binary):
         PHASE = 'isolate'
         proof = migrate('isolate', operation)
         require(proof['source_isolated'] and not proof['migration_ready'], 'SYSTEMD_ISOLATION_INCOMPLETE')
+        try:
+            after_start = Path('/proc', source_pid, 'stat').read_text().rsplit(')', 1)[1].split()[19]
+        except FileNotFoundError:
+            after_start = None
+        require(after_start != source_start, 'ORIGINAL_CONTROLLER_PROCESS_STILL_EXISTS')
         require(migrate('isolate', operation) == proof, 'SYSTEMD_ISOLATION_NOT_IDEMPOTENT')
         cli('migration-cancel', '-operation', operation, denied=True)
         for name in names:
             require((systemd / name).is_symlink() and os.readlink(systemd / name) == '/dev/null', 'SYSTEMD_MASK_MISSING')
             run(['/usr/bin/systemctl', 'start', name], denied=True)
+            observed = run(['/usr/bin/systemctl', 'show', '--property=ActiveState,MainPID,ControlPID', name]).stdout.decode().splitlines()
+            require('ActiveState=inactive' in observed or 'ActiveState=failed' in observed, 'INDEPENDENT_UNIT_STILL_ACTIVE')
+            if name.endswith('.service'):
+                require('MainPID=0' in observed and 'ControlPID=0' in observed, 'INDEPENDENT_UNIT_PROCESS_STILL_ACTIVE')
         run(['/usr/bin/systemctl', 'daemon-reload'])
         require(migrate('status', operation) == proof, 'SYSTEMD_RELOAD_REMOVED_ISOLATION')
         # Fixture-only fault injection. A new /dev/null link is NOT equivalent
@@ -274,6 +320,13 @@ def worker(binary):
             require(migrate('status', operation, denied=True).get('error') == 'HOST_SOURCE_IDENTITY_CHANGED', 'CONFIG_DRIFT_ACCEPTED')
         finally:
             config_file.write_bytes(original_config)
+        original_token = (config_dir / 'read').read_bytes()
+        try:
+            (config_dir / 'read').write_bytes(secrets.token_hex(32).encode())
+            require(migrate('status', operation, denied=True).get('error') == 'HOST_SOURCE_IDENTITY_CHANGED',
+                    'RUNTIME_TOKEN_DRIFT_ACCEPTED')
+        finally:
+            (config_dir / 'read').write_bytes(original_token)
         require(migrate('status', operation)['source_isolated'], 'FAULT_INJECTION_THAWED_SOURCE')
         require(migrate('resume-source', 'f' * 32, denied=True).get('error'), 'WRONG_OPERATION_NOT_DENIED')
         # A future export seal must forbid local activation; this fixture tests
@@ -296,7 +349,8 @@ def worker(binary):
         run(['/usr/bin/systemctl', 'start', names[0]])
         healthy()
         run(['/usr/bin/systemctl', 'stop', names[0]])
-        send(sys.stdout.buffer, {'phase': 'complete', 'strict_tls': True, 'same_identity_restart': True})
+        send(sys.stdout.buffer, {'phase': 'complete', 'strict_tls': True, 'same_identity_restart': True,
+                                'hosted_opt_parent_hardened': opt_hardened})
     finally:
         # Fresh-path checks above establish ownership before any installation;
         # only this fixture's role files and exact operation stages are removed.
@@ -327,6 +381,19 @@ def worker(binary):
         for path in reversed(owned):
             if path.is_dir() and not path.is_symlink():
                 shutil.rmtree(path)
+        if opt_fd is not None:
+            try:
+                current, named = os.fstat(opt_fd), Path('/opt').lstat()
+                require((current.st_dev, current.st_ino, current.st_uid, current.st_gid) ==
+                        (opt_before.st_dev, opt_before.st_ino, opt_before.st_uid, opt_before.st_gid) and
+                        (named.st_dev, named.st_ino) == (current.st_dev, current.st_ino) and
+                        not stat.S_ISLNK(named.st_mode) and stat.S_IMODE(current.st_mode) == 0o755,
+                        'HOSTED_OPT_IDENTITY_CHANGED_NO_RESTORE')
+                if opt_hardened:
+                    os.fchmod(opt_fd, stat.S_IMODE(opt_before.st_mode))
+                require(stat.S_IMODE(os.fstat(opt_fd).st_mode) == stat.S_IMODE(opt_before.st_mode), 'HOSTED_OPT_RESTORE_FAILED')
+            finally:
+                os.close(opt_fd)
         CLEANUP_COMPLETE = True
 
 

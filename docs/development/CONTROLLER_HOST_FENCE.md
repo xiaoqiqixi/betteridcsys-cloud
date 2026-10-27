@@ -55,6 +55,14 @@
 
 恢复路径进一步改为先核对全部单元/屏蔽 inode，再撤销任何一个屏蔽，避免发现外来主控文件前已部分恢复心跳定时器。计划额外拒绝可识别的非本安装版本 `aster-controller` 进程，不终止它们；仍不声称能识别管理员改名运行的任意旧程序。新实库负例包括实际未纳管主控副本、drop-in、外来 mask inode、配置漂移及拒绝后的不变性；其结果须等新提交实测。
 
+### Hosted runner 环境差异与材料绑定
+
+`675bef0cf85685ae31b248e3cdbcdaea9a547b69` 的 [CI 40516096261](https://github.com/xiaoqiqixi/betteridcsys-cloud/actions/runs/40516096261) 为 9/12 成功：两个 systemd/MySQL 用例仍被真实安装器的路径保护拒绝；浏览器任务在准备阶段下载字体时超过900秒，未进入浏览器断言。两个原生 libvirt 安装任务通过，不能据此替代另外三个失败项。
+
+`73247535d52c64d0a797767c2dde326da406346b` 的 [CI 40519867358](https://github.com/xiaoqiqixi/betteridcsys-cloud/actions/runs/40519867358) 在22/24均定位到相同原因：实际 `/opt` 是 root 所有、非符号链接、模式0777。**生产安装器拒绝可被其他用户改写的安装祖先是正确行为，不放宽校验。** 新夹具只在确认未装云/财务系统的独占 CI 主机上，持有 `/opt` 原始目录 FD，将已知0777临时收紧至0755；只允许已知两种模式，不递归 chmod、不 chown、不处理未知路径。停止并删除本轮自有服务和文件后，核对同一目录 inode/设备/owner/group，再恢复原模式。成功报告必须等待此清理完成，并明确 `unmodified_host_image_acceptance=false`；这是经过明确环境准备的 systemd 测试，不是原始 hosted 镜像直接安装成功。
+
+维护身份新增配置所引用的 DSN、令牌、服务端及节点 TLS 材料摘要，防止配置路径不变而底层材料已替换时继续原操作。原文和秘密不进入输出。实库夹具还独立检查原 MainPID 的进程启动身份已消失、被屏蔽服务 MainPID/ControlPID 为0，并注入令牌内容变化检查拒绝。新断言仍须在实际 Linux CI 执行；本地 Python 语法检查不算通过证明。
+
 仍需本轮实际 systemd/MySQL 结果、更完整的并发与在途请求、原生 OS 重启复核及故障窗口验证。daemon-reload **不是**操作系统重启。完成这些才可关闭 M01。M02加密导出、M03空目标恢复、M04双活防护/接管回退、M05后台、M06跨主控实例迁移仍未交付；没有“导出后直接导入运行库”的捷径。
 
 实现语义参考：[Linux renameat2](https://man7.org/linux/man-pages/man2/rename.2.html)、[systemd 单元加载与 mask](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html)。Ubuntu22/24 的实际行为仍由分发版测试确认，不以最新版手册替代验收。

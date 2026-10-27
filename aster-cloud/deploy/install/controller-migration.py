@@ -184,11 +184,30 @@ class Host:
         require(Path('/sys/fs/cgroup/cgroup.controllers').is_file(), 'CGROUP_V2_REQUIRED')
         self.identity = {'controller_id': self.id, 'configuration_sha256': digest(self.config_raw),
                          'installation_sha256': digest(state_raw), 'manifest_sha256': digest(manifest_raw),
-                         'source_commit': source, 'bundle_sha256': bundle_sha, 'machine_id_sha256': digest(machine)}
+                         'source_commit': source, 'bundle_sha256': bundle_sha, 'machine_id_sha256': digest(machine),
+                         'runtime_materials_sha256': self.material_digest()}
+
+    def material_digest(self):
+        # A config file with unchanged path strings is not an unchanged source
+        # when its DSN, tokens or TLS files have been replaced underneath it.
+        # Only digests enter the private journal; no secret bytes reach output.
+        fields = [(key, self.config.get(key), key != 'tls_cert_file', 65536 if key.startswith('tls_') else 4096)
+                  for key in ('dsn_file', 'tls_cert_file', 'tls_key_file', 'billing_token_file',
+                              'admin_read_token_file', 'admin_write_token_file')]
+        for node in sorted(self.nodes, key=lambda n: n['id']):
+            fields += [(node['id'] + ':' + key, node.get(key), key == 'client_key_file', 1024 * 1024)
+                       for key in ('ca_file', 'client_cert_file', 'client_key_file')]
+        h = hashlib.sha256()
+        for label, path, private, maximum in fields:
+            require(isinstance(path, str), 'RUNTIME_MATERIAL_REFERENCE_INVALID')
+            raw = self.i.protected_read(path, maximum, private)
+            h.update(json.dumps([label, path, digest(raw)], separators=(',', ':')).encode() + b'\n')
+        return h.hexdigest()
 
     def fresh_identity(self):
         require(digest(self.i.protected_read(str(CONFIG), 65536)) == self.identity['configuration_sha256'] and
-                digest(self.i.protected_read(str(INSTALL_STATE), 1024 * 1024)) == self.identity['installation_sha256'],
+                digest(self.i.protected_read(str(INSTALL_STATE), 1024 * 1024)) == self.identity['installation_sha256'] and
+                self.material_digest() == self.identity['runtime_materials_sha256'],
                 'HOST_SOURCE_IDENTITY_CHANGED')
 
     def command(self, action, operation=None):
