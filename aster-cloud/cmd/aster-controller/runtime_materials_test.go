@@ -33,16 +33,39 @@ func TestAuthenticatedRuntimeMaterialRestore(t *testing.T) {
 	operation := strings.Repeat("a", 32)
 	target := controllerbackup.RuntimeTarget{Directory: dir, PlanSHA256: strings.Repeat("c", 64),
 		DSN: "aster_r_" + operation[:23] + ":new-private-target-password@unix(/run/mysqld/mysqld.sock)/aster_cloud_restore_" + operation}
-	inArchive := func(fn func(*controllerbackup.Archive) error) error {
-		return controllerbackup.WithVerifiedArchive(archive, keyPath, "source-one", operation, dir, fn)
+	// Authenticate the actual encrypted archive once for sequential target-file
+	// faults. They change files, not ciphertext: repeated scrypt for chmod/link
+	// provides no additional authentication coverage. Ciphertext faults remain
+	// separate independently encrypted cases in the archive inspection tests.
+	err = controllerbackup.WithVerifiedArchive(archive, keyPath, "source-one", operation, dir, func(a *controllerbackup.Archive) error {
+		exerciseRuntimeMaterialRestore(t, a, files, target, dir)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err = inArchive(func(a *controllerbackup.Archive) error { _, e := a.VerifyRuntimeMaterials(target); return e }); err == nil {
+	// A separate reopening still proves authenticated durable reentry.
+	if err := controllerbackup.WithVerifiedArchive(archive, keyPath, "source-one", operation, dir, func(a *controllerbackup.Archive) error {
+		r, e := a.VerifyRuntimeMaterials(target)
+		if e == nil && (!r.MaterialsStaged || !r.ReadOnlyVerification || r.MaterialReferences != 9) {
+			t.Fatal("reopened stage unconfirmed")
+		}
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func exerciseRuntimeMaterialRestore(t *testing.T, a *controllerbackup.Archive, files map[string][]byte, target controllerbackup.RuntimeTarget, dir string) {
+	t.Helper()
+	inArchive := func(fn func(*controllerbackup.Archive) error) error { return fn(a) }
+	if err := inArchive(func(a *controllerbackup.Archive) error { _, e := a.VerifyRuntimeMaterials(target); return e }); err == nil {
 		t.Fatal("readonly status created a missing material stage")
 	}
-	if _, err = os.Lstat(filepath.Join(dir, "materials-started.json")); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(dir, "materials-started.json")); !os.IsNotExist(err) {
 		t.Fatal("readonly status wrote an intent")
 	}
-	if err = inArchive(func(a *controllerbackup.Archive) error {
+	if err := inArchive(func(a *controllerbackup.Archive) error {
 		proof, e := a.RestoreRuntimeMaterials(target)
 		if e != nil {
 			return e

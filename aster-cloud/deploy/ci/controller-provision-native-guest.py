@@ -347,6 +347,7 @@ def execute(metadata):
         progress('target-import')
         entry('target-data-status', 'TARGET_IMPORT_NOT_STARTED')
         entry('target-materials', 'TARGET_IMPORT_NOT_STARTED')
+        entry('target-revoke-sessions', 'TARGET_IMPORT_NOT_STARTED')
         require(not (inputs / 'runtime').exists() and not (inputs / 'materials-started.json').exists())
         imported = json.loads(entry('target-restore').stdout)
         require(imported == {'schema': 1, 'operation_id': operation, 'database_restored': True,
@@ -362,6 +363,8 @@ def execute(metadata):
         require(run(runtime_command, data=b'SELECT revision FROM controller_console_users;\n').stdout == b'18446744073709551614\n')
         require(run(runtime_command, data=b'SELECT COUNT(*) FROM controller_console_sessions;\n').stdout == b'1\n')
         require(run(runtime_command, data=b"SELECT AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='controller_audit';\n").stdout == b'42\n')
+        entry('target-revoke-sessions', 'TARGET_COMMAND_REJECTED')
+        require(not (inputs / 'sessions-started.json').exists())
         progress('target-readback')
         records = private_files + ('import-approval.json', 'import-started.json', 'structure.json')
         committed_hashes = {name: sha(directory / name) for name in records}
@@ -430,12 +433,63 @@ def execute(metadata):
         module.mysql_sql(directory, "ALTER TABLE `" + database + "`.controller_console_sessions DROP FOREIGN KEY controller_console_sessions_user_fk;\n")
         entry('target-data-status', 'TARGET_COMMAND_REJECTED')
         entry('target-restore', 'TARGET_COMMAND_REJECTED')
+        module.mysql_sql(directory, "ALTER TABLE `" + database + "`.controller_console_sessions ADD CONSTRAINT controller_console_sessions_user_fk FOREIGN KEY(user_id) REFERENCES controller_console_users(id) ON DELETE CASCADE;\n")
+        require(json.loads(entry('target-data-status').stdout) == imported)
+        progress('target-sessions')
+        entry('target-session-status', 'TARGET_COMMAND_REJECTED')
+        require(not (inputs / 'sessions-started.json').exists())
+        # Real SQL refusal after durable intent: no row mutation, no automatic
+        # retry on ordinary reentry, explicit same-operation resume only.
+        module.mysql_sql(directory, 'SET GLOBAL super_read_only=ON;\n')
+        try:
+            entry('target-revoke-sessions', 'TARGET_COMMAND_REJECTED')
+            session_intent = inputs / 'sessions-started.json'
+            require(session_intent.is_file() and stat.S_IMODE(session_intent.stat().st_mode) == 0o600)
+            session_hash = sha(session_intent)
+            entry('target-revoke-sessions', 'TARGET_COMMAND_REJECTED')
+            entry('target-session-status', 'TARGET_COMMAND_REJECTED')
+            require(run(runtime_command, data=b'SELECT COUNT(*) FROM controller_console_sessions;\n').stdout == b'1\n')
+            require(run(runtime_command, data=b'SELECT COUNT(*) FROM controller_identity_audit;\n').stdout == b'0\n')
+            require(sha(session_intent) == session_hash)
+        finally:
+            module.mysql_sql(directory, 'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
+        revoked = json.loads(entry('target-session-resume').stdout)
+        require(revoked == {'schema': 1, 'operation_id': operation, 'revoked_sessions': 1,
+            'sessions_revoked': True, 'audit_appended': True, 'exact_database_verified': True,
+            'read_only_verification': False, 'target_activation_approved': False, 'migration_ready': False,
+            'root_inventory_verified': True, 'database_restored': True, 'target_restore_approved': False})
+        readonly_revoked = {**revoked, 'read_only_verification': True}
+        module.mysql_sql(directory, 'SET GLOBAL super_read_only=ON;\n')
+        try:
+            require(json.loads(entry('target-session-status').stdout) == readonly_revoked)
+            require(json.loads(entry('target-revoke-sessions').stdout) == readonly_revoked)
+            require(json.loads(entry('target-material-status').stdout) == {**expected_stage, 'sessions_revoked': True})
+            require(run(runtime_command, data=b'SELECT COUNT(*) FROM controller_console_sessions;\n').stdout == b'0\n')
+            require(run(runtime_command, data=b'SELECT id,actor,action,target FROM controller_identity_audit;\n').stdout ==
+                    ('1\tcontroller-migration\tmigration.sessions_revoked\t' + operation + '\n').encode())
+            entry('target-session-resume', 'TARGET_COMMAND_REJECTED')
+            # Original-image status must not pretend the intentional session
+            # transition left the entire restored database byte-identical.
+            entry('target-data-status', 'TARGET_COMMAND_REJECTED')
+        finally:
+            module.mysql_sql(directory, 'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
+        run(runtime_command, data=b"INSERT INTO controller_console_sessions VALUES(UNHEX(REPEAT('42',32)),NULL,'2026-10-28','2027-01-01');\n")
+        entry('target-session-status', 'TARGET_COMMAND_REJECTED')
+        entry('target-material-status', 'TARGET_COMMAND_REJECTED')
+        run(runtime_command, data=b"DELETE FROM controller_console_sessions WHERE token_hash=UNHEX(REPEAT('42',32));\n")
+        require(json.loads(entry('target-session-status').stdout) == readonly_revoked)
+        require(sha(session_intent) == session_hash and {p.name: sha(p) for p in candidate.iterdir()} == stage_hashes)
+        denied_runtime = subprocess.run([str(version / 'bin/aster-controller'), 'check', '-config', str(candidate / 'config.json')],
+            env=ENV, capture_output=True, timeout=30)
+        require(denied_runtime.returncode == 78 and not denied_runtime.stdout and
+                json.loads(denied_runtime.stderr).get('code') == 'CONTROLLER_MIGRATION_FENCED')
         require({name: sha(directory / name) for name in records} == committed_hashes and (sha(seal), sha(state)) == before)
         require(not Path('/etc/aster-controller').exists() and not Path('/etc/systemd/system/aster-controller.service').exists())
         report.update({key: True for key in ('database_restored', 'real_source_database_snapshot', 'exact_rows_verified',
             'read_only_reentry_verified', 'modified_data_refused', 'removed_constraint_refused', 'foreign_database_refused',
-            'runtime_materials_staged', 'runtime_material_drift_refused', 'runtime_candidate_remains_fenced')})
-        report.update({'configuration_published': False, 'sessions_revoked': False})
+            'runtime_materials_staged', 'runtime_material_drift_refused', 'runtime_candidate_remains_fenced',
+            'sessions_revoked', 'session_transition_exact_readback', 'session_transition_explicit_recovery')})
+        report.update({'configuration_published': False, 'session_browser_verified': False})
     return report
 
 

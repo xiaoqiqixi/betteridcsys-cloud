@@ -95,6 +95,17 @@ func snapshotDatabaseChecked(ctx context.Context, db *sql.DB, ownership *databas
 		return 0, ErrInvalid
 	}
 	defer tx.Rollback()
+	count, err := snapshotTablesChecked(ctx, tx, ownership, write, check)
+	if err != nil || tx.Commit() != nil {
+		return 0, ErrInvalid
+	}
+	return count, nil
+}
+
+// The caller owns one transaction and its session/metadata settings. Sharing
+// this exact inventory/ownership path keeps mutation verification from omitting
+// tables or applying weaker checks than the read-only backup boundary.
+func snapshotTablesChecked(ctx context.Context, tx sqlReader, ownership *databaseOwnership, write func(string, func(io.Writer) error) error, check func(sqlReader) error) (int64, error) {
 	names := tableNames()
 	inventory := append([]string(nil), names...)
 	if ownership != nil {
@@ -165,9 +176,6 @@ func snapshotDatabaseChecked(ctx context.Context, db *sql.DB, ownership *databas
 		if e != nil {
 			return 0, ErrInvalid
 		}
-	}
-	if tx.Commit() != nil {
-		return 0, ErrInvalid
 	}
 	return count, nil
 }

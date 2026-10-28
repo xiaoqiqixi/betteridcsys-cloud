@@ -686,7 +686,7 @@ class Target(Host):
     def unused_host(self):
         require(set(p.name for p in self.root.iterdir()) <=
                 {'request.json', 'backup.age', 'recovery.key', 'plan.json', 'target.lock', 'database-plan.json', 'database',
-                 'materials-started.json', 'runtime'}, 'TARGET_INPUT_INVENTORY_CHANGED')
+                 'materials-started.json', 'runtime', 'sessions-started.json'}, 'TARGET_INPUT_INVENTORY_CHANGED')
         # A killed verification may leave private plaintext. Never silently
         # discard/reuse it, or turn an unreviewed partial run into success.
         require(not CONFIG.parent.exists() and not CONFIG.parent.is_symlink(), 'TARGET_CONFIGURATION_ALREADY_EXISTS')
@@ -729,7 +729,7 @@ class Target(Host):
         if action == 'target-database-plan':
             return {'schema': 1, 'plan': plan, 'readonly': True, 'database_provisioned': False,
                     'database_restored': False, 'target_restore_approved': False, 'migration_ready': False}
-        if action in ('target-restore', 'target-data-status'):
+        if action in ('target-restore', 'target-data-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume'):
             return self.restore_database(action, plan)
         path = self.root / 'database-plan.json'
         if path.exists() or path.is_symlink():
@@ -808,6 +808,23 @@ class Target(Host):
             # evidence: root inventory and every authenticated byte are reread.
             self.unused_host()
             module.verify_restore_mysql(self.operation, plan['data']['charset'], plan['data']['collation'], restored=True)
+            if action in ('target-revoke-sessions', 'target-session-status', 'target-session-resume'):
+                result = self.target_command(action[len('target-'):])
+                sessions = [t['rows'] for t in plan['data']['tables'] if t['name'] == 'controller_console_sessions']
+                require(len(sessions) == 1 and set(result) == {'schema', 'operation_id', 'revoked_sessions',
+                        'sessions_revoked', 'audit_appended', 'exact_database_verified', 'read_only_verification',
+                        'target_activation_approved', 'migration_ready'} and result['schema'] == 1 and
+                        result['operation_id'] == self.operation and type(result['revoked_sessions']) is int and
+                        result['revoked_sessions'] == sessions[0] and
+                        all(result[k] is True for k in ('sessions_revoked', 'audit_appended', 'exact_database_verified')) and
+                        type(result['read_only_verification']) is bool and
+                        (action != 'target-session-status' or result['read_only_verification'] is True) and
+                        result['target_activation_approved'] is False and result['migration_ready'] is False,
+                        'TARGET_SESSIONS_UNCONFIRMED')
+                self.unused_host()
+                module.verify_restore_mysql(self.operation, plan['data']['charset'], plan['data']['collation'], restored=True)
+                return {**result, 'root_inventory_verified': True, 'database_restored': True,
+                        'target_restore_approved': False}
             result = self.target_command('data-status')
             data = result.get('data', {})
             require(result.get('schema') == 1 and result.get('operation_id') == self.operation and
@@ -845,12 +862,15 @@ class Target(Host):
                         result.get('admission_blocked') is True and result.get('guarded_processes_drained') is True and
                         result.get('source_isolated') is False and result.get('migration_ready') is False,
                         'TARGET_SEAL_UNCONFIRMED')
-                if action in ('target-database-plan', 'target-provision', 'target-restore', 'target-data-status'):
+                if action in ('target-database-plan', 'target-provision', 'target-restore', 'target-data-status',
+                              'target-revoke-sessions', 'target-session-status', 'target-session-resume'):
                     return self.prepare_database(action)
                 if action in ('target-materials', 'target-material-status'):
                     # Root-visible objects/grants and every restored data byte
                     # must still match before even the material intent is made.
-                    self.prepare_database('target-data-status')
+                    transition = self.root / 'sessions-started.json'
+                    revoked = transition.exists() or transition.is_symlink()
+                    self.prepare_database('target-session-status' if revoked else 'target-data-status')
                     result = self.target_command('materials' if action == 'target-materials' else 'material-status')
                     require(set(result) == {'schema', 'operation_id', 'material_references', 'materials_staged',
                             'read_only_verification', 'configuration_published', 'sessions_revoked', 'migration_ready'} and
@@ -859,7 +879,8 @@ class Target(Host):
                             (result['material_references'] - 6) % 3 == 0 and result['materials_staged'] is True and
                             type(result['read_only_verification']) is bool and
                             (action != 'target-material-status' or result['read_only_verification'] is True) and
-                            all(result[k] is False for k in ('configuration_published', 'sessions_revoked', 'migration_ready')),
+                            result['sessions_revoked'] is revoked and
+                            all(result[k] is False for k in ('configuration_published', 'migration_ready')),
                             'TARGET_MATERIALS_UNCONFIRMED')
                     self.unused_host()
                     return {**result, 'root_inventory_verified': True, 'database_restored': True,
@@ -874,14 +895,14 @@ class Arguments(argparse.ArgumentParser):
 
 def main():
     parser = Arguments(description=__doc__)
-    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status'))
+    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume'))
     parser.add_argument('--operation')
     args = parser.parse_args()
     require((args.action in ('capabilities', 'plan') and args.operation is None) or
             (args.action not in ('capabilities', 'plan') and isinstance(args.operation, str) and OP.fullmatch(args.operation)),
             'EXACT_OPERATION_ID_REQUIRED')
     if args.action == 'capabilities':
-        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status'],
+        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume'],
                 'export_restore': False, 'migration_ready': False}
     if args.action.startswith('target-'):
         return Target(install_module(), args.operation).prepare(args.action)

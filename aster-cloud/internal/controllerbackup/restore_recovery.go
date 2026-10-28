@@ -97,6 +97,37 @@ func (a *Archive) prepareStructure(ctx context.Context, q sqlReader, owner *data
 	return append(raw, '\n'), nil
 }
 
+func (a *Archive) restoredProof(ctx context.Context, receipt []byte, runtimeDSN string, proof []byte) (DatabasePlan, *databaseOwnership, databasePreparation, error) {
+	fail := func() (DatabasePlan, *databaseOwnership, databasePreparation, error) {
+		return DatabasePlan{}, nil, databasePreparation{}, ErrInvalid
+	}
+	plan, _, _, e := a.parseDatabase(ctx)
+	if e != nil || len(proof) > 65536 || !bytes.HasSuffix(proof, []byte("\n")) {
+		return fail()
+	}
+	owner, e := restoreOwner(receipt, runtimeDSN)
+	if e != nil || owner.Database != "aster_cloud_restore_"+a.manifest.OperationID {
+		return fail()
+	}
+	var p databasePreparation
+	if !canonicalRecord(bytes.TrimSuffix(proof, []byte("\n")), &p) {
+		return fail()
+	}
+	want := a.preparation(owner)
+	want.Tables = p.Tables
+	if !reflect.DeepEqual(p, want) || len(p.Tables) != len(tableNames())+1 {
+		return fail()
+	}
+	names := append(tableNames(), installerOwnershipTable)
+	sort.Strings(names)
+	for i, t := range p.Tables {
+		if t.Name != names[i] || !shaPattern.MatchString(t.SHA256) {
+			return fail()
+		}
+	}
+	return plan, owner, p, nil
+}
+
 // VerifyRestoredDatabase resolves an unknown commit response using read-only
 // verification, never INSERT replay. Every authenticated table byte, encoding,
 // auto-increment and full CREATE TABLE definition (including FKs/indexes) must
@@ -105,29 +136,9 @@ func (a *Archive) prepareStructure(ctx context.Context, q sqlReader, owner *data
 // Root ownership/grants, admission sealing and later session/node authority
 // transfer remain the fixed host coordinator's responsibility.
 func (a *Archive) VerifyRestoredDatabase(ctx context.Context, target *sql.DB, receipt []byte, runtimeDSN string, proof []byte) (DatabaseRestoreReport, error) {
-	plan, _, _, e := a.parseDatabase(ctx)
-	if e != nil || target == nil || len(proof) > 65536 || !bytes.HasSuffix(proof, []byte("\n")) {
+	plan, owner, p, e := a.restoredProof(ctx, receipt, runtimeDSN, proof)
+	if e != nil || target == nil {
 		return DatabaseRestoreReport{}, ErrInvalid
-	}
-	owner, e := restoreOwner(receipt, runtimeDSN)
-	if e != nil || owner.Database != "aster_cloud_restore_"+a.manifest.OperationID {
-		return DatabaseRestoreReport{}, ErrInvalid
-	}
-	var p databasePreparation
-	if !canonicalRecord(bytes.TrimSuffix(proof, []byte("\n")), &p) {
-		return DatabaseRestoreReport{}, ErrInvalid
-	}
-	want := a.preparation(owner)
-	want.Tables = p.Tables
-	if !reflect.DeepEqual(p, want) || len(p.Tables) != len(tableNames())+1 {
-		return DatabaseRestoreReport{}, ErrInvalid
-	}
-	names := append(tableNames(), installerOwnershipTable)
-	sort.Strings(names)
-	for i, t := range p.Tables {
-		if t.Name != names[i] || !shaPattern.MatchString(t.SHA256) {
-			return DatabaseRestoreReport{}, ErrInvalid
-		}
 	}
 	expected := map[string]string{}
 	for _, f := range a.manifest.Files {

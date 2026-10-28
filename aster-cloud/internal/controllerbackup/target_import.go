@@ -112,14 +112,38 @@ func targetData(ctx context.Context, operation string, verify bool, afterVerifie
 // an archived DSN, profile path or caller argument never chooses a destination.
 func RestoreTargetMaterials(ctx context.Context, operation string, verifyOnly bool) (RuntimeMaterialReport, error) {
 	var result RuntimeMaterialReport
-	_, err := targetData(ctx, operation, true, func(plan TargetPlan, sha string, a *Archive, db targetDatabase) error {
+	err := withTargetArchive(operation, func(plan TargetPlan, sha string, a *Archive) error {
+		db, proof, e := importedTargetInputs(ctx, a, plan, sha)
+		if e != nil {
+			return e
+		}
 		target := RuntimeTarget{Directory: filepath.Join(targetRoot, operation), DSN: db.runtimeDSN, PlanSHA256: sha}
-		var e error
+		store, e := control.OpenDSN(db.migrationDSN)
+		if e != nil {
+			return ErrInvalid
+		}
+		defer store.DB.Close()
+		existing, e := targetSessionExists(operation)
+		if e != nil {
+			return e
+		}
+		if existing {
+			binding, intent, e := targetSessionBinding(a, target, true)
+			if e != nil {
+				return e
+			}
+			if _, e = a.VerifyRevokedSessions(ctx, store.DB, db.ownerRaw, db.runtimeDSN, proof, binding, intent); e != nil {
+				return e
+			}
+		} else if _, e = a.VerifyRestoredDatabase(ctx, store.DB, db.ownerRaw, db.runtimeDSN, proof); e != nil {
+			return e
+		}
 		if verifyOnly {
 			result, e = a.VerifyRuntimeMaterials(target)
 		} else {
 			result, e = a.RestoreRuntimeMaterials(target)
 		}
+		result.SessionsRevoked = existing
 		return e
 	})
 	if err != nil {

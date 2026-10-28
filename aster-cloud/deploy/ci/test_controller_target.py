@@ -247,6 +247,9 @@ def main():
         entry('target-data-status', True)
         entry('target-materials', True)
         entry('target-material-status', True)
+        entry('target-revoke-sessions', True)
+        entry('target-session-status', True)
+        entry('target-session-resume', True)
         require(not (inputs / 'database').exists() and not (inputs / 'database-plan.json').exists() and
                 not (inputs / 'runtime').exists() and not (inputs / 'materials-started.json').exists() and
                 install_state.read_bytes() == original_installation and seal.read_bytes() == seal_raw,

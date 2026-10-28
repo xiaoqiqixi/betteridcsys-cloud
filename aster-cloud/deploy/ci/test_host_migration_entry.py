@@ -18,7 +18,7 @@ class HostMigrationEntry(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         value = json.loads(r.stdout)
         self.assertEqual(value['protocol'], 'aster.controller-migration/1')
-        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status'])
+        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume'])
         self.assertIs(value['export_restore'], False)
         self.assertIs(value['migration_ready'], False)
 
@@ -32,6 +32,18 @@ class HostMigrationEntry(unittest.TestCase):
                 self.assertNotEqual(r.returncode, 0)
                 self.assertEqual(r.stdout, b'')
                 self.assertNotIn(b'PRIVATE_SENTINEL', r.stderr)
+
+    def test_session_commands_accept_only_the_fixed_operation(self):
+        for action in ('target-revoke-sessions', 'target-session-status', 'target-session-resume'):
+            for args in ((), ('--operation', '../escape'), ('--operation', 'a' * 32, '--force'),
+                         ('--operation', 'a' * 32, '--intent', 'PRIVATE_SENTINEL'),
+                         ('--operation', 'a' * 32, '--dsn', 'PRIVATE_SENTINEL'),
+                         ('--operation', 'a' * 32, '--timestamp', '2026-10-28')):
+                with self.subTest(action=action, args=args):
+                    r = self.invoke(action, *args)
+                    self.assertEqual(r.returncode, 1)
+                    self.assertEqual(r.stdout, b'')
+                    self.assertNotIn(b'PRIVATE_SENTINEL', r.stderr)
 
 
 if __name__ == '__main__':

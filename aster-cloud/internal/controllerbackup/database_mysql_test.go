@@ -91,6 +91,18 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 	if _, e = store.DB.ExecContext(ctx, "INSERT INTO controller_console_sessions(token_hash,user_id,created_at,expires_at) VALUES(?,?,?,'2027-01-01')", session, userID, stamp); e != nil {
 		t.Fatal(e)
 	}
+	if _, e = store.DB.ExecContext(ctx, "INSERT INTO controller_console_sessions(token_hash,user_id,created_at,expires_at) VALUES(?,NULL,?,'2027-01-01')", bytes.Repeat([]byte{255}, 32), stamp); e != nil {
+		t.Fatal(e)
+	}
+	for _, query := range []string{
+		"INSERT INTO controller_identity_audit(id,actor,action,target,created_at) VALUES(7,'historical','historical','retained','2026-10-27 01:00:00.000001')",
+		"INSERT INTO controller_identity_audit(id,actor,action,target,created_at) VALUES(41,'historical','deleted','retained','2026-10-27 01:00:00.000002')",
+		"DELETE FROM controller_identity_audit WHERE id=41",
+	} {
+		if _, e = store.DB.ExecContext(ctx, query); e != nil {
+			t.Fatal(e)
+		}
+	}
 	capture := func() (map[string][]byte, int64, error) {
 		files := map[string][]byte{}
 		count, e := controllerbackup.SnapshotDatabase(ctx, store.DB, func(name string, emit func(io.Writer) error) error {
@@ -539,6 +551,22 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 			if target.DB.QueryRowContext(ctx, "SELECT datacenter_id FROM controller_nodes WHERE id='node-a'").Scan(&restoredValue) != nil || restoredValue != "香港" {
 				t.Fatal("failed readback altered database")
 			}
+			if _, e := target.DB.ExecContext(ctx, "ALTER TABLE controller_console_sessions ADD CONSTRAINT controller_console_sessions_user_fk FOREIGN KEY(user_id) REFERENCES controller_console_users(id) ON DELETE CASCADE"); e != nil {
+				t.Fatal(e)
+			}
+			if _, e := verify(prepared); e != nil {
+				t.Fatal("fixture must restore its FK before session transition", e)
+			}
+			ownerRaw, e := json.Marshal(owner)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if e := controllerbackup.WithVerifiedArchive(archive, key, "source-sql-test", operation, dir, func(a *controllerbackup.Archive) error {
+				exerciseSessionTransition(t, ctx, a, target.DB, ownerRaw, runtime.FormatDSN(), prepared)
+				return nil
+			}); e != nil {
+				t.Fatal("session fixture archive failed", e)
+			}
 			entries, e := os.ReadDir(dir)
 			if e != nil || len(entries) != 2 {
 				t.Fatal("marked restore left plaintext")
@@ -546,6 +574,10 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 		})
 	}
 	// A foreign table must not be silently omitted or included in the backup.
+	afterTargetChanges, afterCount, e := capture()
+	if e != nil || afterCount != count || !reflect.DeepEqual(afterTargetChanges, files) {
+		t.Fatal("target restore/session transition changed the source database", e)
+	}
 	if _, e = store.DB.ExecContext(ctx, "CREATE TABLE foreign_table(id INT PRIMARY KEY) ENGINE=InnoDB"); e != nil {
 		t.Fatal(e)
 	}
