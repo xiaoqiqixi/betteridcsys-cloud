@@ -35,7 +35,7 @@ jobs:
         run: |
           go mod download
           go mod verify
-          go test -mod=readonly -race -count=1 -v -timeout=10m ./...
+          python3 -I deploy/ci/go-race.py
           go vet -mod=readonly ./...
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -trimpath -buildvcs=false ./cmd/aster-controller ./cmd/aster-node ./cmd/aster-network ./cmd/aster-billing-plugin
       - name: Offline package and SDK-layout safety contracts (not host installation)
@@ -54,6 +54,7 @@ jobs:
         run: |
           python3 -B aster-cloud/deploy/ci/test_unified_install.py
           python3 -B aster-cloud/deploy/ci/test_host_migration_entry.py
+          python3 -B aster-cloud/deploy/ci/test_go_race.py
           python3 -B aster-cloud/deploy/ci/test_install_entrypoints.py
           python3 -B aster-cloud/deploy/ci/test_public_cloud_evidence.py
           python3 -B aster-cloud/deploy/ci/check_install_entrypoints.py --readme README.md --entry aster-cloud/deploy/install/cloud.py --bootstrap aster-cloud/deploy/install/release_verify.py
@@ -165,22 +166,20 @@ jobs:
           overwrite: false
 
   native-controller-provision:
-    name: Native controller provisioning and restore (ubuntu-${{ matrix.ubuntu }})
+    name: Native ${{ matrix.scenario }} (ubuntu-${{ matrix.ubuntu }})
     strategy:
       fail-fast: false
       matrix:
         # All emulator hosts use reviewed libslirp 4.7.x (loopback-only command
         # socketpair). The independently signed guests run supported 22/24.
         # Ubuntu 26 is deferred, not a failed result reclassified as passing.
-        include:
-          - os: ubuntu-24.04
-            ubuntu: '22.04'
-          - os: ubuntu-24.04
-            ubuntu: '24.04'
+        os: [ubuntu-24.04]
+        ubuntu: ['22.04', '24.04']
+        scenario: ['controller-restore-data', 'controller-restore-sessions', 'controller-restore-configuration']
     runs-on: ${{ matrix.os }}
     timeout-minutes: 85
-    # 15m isolated source SQL + fixed 60m expanded restore VM + setup/cleanup.
-    # Simpler libvirt/provision VMs keep 30m; no automatic retry or gate waiver.
+    # Each required scenario recreates real import prerequisites at this SHA.
+    # 15m source SQL + unchanged 60m VM + setup/cleanup, no retry/gate waiver.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -197,24 +196,38 @@ jobs:
       - name: Actual signed Ubuntu target provisioning, import and read-only recovery
         env:
           TEST_UBUNTU: ${{ matrix.ubuntu }}
+          TEST_SCENARIO: ${{ matrix.scenario }}
         run: |
           set -euo pipefail
-          python3 -I aster-cloud/deploy/ci/libvirt-native.py --scenario controller-restore \
+          python3 -I aster-cloud/deploy/ci/libvirt-native.py --scenario "$TEST_SCENARIO" \
             --ubuntu "$TEST_UBUNTU" --source-root "$GITHUB_WORKSPACE" \
             --source-sha "$GITHUB_SHA" --output "$RUNNER_TEMP/cloud-controller-provision"
       - name: Independently reject migration and real-source overclaims
         env:
           TEST_UBUNTU: ${{ matrix.ubuntu }}
+          TEST_SCENARIO: ${{ matrix.scenario }}
         run: |
           python3 -I - <<'PYTEST'
           import json, os, pathlib
           root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'cloud-controller-provision'
+          common = set('passed real_apt real_systemd real_mysql actual_installer actual_controller target_sealed exact_encoding_preserved credentials_verified runtime_ddl_denied same_operation_preserved source_fixture_synthetic database_restored real_source_database_snapshot exact_rows_verified runtime_materials_staged runtime_candidate_remains_fenced'.split())
+          phases = {
+              'controller-restore-data': set('foreign_account_refused lost_credential_refused_without_reset maintenance_authentication_verified maintenance_drift_refused maintenance_nonroot_denied read_only_reentry_verified modified_data_refused removed_constraint_refused foreign_database_refused runtime_material_drift_refused'.split()),
+              'controller-restore-sessions': set('sessions_revoked session_transition_exact_readback session_transition_explicit_recovery'.split()),
+              'controller-restore-configuration': set('sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced'.split()),
+          }
+          expected = common | phases[os.environ['TEST_SCENARIO']]
+          denied = set('source_host_export_verified node_takeover_verified migration_ready kvm_ready session_browser_verified'.split())
           for name in ('summary.json', 'guest-report.json'):
               value = json.loads((root / name).read_text())
               assert value['schema'] == 1 and value['source_sha'] == os.environ['GITHUB_SHA']
-              assert value['ubuntu'] == os.environ['TEST_UBUNTU'] and value['scenario'] == 'controller-restore'
-              assert all(value[k] is True for k in ('passed', 'real_apt', 'real_systemd', 'real_mysql', 'actual_installer', 'actual_controller', 'target_sealed', 'exact_encoding_preserved', 'credentials_verified', 'runtime_ddl_denied', 'foreign_account_refused', 'lost_credential_refused_without_reset', 'same_operation_preserved', 'maintenance_authentication_verified', 'maintenance_drift_refused', 'maintenance_nonroot_denied', 'source_fixture_synthetic', 'database_restored', 'real_source_database_snapshot', 'exact_rows_verified', 'read_only_reentry_verified', 'modified_data_refused', 'removed_constraint_refused', 'foreign_database_refused', 'runtime_materials_staged', 'runtime_material_drift_refused', 'runtime_candidate_remains_fenced', 'sessions_revoked', 'session_transition_exact_readback', 'session_transition_explicit_recovery', 'configuration_plan_verified', 'configuration_plan_readonly', 'configuration_plan_tls_drift_refused', 'configuration_plan_requires_exact_session_postimage'))
-              assert all(value[k] is False for k in ('source_host_export_verified', 'node_takeover_verified', 'migration_ready', 'kvm_ready', 'configuration_published', 'session_browser_verified'))
+              assert value['ubuntu'] == os.environ['TEST_UBUNTU'] and value['scenario'] == os.environ['TEST_SCENARIO']
+              assert all(value[k] is True for k in expected)
+              assert all(value[k] is False for k in denied)
+              # A report must not claim another scenario's unexecuted faults.
+              assert not (set().union(*phases.values()) - expected) & set(value)
+              if name == 'guest-report.json':
+                  assert set(value) == expected | denied | {'schema','scenario','source_sha','ubuntu','image_sha256'}
           summary = json.loads((root / 'summary.json').read_text())
           assert all(summary[k] is True for k in ('host_network_unchanged', 'tcg_only', 'host_process_isolation_verified', 'sandbox_selftests_passed', 'relay_cleanup_verified'))
           assert summary['host_network_proof']['unchanged'] is True and summary['host_network_pre_vm_proof']['unchanged'] is True
@@ -223,7 +236,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: cloud-controller-provision-ubuntu-${{ matrix.ubuntu }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: cloud-${{ matrix.scenario }}-ubuntu-${{ matrix.ubuntu }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/cloud-controller-provision/summary.json
             ${{ runner.temp }}/cloud-controller-provision/guest-report.json

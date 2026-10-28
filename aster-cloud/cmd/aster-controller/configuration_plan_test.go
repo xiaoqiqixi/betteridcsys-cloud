@@ -237,6 +237,9 @@ func TestAuthenticatedTargetConfigurationPlan(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+		t.Run("publication requires independent plan approval", func(t *testing.T) {
+			testConfigurationPublicationApproval(t, a, target, request, plan)
+		})
 		again, err := a.PlanConfiguration(target, request, strings.Repeat("e", 64))
 		if err != nil {
 			t.Fatal(err)

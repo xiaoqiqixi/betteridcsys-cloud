@@ -140,3 +140,11 @@ Ubuntu22/24 的固定场景扩展为 `controller-restore`，保留原专用库�
 ### 保留节点身份的材料重定位
 
 节点历史 profile 包含文件路径，直接改路径会改变已批准摘要。运行时与再次导出通过可选的 root 配置 `node_materials` 读取绑定后的材料，保留原 profile，并逐份验证摘要和文件保护；不存在静默回退。配置、真实 mTLS 和再次导出的合同见[节点材料连续性](CONTROLLER_RUNTIME_MATERIALS.md)。此能力不解除目标封存，不等于已完成目标材料落盘或会话撤销。
+
+
+### 当前原生场景划分
+
+历史 `controller-restore` 整体场景已替换为同提交必需的 data、sessions、configuration 三组，
+每组在Ubuntu22/24上重新执行真实导入前置。没有删除原有负例，也不把未执行的其他组证据填成true。
+每VM仍为3600秒，总job仍为85分钟，宿主网络和加密要求不变。
+当前合同与未验范围见[配置发布与验收](CONTROLLER_CONFIGURATION_PUBLICATION.md#原生耗时与认证边界)。

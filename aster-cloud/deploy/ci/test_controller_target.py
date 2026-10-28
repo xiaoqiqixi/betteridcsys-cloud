@@ -251,6 +251,9 @@ def main():
         entry('target-session-status', True)
         entry('target-session-resume', True)
         entry('target-configuration-plan', True)
+        entry('target-configuration-publish', True)
+        entry('target-configuration-status', True)
+        entry('target-configuration-resume', True)
         require(not (inputs / 'database').exists() and not (inputs / 'database-plan.json').exists() and
                 not (inputs / 'runtime').exists() and not (inputs / 'materials-started.json').exists() and
                 install_state.read_bytes() == original_installation and seal.read_bytes() == seal_raw,

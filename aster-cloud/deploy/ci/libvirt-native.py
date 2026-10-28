@@ -50,7 +50,7 @@ RELAY_PROOF = {}
 SANDBOX_PROOF = {}
 RELAY_EVENTS = {"spawned", "dns-ok", "dns-failed", "dns-nonpublic", "connect-ok", "connect-failed", "guest-first-bytes", "server-first-bytes", "guest-eof", "server-eof", "timeout", "io-failed"}
 BOOT_STAGES = {"bootcmd", "boot-mask:start", "boot-mask:done", "boot-hosts:start", "boot-hosts:done", "runcmd-enter"}
-GUEST_PHASES = {"preflight", "prepare", "inspect", "resume", "image-and-config", "doctor", "controller-install", "target-plan", "target-provision", "target-maintenance", "target-maintenance-root-login", "target-maintenance-nonroot-login", "target-maintenance-confirmation", "target-maintenance-drift", "target-maintenance-nss", "target-credentials", "target-grants", "target-refusals", "target-import", "target-readback", "target-materials", "target-data-refusals", "target-sessions"}
+GUEST_PHASES = {"preflight", "prepare", "inspect", "resume", "image-and-config", "doctor", "controller-install", "target-plan", "target-provision", "target-maintenance", "target-maintenance-root-login", "target-maintenance-nonroot-login", "target-maintenance-confirmation", "target-maintenance-drift", "target-maintenance-nss", "target-credentials", "target-grants", "target-refusals", "target-import", "target-readback", "target-materials", "target-data-refusals", "target-sessions", "target-configuration-plan", "target-configuration-publish"}
 DIAGNOSTIC_COMMANDS = {"apt-update", "apt-simulate", "apt-install", "network-rules-readonly", "other-fixed-command"} | {
     "systemd-" + name for name in ("start", "stop", "enable", "disable", "daemon-reload", "show", "is-active")} | {
     "virsh-" + name for name in ("net-list", "list", "capabilities")}
@@ -653,7 +653,7 @@ def make_seed(work, root, source_sha, image_provenance, scenario="libvirt"):
     require(go is not None, "GO_TOOLCHAIN_REQUIRED")
     env = dict(SAFE_ENV, PATH=os.environ.get("PATH", SAFE_ENV["PATH"]), HOME=str(work), GOTOOLCHAIN="local", CGO_ENABLED="0", GOOS="linux", GOARCH="amd64")
     require(run([go, "version"], env=env).decode().startswith("go version go1.27.3 "), "PINNED_GO_TOOLCHAIN_REQUIRED")
-    require(scenario in ('libvirt', 'controller-provision', 'controller-restore'), 'FIXED_GUEST_SCENARIO_REQUIRED')
+    require(scenario in SCENARIOS, 'FIXED_GUEST_SCENARIO_REQUIRED')
     name = 'aster-node' if scenario == 'libvirt' else 'aster-controller'
     binary = work / name
     run([go, "build", "-mod=readonly", "-trimpath", "-buildvcs=false", "-ldflags=-s -w", "-o", str(binary), "./cmd/" + name], cwd=root / "aster-cloud", env=env, timeout=300)
@@ -670,7 +670,7 @@ def make_seed(work, root, source_sha, image_provenance, scenario="libvirt"):
         content = {'guest.py': (HERE / 'controller-provision-native-guest.py').read_bytes(), name: binary.read_bytes()}
         if scenario == 'controller-provision':
             content['controller-fixture.test'] = fixture.read_bytes()
-        if scenario == 'controller-restore':
+        if scenario in RESTORE_SCENARIOS:
             source = work / 'source-fixture'
             source.mkdir(mode=0o700)
             # Actual unprivileged, pinned MySQL snapshot, fully stopped and
@@ -709,10 +709,11 @@ def make_seed(work, root, source_sha, image_provenance, scenario="libvirt"):
 def guest_deadline_seconds(scenario):
     # Fixed scenario policy, not a caller-controlled/disabled timeout. Run
     # 40663478295 spent 13–18m in signed guest bootstrap before restore checks;
-    # the full encrypted import/readback/material suite needs its own budget.
-    require(scenario in ('libvirt', 'controller-provision', 'controller-restore'),
+    # every restore scenario retains that budget; each recreates actual import
+    # prerequisites and reports only the negative cases it executed.
+    require(scenario in SCENARIOS,
             'FIXED_GUEST_SCENARIO_REQUIRED')
-    return 3600 if scenario == 'controller-restore' else 1800
+    return 3600 if scenario in RESTORE_SCENARIOS else 1800
 
 
 def run_vm(arguments, work, metadata):
@@ -768,15 +769,24 @@ def run_vm(arguments, work, metadata):
         RELAY_PROOF["lifecycle"] = cleanup_relays(work, metadata)
 
 
-PROVISION_TRUE = set("passed real_apt real_systemd real_mysql actual_installer actual_controller target_sealed exact_encoding_preserved credentials_verified runtime_ddl_denied foreign_account_refused lost_credential_refused_without_reset same_operation_preserved maintenance_authentication_verified maintenance_drift_refused maintenance_nonroot_denied source_fixture_synthetic".split())
+RESTORE_SCENARIOS = ('controller-restore-data', 'controller-restore-sessions', 'controller-restore-configuration')
+SCENARIOS = ('libvirt', 'controller-provision', *RESTORE_SCENARIOS)
+PROVISION_COMMON = set("passed real_apt real_systemd real_mysql actual_installer actual_controller target_sealed exact_encoding_preserved credentials_verified runtime_ddl_denied same_operation_preserved source_fixture_synthetic".split())
+PROVISION_NEGATIVE = set("foreign_account_refused lost_credential_refused_without_reset maintenance_authentication_verified maintenance_drift_refused maintenance_nonroot_denied".split())
+PROVISION_TRUE = PROVISION_COMMON | PROVISION_NEGATIVE
 PROVISION_FALSE = set("database_restored source_host_export_verified node_takeover_verified migration_ready kvm_ready".split())
-RESTORE_TRUE = PROVISION_TRUE | set("database_restored real_source_database_snapshot exact_rows_verified read_only_reentry_verified modified_data_refused removed_constraint_refused foreign_database_refused runtime_materials_staged runtime_material_drift_refused runtime_candidate_remains_fenced sessions_revoked session_transition_exact_readback session_transition_explicit_recovery configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage".split())
-RESTORE_FALSE = (PROVISION_FALSE - {'database_restored'}) | {'configuration_published', 'session_browser_verified'}
+RESTORE_COMMON = PROVISION_COMMON | set("database_restored real_source_database_snapshot exact_rows_verified runtime_materials_staged runtime_candidate_remains_fenced".split())
+RESTORE_EVIDENCE = {
+    'controller-restore-data': RESTORE_COMMON | PROVISION_NEGATIVE | set("read_only_reentry_verified modified_data_refused removed_constraint_refused foreign_database_refused runtime_material_drift_refused".split()),
+    'controller-restore-sessions': RESTORE_COMMON | set("sessions_revoked session_transition_exact_readback session_transition_explicit_recovery".split()),
+    'controller-restore-configuration': RESTORE_COMMON | set("sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced".split()),
+}
+RESTORE_FALSE = (PROVISION_FALSE - {'database_restored'}) | {'session_browser_verified'}
 
 
 def validate_result(result, metadata):
-    if metadata.get('scenario') in ('controller-provision', 'controller-restore'):
-        true, false = (RESTORE_TRUE, RESTORE_FALSE) if metadata['scenario'] == 'controller-restore' else (PROVISION_TRUE, PROVISION_FALSE)
+    if metadata.get('scenario') in ('controller-provision', *RESTORE_SCENARIOS):
+        true, false = (RESTORE_EVIDENCE[metadata['scenario']], RESTORE_FALSE) if metadata['scenario'] in RESTORE_SCENARIOS else (PROVISION_TRUE, PROVISION_FALSE)
         require(isinstance(result, dict) and set(result) == true | false |
                 {'schema', 'scenario', 'source_sha', 'ubuntu', 'image_sha256'}, 'GUEST_RESULT_SCHEMA_REJECTED')
         require(result['schema'] == 1 and result['scenario'] == metadata['scenario'] and
@@ -903,11 +913,10 @@ def execute(args):
                        explicit_kvm_denial=result["explicit_kvm_denial"], non_kvm_doctor_checks_passed=result["non_kvm_doctor_checks_passed"],
                        scope="Software preparation and explicit no-KVM doctor denial only; not a real KVM guest or production deployment acceptance.")
     else:
-        summary.update({k: result[k] for k in PROVISION_TRUE | PROVISION_FALSE})
+        summary.update({k: result[k] for k in ((PROVISION_TRUE | PROVISION_FALSE) if scenario == "controller-provision" else (RESTORE_EVIDENCE[scenario] | RESTORE_FALSE))})
         summary.update(scenario=scenario, scope="Actual target-only APT/MySQL provisioning with synthetic source records; no data restore, source-host export, activation, reboot or node takeover.")
-        if scenario == 'controller-restore':
-            summary.update({k: result[k] for k in RESTORE_TRUE | RESTORE_FALSE})
-            summary['scope'] = 'Real isolated MySQL snapshot and root target import/readback. Source host metadata remains synthetic; no real source-host export, activation, reboot or node takeover.'
+        if scenario in RESTORE_SCENARIOS:
+            summary['scope'] = 'Scenario-scoped real MySQL import, runtime materials and ' + scenario.removeprefix('controller-restore-') + ' checks. Other scenarios require separate same-source evidence. Source host metadata remains synthetic; no source-host export, activation, reboot or node takeover.'
     summary.update(schema=1, host_network_unchanged=True, tcg_only=True,
                    host_network_proof=HOST_PROOF, host_network_pre_vm_proof=HOST_PRE_VM_PROOF,
                    host_process_isolation_verified=True, sandbox_selftests_passed=True, relay_cleanup_verified=True,
@@ -920,7 +929,7 @@ def main(argv=None):
     global OUTPUT_CREATED, VM_PROGRESS, HOST_PROOF, HOST_PRE_VM_PROOF, GUEST_RESULT_SEEN, RELAY_PROOF, SANDBOX_PROOF
     OUTPUT_CREATED, VM_PROGRESS, HOST_PROOF, HOST_PRE_VM_PROOF, GUEST_RESULT_SEEN, RELAY_PROOF, SANDBOX_PROOF = None, [], {}, {}, False, {}, {}
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=("libvirt", "controller-provision", "controller-restore"), default="libvirt")
+    parser.add_argument("--scenario", choices=SCENARIOS, default="libvirt")
     parser.add_argument("--ubuntu", choices=sorted(IMAGES), required=True)
     parser.add_argument("--source-root", required=True)
     parser.add_argument("--source-sha", required=True)

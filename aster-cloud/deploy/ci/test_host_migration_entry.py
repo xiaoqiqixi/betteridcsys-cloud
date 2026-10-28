@@ -18,7 +18,7 @@ class HostMigrationEntry(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         value = json.loads(r.stdout)
         self.assertEqual(value['protocol'], 'aster.controller-migration/1')
-        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan'])
+        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume'])
         self.assertIs(value['export_restore'], False)
         self.assertIs(value['migration_ready'], False)
 
@@ -56,6 +56,17 @@ class HostMigrationEntry(unittest.TestCase):
                 self.assertEqual(r.returncode, 1)
                 self.assertEqual(r.stdout, b'')
                 self.assertNotIn(b'PRIVATE_SENTINEL', r.stderr)
+
+    def test_publication_commands_never_accept_free_paths_or_implicit_approval(self):
+        for action in ('target-configuration-publish','target-configuration-status','target-configuration-resume'):
+            for extra in ((), ('--operation','../escape'), ('--operation','a'*32,'--approve'),
+                          ('--operation','a'*32,'--force'), ('--operation','a'*32,'--destination','/etc'),
+                          ('--operation','a'*32,'--approval','PRIVATE_SENTINEL')):
+                with self.subTest(action=action,extra=extra):
+                    result=self.invoke(action,*extra)
+                    self.assertEqual(result.returncode,1)
+                    self.assertEqual(result.stdout,b'')
+                    self.assertNotIn(b'PRIVATE_SENTINEL',result.stderr)
 
 
 if __name__ == '__main__':

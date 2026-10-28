@@ -28,7 +28,11 @@ type TargetDatabasePlan struct {
 }
 
 func withTargetArchive(operation string, action func(TargetPlan, string, *Archive) error) error {
-	_, e := planTargetArchive(operation, func(plan TargetPlan, a *Archive) error {
+	return withTargetArchiveMode(operation, false, action)
+}
+
+func withTargetArchiveMode(operation string, configuration bool, action func(TargetPlan, string, *Archive) error) error {
+	_, e := planTargetArchiveMode(operation, configuration, func(plan TargetPlan, a *Archive) error {
 		dir := filepath.Join(targetRoot, operation)
 		raw, e := targetRead(filepath.Join(dir, "plan.json"), 4096)
 		var approved TargetPlan

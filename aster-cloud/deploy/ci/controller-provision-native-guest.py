@@ -164,7 +164,13 @@ def execute(metadata):
     inputs = Path('/var/lib/aster-controller-restore') / operation
     inputs.parent.mkdir(mode=0o700)
     inputs.mkdir(mode=0o700)
-    restoring = metadata['scenario'] == 'controller-restore'
+    scenario = metadata['scenario']
+    require(scenario in ('controller-provision', 'controller-restore-data', 'controller-restore-sessions', 'controller-restore-configuration'))
+    restoring = scenario != 'controller-provision'
+    data_checks = scenario == 'controller-restore-data'
+    session_checks = scenario == 'controller-restore-sessions'
+    configuration_checks = scenario == 'controller-restore-configuration'
+    provision_checks = not restoring or data_checks
     if restoring:
         for name in ('backup.age', 'recovery.key', 'request.json'):
             private(inputs / name, (ROOT / name).read_bytes())
@@ -221,74 +227,75 @@ def execute(metadata):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     database, runtime_user, migration_user = module.restore_database_names(operation)
-    progress('target-maintenance')
-    # The package-created maintenance account is hardened, not allowlisted by
-    # name. Check real peer authentication and refusal without credential reset.
-    maintenance = json.loads((directory / 'maintenance-auth-intent.json').read_bytes())
-    require(maintenance['before']['mode'] in ('password', 'root-socket'))
-    expected_maintenance = {'plugin': 'auth_socket', 'mapping': 'root', 'locked': 'N'}
-    maintenance_sql = "SELECT JSON_OBJECT('plugin',plugin,'mapping',authentication_string,'locked',account_locked) FROM mysql.user WHERE User='debian-sys-maint' AND Host='localhost';\n"
-    require(module._query(directory, maintenance_sql) == expected_maintenance)
-    # Ubuntu's MySQL 8.0 has no --no-login-paths (introduced in 8.4).
-    # Use the documented login-file override, as production bootstrap does.
-    # Both OS identities can traverse this empty root-owned directory; an
-    # inaccessible /root path must not masquerade as an authentication denial.
-    client_home = Path('/run') / ('aster-native-mysql-client-' + NONCE)
-    client_home.mkdir(mode=0o755)
-    client_home.chmod(0o755)
-    client_env = {**ENV, 'HOME': str(client_home), 'MYSQL_TEST_LOGIN_FILE': str(client_home / 'absent-login-file')}
-    require(not list(client_home.iterdir()))
-    maint_command = ['/usr/bin/mysql', '--no-defaults', '--protocol=SOCKET',
-        '--socket=/run/mysqld/mysqld.sock', '--user=debian-sys-maint', '--batch', '--raw', '--skip-column-names', '--skip-reconnect', '--connect-timeout=5']
-    progress('target-maintenance-root-login')
-    require(run(maint_command, env=client_env, data=b'SELECT CURRENT_USER();\n').stdout == b'debian-sys-maint@localhost\n')
-    progress('target-maintenance-nonroot-login')
-    denied = subprocess.run(['/usr/sbin/runuser', '--preserve-environment', '--user', 'nobody', '--', *maint_command],
-        input=b'SELECT CURRENT_USER();\n', env=client_env, cwd='/',
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-    require(denied.returncode == 1 and not denied.stdout and re.match(rb'^ERROR (1045|1698) \(28000\)', denied.stderr),
-            'TARGET_NATIVE_REFUSAL_UNCONFIRMED')
-    require(not list(client_home.iterdir()))
-    client_home.rmdir()  # Only the exact empty directory this fixture created.
-    # Simulate loss of only the completion acknowledgement: immutable intent
-    # plus exact authentication/grants can reconstruct that same confirmation.
-    progress('target-maintenance-confirmation')
-    confirmation = directory / 'maintenance-auth-verified.json'
-    retained_confirmation = ROOT / 'retained-maintenance-confirmation.json'
-    confirmation.rename(retained_confirmation)
-    require(json.loads(entry('target-provision').stdout) == expected)
-    require(sha(confirmation) == sha(retained_confirmation) == hashes['maintenance-auth-verified.json'])
-    # Test-owned tampering is restored ONLY by this disposable fixture. The
-    # production command must leave every changed credential untouched.
-    progress('target-maintenance-drift')
-    for alteration in ("IDENTIFIED WITH auth_socket AS 'nobody'", "IDENTIFIED WITH caching_sha2_password BY RANDOM PASSWORD"):
-        module.mysql_sql(directory, "ALTER USER 'debian-sys-maint'@'localhost' " + alteration + ";\n")
-        changed = module.mysql_sql(directory, "SELECT SHA2(CONCAT(plugin,CHAR(0),authentication_string),256) FROM mysql.user WHERE User='debian-sys-maint' AND Host='localhost';\n")
-        entry('target-provision', 'TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED' if "'nobody'" in alteration else 'TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED')
-        require(module.mysql_sql(directory, "SELECT SHA2(CONCAT(plugin,CHAR(0),authentication_string),256) FROM mysql.user WHERE User='debian-sys-maint' AND Host='localhost';\n") == changed)
-        require({name: sha(directory / name) for name in private_files} == hashes)
-        module.mysql_sql(directory, "ALTER USER 'debian-sys-maint'@'localhost' IDENTIFIED WITH auth_socket AS 'root';\n")
-    grant_database = database.replace('_', '\\_')
-    module.mysql_sql(directory, "GRANT SELECT ON `" + grant_database + "`.* TO 'debian-sys-maint'@'localhost';\n")
-    altered_grants = module.mysql_sql(directory, "SHOW GRANTS FOR 'debian-sys-maint'@'localhost';\n")
-    entry('target-provision', 'TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED')
-    require(module.mysql_sql(directory, "SHOW GRANTS FOR 'debian-sys-maint'@'localhost';\n") == altered_grants)
-    module.mysql_sql(directory, "REVOKE SELECT ON `" + grant_database + "`.* FROM 'debian-sys-maint'@'localhost';\n")
-    module.mysql_sql(directory, "CREATE USER 'debian-sys-maint'@'%' ACCOUNT LOCK;\n")
-    entry('target-provision', 'TARGET_RESTORE_SERVER_INVENTORY_REJECTED')
-    module.mysql_sql(directory, "DROP USER 'debian-sys-maint'@'%';\n")
-    # auth_socket permits a same-named OS user as well as AS 'root'. A newly
-    # introduced NSS principal must therefore block all further restore steps.
-    progress('target-maintenance-nss')
-    run(['/usr/sbin/useradd', '--no-create-home', '--no-user-group', '--gid', '65534',
-         '--shell', '/usr/sbin/nologin', 'debian-sys-maint'])
-    try:
-        entry('target-provision', 'TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED')
+    if provision_checks:
+        progress('target-maintenance')
+        # The package-created maintenance account is hardened, not allowlisted by
+        # name. Check real peer authentication and refusal without credential reset.
+        maintenance = json.loads((directory / 'maintenance-auth-intent.json').read_bytes())
+        require(maintenance['before']['mode'] in ('password', 'root-socket'))
+        expected_maintenance = {'plugin': 'auth_socket', 'mapping': 'root', 'locked': 'N'}
+        maintenance_sql = "SELECT JSON_OBJECT('plugin',plugin,'mapping',authentication_string,'locked',account_locked) FROM mysql.user WHERE User='debian-sys-maint' AND Host='localhost';\n"
         require(module._query(directory, maintenance_sql) == expected_maintenance)
-    finally:
-        run(['/usr/sbin/userdel', 'debian-sys-maint'])
-    require(json.loads(entry('target-provision').stdout) == expected)
-    require({name: sha(directory / name) for name in private_files} == hashes)
+        # Ubuntu's MySQL 8.0 has no --no-login-paths (introduced in 8.4).
+        # Use the documented login-file override, as production bootstrap does.
+        # Both OS identities can traverse this empty root-owned directory; an
+        # inaccessible /root path must not masquerade as an authentication denial.
+        client_home = Path('/run') / ('aster-native-mysql-client-' + NONCE)
+        client_home.mkdir(mode=0o755)
+        client_home.chmod(0o755)
+        client_env = {**ENV, 'HOME': str(client_home), 'MYSQL_TEST_LOGIN_FILE': str(client_home / 'absent-login-file')}
+        require(not list(client_home.iterdir()))
+        maint_command = ['/usr/bin/mysql', '--no-defaults', '--protocol=SOCKET',
+            '--socket=/run/mysqld/mysqld.sock', '--user=debian-sys-maint', '--batch', '--raw', '--skip-column-names', '--skip-reconnect', '--connect-timeout=5']
+        progress('target-maintenance-root-login')
+        require(run(maint_command, env=client_env, data=b'SELECT CURRENT_USER();\n').stdout == b'debian-sys-maint@localhost\n')
+        progress('target-maintenance-nonroot-login')
+        denied = subprocess.run(['/usr/sbin/runuser', '--preserve-environment', '--user', 'nobody', '--', *maint_command],
+            input=b'SELECT CURRENT_USER();\n', env=client_env, cwd='/',
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        require(denied.returncode == 1 and not denied.stdout and re.match(rb'^ERROR (1045|1698) \(28000\)', denied.stderr),
+                'TARGET_NATIVE_REFUSAL_UNCONFIRMED')
+        require(not list(client_home.iterdir()))
+        client_home.rmdir()  # Only the exact empty directory this fixture created.
+        # Simulate loss of only the completion acknowledgement: immutable intent
+        # plus exact authentication/grants can reconstruct that same confirmation.
+        progress('target-maintenance-confirmation')
+        confirmation = directory / 'maintenance-auth-verified.json'
+        retained_confirmation = ROOT / 'retained-maintenance-confirmation.json'
+        confirmation.rename(retained_confirmation)
+        require(json.loads(entry('target-provision').stdout) == expected)
+        require(sha(confirmation) == sha(retained_confirmation) == hashes['maintenance-auth-verified.json'])
+        # Test-owned tampering is restored ONLY by this disposable fixture. The
+        # production command must leave every changed credential untouched.
+        progress('target-maintenance-drift')
+        for alteration in ("IDENTIFIED WITH auth_socket AS 'nobody'", "IDENTIFIED WITH caching_sha2_password BY RANDOM PASSWORD"):
+            module.mysql_sql(directory, "ALTER USER 'debian-sys-maint'@'localhost' " + alteration + ";\n")
+            changed = module.mysql_sql(directory, "SELECT SHA2(CONCAT(plugin,CHAR(0),authentication_string),256) FROM mysql.user WHERE User='debian-sys-maint' AND Host='localhost';\n")
+            entry('target-provision', 'TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED' if "'nobody'" in alteration else 'TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED')
+            require(module.mysql_sql(directory, "SELECT SHA2(CONCAT(plugin,CHAR(0),authentication_string),256) FROM mysql.user WHERE User='debian-sys-maint' AND Host='localhost';\n") == changed)
+            require({name: sha(directory / name) for name in private_files} == hashes)
+            module.mysql_sql(directory, "ALTER USER 'debian-sys-maint'@'localhost' IDENTIFIED WITH auth_socket AS 'root';\n")
+        grant_database = database.replace('_', '\\_')
+        module.mysql_sql(directory, "GRANT SELECT ON `" + grant_database + "`.* TO 'debian-sys-maint'@'localhost';\n")
+        altered_grants = module.mysql_sql(directory, "SHOW GRANTS FOR 'debian-sys-maint'@'localhost';\n")
+        entry('target-provision', 'TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED')
+        require(module.mysql_sql(directory, "SHOW GRANTS FOR 'debian-sys-maint'@'localhost';\n") == altered_grants)
+        module.mysql_sql(directory, "REVOKE SELECT ON `" + grant_database + "`.* FROM 'debian-sys-maint'@'localhost';\n")
+        module.mysql_sql(directory, "CREATE USER 'debian-sys-maint'@'%' ACCOUNT LOCK;\n")
+        entry('target-provision', 'TARGET_RESTORE_SERVER_INVENTORY_REJECTED')
+        module.mysql_sql(directory, "DROP USER 'debian-sys-maint'@'%';\n")
+        # auth_socket permits a same-named OS user as well as AS 'root'. A newly
+        # introduced NSS principal must therefore block all further restore steps.
+        progress('target-maintenance-nss')
+        run(['/usr/sbin/useradd', '--no-create-home', '--no-user-group', '--gid', '65534',
+             '--shell', '/usr/sbin/nologin', 'debian-sys-maint'])
+        try:
+            entry('target-provision', 'TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED')
+            require(module._query(directory, maintenance_sql) == expected_maintenance)
+        finally:
+            run(['/usr/sbin/userdel', 'debian-sys-maint'])
+        require(json.loads(entry('target-provision').stdout) == expected)
+        require({name: sha(directory / name) for name in private_files} == hashes)
     progress('target-credentials')
     binding = json.loads((directory / 'restore-provision.json').read_bytes())
     require(binding['operation_id'] == operation and binding['collation'] == 'utf8mb4_bin')
@@ -308,47 +315,52 @@ def execute(metadata):
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
     require(denied.returncode == 1 and not denied.stdout and re.match(rb'^ERROR 1142 \(42000\)', denied.stderr),
             'TARGET_NATIVE_REFUSAL_UNCONFIRMED')
-    progress('resume')
-    require(json.loads(entry('target-provision').stdout) == expected)
-    require({name: sha(directory / name) for name in private_files} == hashes and (sha(seal), sha(state)) == before)
-    progress('target-refusals')
-    # Test-owned locked account: production never removes unknown accounts.
-    module.mysql_sql(directory, "CREATE USER 'aster_native_foreign'@'localhost' ACCOUNT LOCK;\n")
-    entry('target-provision', 'TARGET_RESTORE_SERVER_INVENTORY_REJECTED')
-    require({name: sha(directory / name) for name in private_files} == hashes)
-    module.mysql_sql(directory, "DROP USER 'aster_native_foreign'@'localhost';\n")
-    credentials = directory / 'runtime-mysql-dsn'
-    retained = ROOT / 'retained-runtime-dsn'
-    before_auth = module.mysql_sql(directory, "SELECT SHA2(authentication_string,256) FROM mysql.user WHERE User='" + runtime_user + "' AND Host='localhost';\n")
-    credentials.rename(retained)
-    entry('target-provision', 'TARGET_DATABASE_CREATE_UNCONFIRMED')
-    require(not credentials.exists() and sha(retained) == hashes['runtime-mysql-dsn'])
-    require(module.mysql_sql(directory, "SELECT SHA2(authentication_string,256) FROM mysql.user WHERE User='" + runtime_user + "' AND Host='localhost';\n") == before_auth)
-    retained.rename(credentials)
+    if provision_checks:
+        progress('resume')
+        require(json.loads(entry('target-provision').stdout) == expected)
+        require({name: sha(directory / name) for name in private_files} == hashes and (sha(seal), sha(state)) == before)
+        progress('target-refusals')
+        # Test-owned locked account: production never removes unknown accounts.
+        module.mysql_sql(directory, "CREATE USER 'aster_native_foreign'@'localhost' ACCOUNT LOCK;\n")
+        entry('target-provision', 'TARGET_RESTORE_SERVER_INVENTORY_REJECTED')
+        require({name: sha(directory / name) for name in private_files} == hashes)
+        module.mysql_sql(directory, "DROP USER 'aster_native_foreign'@'localhost';\n")
+        credentials = directory / 'runtime-mysql-dsn'
+        retained = ROOT / 'retained-runtime-dsn'
+        before_auth = module.mysql_sql(directory, "SELECT SHA2(authentication_string,256) FROM mysql.user WHERE User='" + runtime_user + "' AND Host='localhost';\n")
+        credentials.rename(retained)
+        entry('target-provision', 'TARGET_DATABASE_CREATE_UNCONFIRMED')
+        require(not credentials.exists() and sha(retained) == hashes['runtime-mysql-dsn'])
+        require(module.mysql_sql(directory, "SELECT SHA2(authentication_string,256) FROM mysql.user WHERE User='" + runtime_user + "' AND Host='localhost';\n") == before_auth)
+        retained.rename(credentials)
     require((sha(seal), sha(state)) == before and not Path('/etc/aster-controller').exists())
     require(not Path('/etc/systemd/system/aster-controller.service').exists())
     # The empty owned DB remains unactivated, with its real provenance marker.
     info = module._query(directory, "SELECT JSON_OBJECT('tables',COUNT(*)) FROM information_schema.TABLES WHERE TABLE_SCHEMA='" + database + "';\n")
     require(info == {'tables': 1})
-    true = 'passed real_apt real_systemd real_mysql actual_installer actual_controller target_sealed exact_encoding_preserved credentials_verified runtime_ddl_denied foreign_account_refused lost_credential_refused_without_reset same_operation_preserved maintenance_authentication_verified maintenance_drift_refused maintenance_nonroot_denied source_fixture_synthetic'.split()
+    true = 'passed real_apt real_systemd real_mysql actual_installer actual_controller target_sealed exact_encoding_preserved credentials_verified runtime_ddl_denied same_operation_preserved source_fixture_synthetic'.split()
+    if provision_checks:
+        true += 'foreign_account_refused lost_credential_refused_without_reset maintenance_authentication_verified maintenance_drift_refused maintenance_nonroot_denied'.split()
     false = 'database_restored source_host_export_verified node_takeover_verified migration_ready kvm_ready'.split()
     report = {**{k: True for k in true}, **{k: False for k in false}, 'schema': 1, 'scenario': metadata['scenario'],
               **{k: metadata[k] for k in ('source_sha', 'ubuntu', 'image_sha256')}}
     if restoring:
-        # Restore the same owned provisioning operation after the deliberate
-        # lost-credential refusal, without replacing passwords or the marker.
-        require(json.loads(entry('target-provision').stdout) == expected)
-        module.mysql_sql(directory, 'CREATE DATABASE aster_native_foreign;\n')
-        entry('target-restore', 'TARGET_RESTORE_INVENTORY_UNCONFIRMED')
-        require(not (directory / 'import-started.json').exists() and not (directory / 'import-approval.json').exists())
-        require(module._query(directory, "SELECT JSON_OBJECT('schemas',COUNT(*)) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='aster_native_foreign';\n") == {'schemas': 1})
-        # Only the fixture removes its own foreign DB; production never does.
-        module.mysql_sql(directory, 'DROP DATABASE aster_native_foreign;\n')
+        if data_checks:
+            # Restore the same owned provisioning operation after the deliberate
+            # lost-credential refusal, without replacing passwords or the marker.
+            require(json.loads(entry('target-provision').stdout) == expected)
+            module.mysql_sql(directory, 'CREATE DATABASE aster_native_foreign;\n')
+            entry('target-restore', 'TARGET_RESTORE_INVENTORY_UNCONFIRMED')
+            require(not (directory / 'import-started.json').exists() and not (directory / 'import-approval.json').exists())
+            require(module._query(directory, "SELECT JSON_OBJECT('schemas',COUNT(*)) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='aster_native_foreign';\n") == {'schemas': 1})
+            # Only the fixture removes its own foreign DB; production never does.
+            module.mysql_sql(directory, 'DROP DATABASE aster_native_foreign;\n')
         progress('target-import')
-        entry('target-data-status', 'TARGET_IMPORT_NOT_STARTED')
-        entry('target-materials', 'TARGET_IMPORT_NOT_STARTED')
-        entry('target-revoke-sessions', 'TARGET_IMPORT_NOT_STARTED')
-        require(not (inputs / 'runtime').exists() and not (inputs / 'materials-started.json').exists())
+        if data_checks:
+            entry('target-data-status', 'TARGET_IMPORT_NOT_STARTED')
+            entry('target-materials', 'TARGET_IMPORT_NOT_STARTED')
+            entry('target-revoke-sessions', 'TARGET_IMPORT_NOT_STARTED')
+            require(not (inputs / 'runtime').exists() and not (inputs / 'materials-started.json').exists())
         imported = json.loads(entry('target-restore').stdout)
         require(imported == {'schema': 1, 'operation_id': operation, 'database_restored': True,
             'read_only_verification': True, 'target_restore_approved': False, 'migration_ready': False,
@@ -363,8 +375,9 @@ def execute(metadata):
         require(run(runtime_command, data=b'SELECT revision FROM controller_console_users;\n').stdout == b'18446744073709551614\n')
         require(run(runtime_command, data=b'SELECT COUNT(*) FROM controller_console_sessions;\n').stdout == b'1\n')
         require(run(runtime_command, data=b"SELECT AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='controller_audit';\n").stdout == b'42\n')
-        entry('target-revoke-sessions', 'TARGET_COMMAND_REJECTED')
-        require(not (inputs / 'sessions-started.json').exists())
+        if data_checks:
+            entry('target-revoke-sessions', 'TARGET_COMMAND_REJECTED')
+            require(not (inputs / 'sessions-started.json').exists())
         progress('target-readback')
         records = private_files + ('import-approval.json', 'import-started.json', 'structure.json')
         committed_hashes = {name: sha(directory / name) for name in records}
@@ -372,11 +385,13 @@ def execute(metadata):
         try:
             # MySQL itself rejects writes, including privileged writes. A lost
             # response/repeated root invocation must do only exact readback.
-            require(json.loads(entry('target-restore').stdout) == imported)
-            require(json.loads(entry('target-data-status').stdout) == imported)
+            if data_checks:
+                require(json.loads(entry('target-restore').stdout) == imported)
+                require(json.loads(entry('target-data-status').stdout) == imported)
             progress('target-materials')
-            entry('target-material-status', 'TARGET_COMMAND_REJECTED')
-            require(not (inputs / 'runtime').exists() and not (inputs / 'materials-started.json').exists())
+            if data_checks:
+                entry('target-material-status', 'TARGET_COMMAND_REJECTED')
+                require(not (inputs / 'runtime').exists() and not (inputs / 'materials-started.json').exists())
             staged = json.loads(entry('target-materials').stdout)
             require(staged == {'schema': 1, 'operation_id': operation, 'material_references': 6,
                 'materials_staged': True, 'read_only_verification': False, 'configuration_published': False,
@@ -398,87 +413,120 @@ def execute(metadata):
             stage_hashes = {p.name: sha(p) for p in candidate.iterdir()}
             intent_hash = sha(inputs / 'materials-started.json')
             expected_stage = {**staged, 'read_only_verification': True}
-            require(json.loads(entry('target-materials').stdout) == expected_stage)
-            require(json.loads(entry('target-material-status').stdout) == expected_stage)
+            if data_checks:
+                require(json.loads(entry('target-materials').stdout) == expected_stage)
+                require(json.loads(entry('target-material-status').stdout) == expected_stage)
             # Staged files do not grant runtime admission, even with a complete
             # valid configuration and real restored database credentials.
             denied_runtime = subprocess.run([str(version / 'bin/aster-controller'), 'check', '-config', str(candidate / 'config.json')],
                 env=ENV, capture_output=True, timeout=30)
             require(denied_runtime.returncode == 78 and not denied_runtime.stdout and
                     json.loads(denied_runtime.stderr).get('code') == 'CONTROLLER_MIGRATION_FENCED')
-            material = Path(config['billing_token_file'])
-            original = material.read_bytes()
-            try:
-                material.write_bytes(original + b'changed')
-                entry('target-materials', 'TARGET_COMMAND_REJECTED')
-                entry('target-material-status', 'TARGET_COMMAND_REJECTED')
-                require(material.read_bytes() == original + b'changed')
-            finally:
-                material.write_bytes(original)  # Fixture-only fault cleanup, not product repair.
+            if data_checks:
+                material = Path(config['billing_token_file'])
+                original = material.read_bytes()
+                try:
+                    material.write_bytes(original + b'changed')
+                    entry('target-materials', 'TARGET_COMMAND_REJECTED')
+                    entry('target-material-status', 'TARGET_COMMAND_REJECTED')
+                    require(material.read_bytes() == original + b'changed')
+                finally:
+                    material.write_bytes(original)  # Fixture-only fault cleanup, not product repair.
             require({p.name: sha(p) for p in candidate.iterdir()} == stage_hashes and
                     sha(inputs / 'materials-started.json') == intent_hash)
         finally:
             module.mysql_sql(directory, 'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
         require({name: sha(directory / name) for name in records} == committed_hashes)
-        entry('target-provision', 'TARGET_IMPORT_ALREADY_STARTED_USE_DATA_STATUS')
-        progress('target-data-refusals')
-        module.mysql_sql(directory, "UPDATE `" + database + "`.controller_nodes SET datacenter_id='changed' WHERE id='node-a';\n")
-        entry('target-data-status', 'TARGET_COMMAND_REJECTED')
-        entry('target-restore', 'TARGET_COMMAND_REJECTED')
-        entry('target-material-status', 'TARGET_COMMAND_REJECTED')
-        require({p.name: sha(p) for p in candidate.iterdir()} == stage_hashes)
-        require(run(runtime_command, data=b"SELECT datacenter_id FROM controller_nodes WHERE id='node-a';\n").stdout == b'changed\n')
-        module.mysql_sql(directory, "UPDATE `" + database + "`.controller_nodes SET datacenter_id=CONVERT(0xE9A699E6B8AF USING utf8mb4) WHERE id='node-a';\n")
-        require(json.loads(entry('target-data-status').stdout) == imported)
-        module.mysql_sql(directory, "ALTER TABLE `" + database + "`.controller_console_sessions DROP FOREIGN KEY controller_console_sessions_user_fk;\n")
-        entry('target-data-status', 'TARGET_COMMAND_REJECTED')
-        entry('target-restore', 'TARGET_COMMAND_REJECTED')
-        module.mysql_sql(directory, "ALTER TABLE `" + database + "`.controller_console_sessions ADD CONSTRAINT controller_console_sessions_user_fk FOREIGN KEY(user_id) REFERENCES controller_console_users(id) ON DELETE CASCADE;\n")
-        require(json.loads(entry('target-data-status').stdout) == imported)
+        report.update({key: True for key in ('database_restored', 'real_source_database_snapshot', 'exact_rows_verified',
+            'runtime_materials_staged', 'runtime_candidate_remains_fenced')})
+        report['session_browser_verified'] = False
+
+        def finish():
+            # The actual ordinary runtime remains refused in every scenario;
+            # importing, revoking sessions or publishing never grants takeover.
+            denied_runtime = subprocess.run([str(version / 'bin/aster-controller'), 'check', '-config', str(candidate / 'config.json')],
+                env=ENV, capture_output=True, timeout=30)
+            require(denied_runtime.returncode == 78 and not denied_runtime.stdout and
+                    json.loads(denied_runtime.stderr).get('code') == 'CONTROLLER_MIGRATION_FENCED')
+            require({name: sha(directory / name) for name in records} == committed_hashes and (sha(seal), sha(state)) == before)
+            require({p.name: sha(p) for p in candidate.iterdir()} == stage_hashes and sha(inputs / 'materials-started.json') == intent_hash)
+            require(Path('/etc/aster-controller').exists() == configuration_checks and
+                    not Path('/etc/systemd/system/aster-controller.service').exists())
+            return report
+
+        if data_checks:
+            entry('target-provision', 'TARGET_IMPORT_ALREADY_STARTED_USE_DATA_STATUS')
+            progress('target-data-refusals')
+            module.mysql_sql(directory, "UPDATE `" + database + "`.controller_nodes SET datacenter_id='changed' WHERE id='node-a';\n")
+            entry('target-data-status', 'TARGET_COMMAND_REJECTED')
+            entry('target-restore', 'TARGET_COMMAND_REJECTED')
+            entry('target-material-status', 'TARGET_COMMAND_REJECTED')
+            require({p.name: sha(p) for p in candidate.iterdir()} == stage_hashes)
+            require(run(runtime_command, data=b"SELECT datacenter_id FROM controller_nodes WHERE id='node-a';\n").stdout == b'changed\n')
+            module.mysql_sql(directory, "UPDATE `" + database + "`.controller_nodes SET datacenter_id=CONVERT(0xE9A699E6B8AF USING utf8mb4) WHERE id='node-a';\n")
+            require(json.loads(entry('target-data-status').stdout) == imported)
+            module.mysql_sql(directory, "ALTER TABLE `" + database + "`.controller_console_sessions DROP FOREIGN KEY controller_console_sessions_user_fk;\n")
+            entry('target-data-status', 'TARGET_COMMAND_REJECTED')
+            entry('target-restore', 'TARGET_COMMAND_REJECTED')
+            module.mysql_sql(directory, "ALTER TABLE `" + database + "`.controller_console_sessions ADD CONSTRAINT controller_console_sessions_user_fk FOREIGN KEY(user_id) REFERENCES controller_console_users(id) ON DELETE CASCADE;\n")
+            require(json.loads(entry('target-data-status').stdout) == imported)
+            report.update({key: True for key in ('read_only_reentry_verified', 'modified_data_refused',
+                'removed_constraint_refused', 'foreign_database_refused', 'runtime_material_drift_refused')})
+            return finish()
         progress('target-sessions')
-        entry('target-session-status', 'TARGET_COMMAND_REJECTED')
-        require(not (inputs / 'sessions-started.json').exists())
-        # Real SQL refusal after durable intent: no row mutation, no automatic
-        # retry on ordinary reentry, explicit same-operation resume only.
-        module.mysql_sql(directory, 'SET GLOBAL super_read_only=ON;\n')
-        try:
-            entry('target-revoke-sessions', 'TARGET_COMMAND_REJECTED')
-            session_intent = inputs / 'sessions-started.json'
-            require(session_intent.is_file() and stat.S_IMODE(session_intent.stat().st_mode) == 0o600)
-            session_hash = sha(session_intent)
-            entry('target-revoke-sessions', 'TARGET_COMMAND_REJECTED')
+        if session_checks:
             entry('target-session-status', 'TARGET_COMMAND_REJECTED')
-            require(run(runtime_command, data=b'SELECT COUNT(*) FROM controller_console_sessions;\n').stdout == b'1\n')
-            require(run(runtime_command, data=b'SELECT COUNT(*) FROM controller_identity_audit;\n').stdout == b'0\n')
+            require(not (inputs / 'sessions-started.json').exists())
+            # Real SQL refusal after durable intent: no row mutation, no automatic
+            # retry on ordinary reentry, explicit same-operation resume only.
+            module.mysql_sql(directory, 'SET GLOBAL super_read_only=ON;\n')
+            try:
+                entry('target-revoke-sessions', 'TARGET_COMMAND_REJECTED')
+                session_intent = inputs / 'sessions-started.json'
+                require(session_intent.is_file() and stat.S_IMODE(session_intent.stat().st_mode) == 0o600)
+                session_hash = sha(session_intent)
+                entry('target-revoke-sessions', 'TARGET_COMMAND_REJECTED')
+                entry('target-session-status', 'TARGET_COMMAND_REJECTED')
+                require(run(runtime_command, data=b'SELECT COUNT(*) FROM controller_console_sessions;\n').stdout == b'1\n')
+                require(run(runtime_command, data=b'SELECT COUNT(*) FROM controller_identity_audit;\n').stdout == b'0\n')
+                require(sha(session_intent) == session_hash)
+            finally:
+                module.mysql_sql(directory, 'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
+        revoked = json.loads(entry('target-session-resume' if session_checks else 'target-revoke-sessions').stdout)
+        session_intent = inputs / 'sessions-started.json'
+        if session_checks:
             require(sha(session_intent) == session_hash)
-        finally:
-            module.mysql_sql(directory, 'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
-        revoked = json.loads(entry('target-session-resume').stdout)
+        session_hash = sha(session_intent)
         require(revoked == {'schema': 1, 'operation_id': operation, 'revoked_sessions': 1,
             'sessions_revoked': True, 'audit_appended': True, 'exact_database_verified': True,
             'read_only_verification': False, 'target_activation_approved': False, 'migration_ready': False,
             'root_inventory_verified': True, 'database_restored': True, 'target_restore_approved': False})
         readonly_revoked = {**revoked, 'read_only_verification': True}
-        module.mysql_sql(directory, 'SET GLOBAL super_read_only=ON;\n')
-        try:
+        if session_checks:
+            module.mysql_sql(directory, 'SET GLOBAL super_read_only=ON;\n')
+            try:
+                require(json.loads(entry('target-session-status').stdout) == readonly_revoked)
+                require(json.loads(entry('target-revoke-sessions').stdout) == readonly_revoked)
+                require(json.loads(entry('target-material-status').stdout) == {**expected_stage, 'sessions_revoked': True})
+                require(run(runtime_command, data=b'SELECT COUNT(*) FROM controller_console_sessions;\n').stdout == b'0\n')
+                require(run(runtime_command, data=b'SELECT id,actor,action,target FROM controller_identity_audit;\n').stdout ==
+                        ('1\tcontroller-migration\tmigration.sessions_revoked\t' + operation + '\n').encode())
+                entry('target-session-resume', 'TARGET_COMMAND_REJECTED')
+                # Original-image status must not pretend the intentional session
+                # transition left the entire restored database byte-identical.
+                entry('target-data-status', 'TARGET_COMMAND_REJECTED')
+            finally:
+                module.mysql_sql(directory, 'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
+            run(runtime_command, data=b"INSERT INTO controller_console_sessions VALUES(UNHEX(REPEAT('42',32)),NULL,'2026-10-28','2027-01-01');\n")
+            entry('target-session-status', 'TARGET_COMMAND_REJECTED')
+            entry('target-material-status', 'TARGET_COMMAND_REJECTED')
+            run(runtime_command, data=b"DELETE FROM controller_console_sessions WHERE token_hash=UNHEX(REPEAT('42',32));\n")
             require(json.loads(entry('target-session-status').stdout) == readonly_revoked)
-            require(json.loads(entry('target-revoke-sessions').stdout) == readonly_revoked)
-            require(json.loads(entry('target-material-status').stdout) == {**expected_stage, 'sessions_revoked': True})
-            require(run(runtime_command, data=b'SELECT COUNT(*) FROM controller_console_sessions;\n').stdout == b'0\n')
-            require(run(runtime_command, data=b'SELECT id,actor,action,target FROM controller_identity_audit;\n').stdout ==
-                    ('1\tcontroller-migration\tmigration.sessions_revoked\t' + operation + '\n').encode())
-            entry('target-session-resume', 'TARGET_COMMAND_REJECTED')
-            # Original-image status must not pretend the intentional session
-            # transition left the entire restored database byte-identical.
-            entry('target-data-status', 'TARGET_COMMAND_REJECTED')
-        finally:
-            module.mysql_sql(directory, 'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
-        run(runtime_command, data=b"INSERT INTO controller_console_sessions VALUES(UNHEX(REPEAT('42',32)),NULL,'2026-10-28','2027-01-01');\n")
-        entry('target-session-status', 'TARGET_COMMAND_REJECTED')
-        entry('target-material-status', 'TARGET_COMMAND_REJECTED')
-        run(runtime_command, data=b"DELETE FROM controller_console_sessions WHERE token_hash=UNHEX(REPEAT('42',32));\n")
-        require(json.loads(entry('target-session-status').stdout) == readonly_revoked)
-        require(sha(session_intent) == session_hash and {p.name: sha(p) for p in candidate.iterdir()} == stage_hashes)
+            require(sha(session_intent) == session_hash and {p.name: sha(p) for p in candidate.iterdir()} == stage_hashes)
+            report.update({key: True for key in ('sessions_revoked', 'session_transition_exact_readback', 'session_transition_explicit_recovery')})
+            return finish()
+        require(configuration_checks)
+        report['sessions_revoked'] = True
         progress('target-configuration-plan')
         cert_path, key_path = inputs / 'configuration-tls.crt', inputs / 'configuration-tls.key'
         private(cert_path, b'')
@@ -492,7 +540,7 @@ def execute(metadata):
                    'listen': '127.0.0.1:9555', 'tls_mode': 'replacement'}
         private(inputs / 'configuration-request.json', json.dumps(request, separators=(',', ':')).encode())
         planned = json.loads(entry('target-configuration-plan').stdout)
-        require(set(planned) == {'schema','operation_id','plan','readonly','sessions_revoked','exact_database_verified',
+        require(set(planned) == {'schema','operation_id','plan','plan_sha256','readonly','sessions_revoked','exact_database_verified',
                                 'configuration_published','migration_ready','root_inventory_verified','database_restored','target_restore_approved'} and
                 all(planned[k] is True for k in ('readonly','sessions_revoked','exact_database_verified','root_inventory_verified','database_restored')) and
                 all(planned[k] is False for k in ('configuration_published','migration_ready','target_restore_approved')) and
@@ -518,19 +566,62 @@ def execute(metadata):
         require(not (inputs / 'configuration-started.json').exists() and not (inputs / 'configuration-approval.json').exists() and
                 not Path('/etc/aster-controller').exists() and not Path('/etc/systemd/system/aster-controller.service').exists() and
                 sha(session_intent) == session_hash and {p.name: sha(p) for p in candidate.iterdir()} == stage_hashes)
-        denied_runtime = subprocess.run([str(version / 'bin/aster-controller'), 'check', '-config', str(candidate / 'config.json')],
-            env=ENV, capture_output=True, timeout=30)
-        require(denied_runtime.returncode == 78 and not denied_runtime.stdout and
-                json.loads(denied_runtime.stderr).get('code') == 'CONTROLLER_MIGRATION_FENCED')
-        require({name: sha(directory / name) for name in records} == committed_hashes and (sha(seal), sha(state)) == before)
-        require(not Path('/etc/aster-controller').exists() and not Path('/etc/systemd/system/aster-controller.service').exists())
-        report.update({key: True for key in ('database_restored', 'real_source_database_snapshot', 'exact_rows_verified',
-            'read_only_reentry_verified', 'modified_data_refused', 'removed_constraint_refused', 'foreign_database_refused',
-            'runtime_materials_staged', 'runtime_material_drift_refused', 'runtime_candidate_remains_fenced',
-            'sessions_revoked', 'session_transition_exact_readback', 'session_transition_explicit_recovery',
-            'configuration_plan_verified', 'configuration_plan_readonly', 'configuration_plan_tls_drift_refused',
-            'configuration_plan_requires_exact_session_postimage')})
-        report.update({'configuration_published': False, 'session_browser_verified': False})
+        progress('target-configuration-publish')
+        entry('target-configuration-publish', 'TARGET_COMMAND_REJECTED')
+        approval = {'schema':1,'operation_id':operation,'target_plan_sha256':config_plan['target_plan_sha256'],
+                    'configuration_plan_sha256':planned['plan_sha256']}
+        private(inputs / 'configuration-approval.json', json.dumps(approval,separators=(',',':')).encode())
+        destination = Path('/etc/aster-controller')
+        destination.mkdir(mode=0o700)
+        entry('target-configuration-publish', 'TARGET_COMMAND_REJECTED')
+        require(not (inputs / 'configuration-started.json').exists() and not list(destination.iterdir()))
+        destination.rmdir()  # Only the empty directory injected by this fixture.
+        published = json.loads(entry('target-configuration-publish').stdout)
+        require(set(published) == {'schema','operation_id','plan','plan_sha256','intent_sha256','read_only_verification',
+                                  'configuration_published','target_activation_approved','migration_ready','sessions_revoked',
+                                  'exact_database_verified','root_inventory_verified','database_restored','target_restore_approved'} and
+                published['schema']==1 and published['operation_id']==operation and published['plan']==config_plan and
+                published['plan_sha256']==planned['plan_sha256'] and
+                all(published[k] is True for k in ('configuration_published','sessions_revoked','exact_database_verified','root_inventory_verified','database_restored')) and
+                all(published[k] is False for k in ('read_only_verification','target_activation_approved','migration_ready','target_restore_approved')) and
+                published['intent_sha256']==sha(inputs/'configuration-started.json'))
+        publication_hashes = {p.name:sha(p) for p in destination.iterdir()}
+        require(set(publication_hashes)=={'config.json','console.json','server.crt','server.key','manifest.json'} and
+                all(publication_hashes[f['name']]==f['sha256'] for f in config_plan['files']))
+        readonly_published = {**published,'read_only_verification':True}
+        module.mysql_sql(directory, 'SET GLOBAL super_read_only=ON;\n')
+        try:
+            require(json.loads(entry('target-configuration-status').stdout)==readonly_published)
+            require(json.loads(entry('target-configuration-publish').stdout)==readonly_published)
+        finally:
+            module.mysql_sql(directory, 'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
+        entry('target-configuration-resume', 'TARGET_COMMAND_REJECTED')
+        # Model a reachable pre-rename interruption with this fixture's own
+        # bytes and original durable intent; this is not a power-cut test.
+        stage = Path('/etc') / ('.aster-controller-configuration-' + operation)
+        destination.rename(stage)
+        (stage/'manifest.json').unlink()
+        (stage/'console.json').unlink()
+        entry('target-configuration-status','TARGET_COMMAND_REJECTED')
+        entry('target-configuration-publish','TARGET_COMMAND_REJECTED')
+        require(not (stage/'console.json').exists() and not destination.exists())
+        require(json.loads(entry('target-configuration-resume').stdout)==published)
+        require({p.name:sha(p) for p in destination.iterdir()}==publication_hashes and not stage.exists())
+        config_bytes=(destination/'config.json').read_bytes()
+        (destination/'config.json').write_bytes(config_bytes+b' ')
+        entry('target-configuration-status','TARGET_COMMAND_REJECTED')
+        require((destination/'config.json').read_bytes()==config_bytes+b' ')
+        (destination/'config.json').write_bytes(config_bytes)
+        denied_published = subprocess.run([str(version/'bin/aster-controller'),'check','-config',str(destination/'config.json')],env=ENV,capture_output=True,timeout=30)
+        require(denied_published.returncode==78 and not denied_published.stdout and
+                json.loads(denied_published.stderr).get('code')=='CONTROLLER_MIGRATION_FENCED')
+        require(not Path('/etc/systemd/system/aster-controller.service').exists() and
+                sha(session_intent)==session_hash and {p.name:sha(p) for p in candidate.iterdir()}==stage_hashes)
+        report.update({key: True for key in ('configuration_plan_verified', 'configuration_plan_readonly',
+            'configuration_plan_tls_drift_refused', 'configuration_plan_requires_exact_session_postimage',
+            'configuration_published', 'configuration_publication_readonly', 'configuration_partial_resume_verified',
+            'published_configuration_remains_fenced')})
+        return finish()
     return report
 
 

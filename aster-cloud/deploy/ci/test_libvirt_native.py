@@ -79,38 +79,19 @@ class NativeFixtureContract(unittest.TestCase):
         for name in ("libvirt-native.py", "libvirt-native-guest.py", "controller-provision-native-guest.py", "test_libvirt_native.py"):
             ast.parse((HERE / name).read_text(), feature_version=(3, 10))
 
-    def test_controller_restore_report_requires_import_readback_without_claiming_takeover(self):
-        metadata = {**self.metadata(), 'scenario': 'controller-restore'}
-        result = {**metadata, 'schema': 1, **{key: True for key in (
-            'passed', 'real_apt', 'real_systemd', 'real_mysql', 'actual_installer', 'actual_controller',
-            'target_sealed', 'exact_encoding_preserved', 'credentials_verified', 'runtime_ddl_denied',
-            'foreign_account_refused', 'lost_credential_refused_without_reset', 'same_operation_preserved',
-            'maintenance_authentication_verified', 'maintenance_drift_refused', 'maintenance_nonroot_denied',
-            'source_fixture_synthetic', 'database_restored', 'real_source_database_snapshot',
-            'exact_rows_verified', 'read_only_reentry_verified', 'modified_data_refused',
-            'removed_constraint_refused', 'foreign_database_refused', 'runtime_materials_staged',
-            'runtime_material_drift_refused', 'runtime_candidate_remains_fenced',
-            'sessions_revoked', 'session_transition_exact_readback', 'session_transition_explicit_recovery',
-            'configuration_plan_verified', 'configuration_plan_readonly', 'configuration_plan_tls_drift_refused',
-            'configuration_plan_requires_exact_session_postimage')}, **{key: False for key in (
-            'source_host_export_verified', 'node_takeover_verified', 'migration_ready', 'kvm_ready',
-            'configuration_published', 'session_browser_verified')}}
-        self.assertEqual(h.public_result(result, metadata), result)
-        for key in ('maintenance_authentication_verified', 'maintenance_drift_refused', 'maintenance_nonroot_denied',
-                    'database_restored', 'real_source_database_snapshot', 'read_only_reentry_verified',
-                    'modified_data_refused', 'removed_constraint_refused', 'foreign_database_refused',
-                    'runtime_materials_staged', 'runtime_material_drift_refused', 'runtime_candidate_remains_fenced',
-            'sessions_revoked', 'session_transition_exact_readback', 'session_transition_explicit_recovery',
-            'configuration_plan_verified', 'configuration_plan_readonly', 'configuration_plan_tls_drift_refused',
-            'configuration_plan_requires_exact_session_postimage'):
-            with self.subTest(key=key), self.assertRaises(h.Refused):
-                h.public_result({**result, key: False}, metadata)
-        for key in ('source_host_export_verified', 'node_takeover_verified', 'migration_ready', 'kvm_ready',
-                    'configuration_published', 'session_browser_verified'):
-            with self.subTest(key=key), self.assertRaises(h.Refused):
-                h.public_result({**result, key: True}, metadata)
+    def test_retired_monolithic_restore_scenario_is_not_accepted(self):
         with self.assertRaises(h.Refused):
-            h.public_result(result, {**metadata, 'scenario': 'controller-provision'})
+            h.guest_deadline_seconds('controller-restore')
+
+    def test_configuration_failure_reports_keep_fixed_phase_without_private_details(self):
+        metadata = {**self.metadata(), 'scenario': 'controller-restore-configuration'}
+        for phase in ('target-configuration-plan', 'target-configuration-publish'):
+            result = {**self.metadata(), 'schema': 1, 'passed': False, 'kvm_ready': False,
+                      'code': 'TARGET_NATIVE_ASSERTION_FAILED', 'phase': phase, 'private': 'not public'}
+            public = h.public_result(result, metadata)
+            self.assertEqual(public['phase'], phase)
+            self.assertFalse(public['passed'])
+            self.assertNotIn('private', public)
 
     def test_only_fixed_signed_dated_official_images(self):
         self.assertEqual(set(h.IMAGES), {"22.04", "24.04"})
@@ -121,6 +102,39 @@ class NativeFixtureContract(unittest.TestCase):
             self.assertNotEqual(sha, "0" * 64)
         self.assertEqual(h.IMAGES["22.04"][0], "jammy")
         self.assertEqual(h.IMAGES["24.04"][0], "noble")
+
+    def test_restore_scenarios_require_their_own_evidence_not_other_scenario_claims(self):
+        # Independent report contract. These samples test validation only; they
+        # are not fabricated evidence that a native guest executed successfully.
+        common = set('passed real_apt real_systemd real_mysql actual_installer actual_controller target_sealed exact_encoding_preserved credentials_verified runtime_ddl_denied same_operation_preserved source_fixture_synthetic database_restored real_source_database_snapshot exact_rows_verified runtime_materials_staged runtime_candidate_remains_fenced'.split())
+        denied = set('source_host_export_verified node_takeover_verified migration_ready kvm_ready session_browser_verified'.split())
+        phases = {
+            'data': set('foreign_account_refused lost_credential_refused_without_reset maintenance_authentication_verified maintenance_drift_refused maintenance_nonroot_denied read_only_reentry_verified modified_data_refused removed_constraint_refused foreign_database_refused runtime_material_drift_refused'.split()),
+            'sessions': set('sessions_revoked session_transition_exact_readback session_transition_explicit_recovery'.split()),
+            'configuration': set('sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced'.split()),
+        }
+        for phase, evidence in phases.items():
+            metadata = {**self.metadata(), 'scenario': 'controller-restore-' + phase}
+            result = {**metadata, 'schema': 1, **dict.fromkeys(common | evidence, True), **dict.fromkeys(denied, False)}
+            with self.subTest(phase=phase):
+                self.assertEqual(h.public_result(result, metadata), result)
+                self.assertEqual(h.guest_deadline_seconds(metadata['scenario']), 3600)
+            for field in common | evidence:
+                with self.subTest(phase=phase, missing=field), self.assertRaises(h.Refused):
+                    h.public_result({k: v for k, v in result.items() if k != field}, metadata)
+                with self.subTest(phase=phase, false=field), self.assertRaises(h.Refused):
+                    h.validate_result({**result, field: False}, metadata)
+            for field in denied:
+                with self.subTest(phase=phase, overclaim=field), self.assertRaises(h.Refused):
+                    h.public_result({**result, field: True}, metadata)
+            for other, extra in phases.items():
+                if other != phase:
+                    with self.subTest(phase=phase, wrong_scenario=other), self.assertRaises(h.Refused):
+                        h.public_result(result, {**metadata, 'scenario': 'controller-restore-' + other})
+                    with self.subTest(phase=phase, unexecuted=other), self.assertRaises(h.Refused):
+                        h.public_result({**result, next(iter(extra - evidence)): True}, metadata)
+            with self.assertRaises(h.Refused):
+                h.public_result(result, {**metadata, 'source_sha': 'b' * 40})
 
     def test_deferred_and_unknown_releases_stop_before_any_fixture_execution(self):
         for version in ("26.04", "24.10", "unknown"):
@@ -137,7 +151,16 @@ class NativeFixtureContract(unittest.TestCase):
         workflow = (repo / ".github/workflows/ci.yml").read_text()
         for job in ('native-libvirt', 'native-controller-provision'):
             section = re.search(r'^  ' + job + r':\n(.*?)(?=^  [a-z][a-z-]*:|\Z)', workflow, re.M | re.S).group(1)
-            self.assertEqual(re.findall(r"ubuntu: '([^']+)'", section), ["22.04", "24.04"])
+            if job == 'native-libvirt':
+                self.assertEqual(re.findall(r"ubuntu: '([^']+)'", section), ["22.04", "24.04"])
+            else:
+                self.assertEqual(ast.literal_eval(re.search(r'ubuntu: (\[.*\])', section).group(1)), ['22.04', '24.04'])
+                self.assertEqual(ast.literal_eval(re.search(r'scenario: (\[.*\])', section).group(1)),
+                    ['controller-restore-data', 'controller-restore-sessions', 'controller-restore-configuration'])
+                self.assertNotIn('continue-on-error', section)
+                self.assertNotIn('exclude:', section)
+                self.assertIn('--scenario "$TEST_SCENARIO"', section)
+                self.assertIn('timeout-minutes: 85', section)
         sandbox = (HERE / "libvirt-native-sandbox.c").read_text()
         self.assertEqual(re.findall(r'"ubuntu-([0-9.]+)-server-cloudimg-amd64.img"', sandbox), ["22.04", "24.04"])
 
@@ -152,7 +175,7 @@ class NativeFixtureContract(unittest.TestCase):
         workflow = (HERE.parents[2] / '.github/workflows/ci.yml').read_text()
         expected = (
             'name: cloud-libvirt-native-ubuntu-${{ matrix.ubuntu }}-${{ github.run_id }}-${{ github.run_attempt }}',
-            'name: cloud-controller-provision-ubuntu-${{ matrix.ubuntu }}-${{ github.run_id }}-${{ github.run_attempt }}',
+            'name: cloud-${{ matrix.scenario }}-ubuntu-${{ matrix.ubuntu }}-${{ github.run_id }}-${{ github.run_attempt }}',
             'name: network-management-browser-${{ github.run_id }}-${{ github.run_attempt }}',
         )
         for name in expected:
@@ -733,14 +756,15 @@ class NativeFixtureContract(unittest.TestCase):
         # simpler libvirt/provision scenarios retain their existing bounds.
         self.assertEqual(h.guest_deadline_seconds('libvirt'), 1800)
         self.assertEqual(h.guest_deadline_seconds('controller-provision'), 1800)
-        self.assertEqual(h.guest_deadline_seconds('controller-restore'), 3600)
+        for phase in ('data', 'sessions', 'configuration'):
+            self.assertEqual(h.guest_deadline_seconds('controller-restore-' + phase), 3600)
         for invalid in (None, '', 'restore', 'controller-restore ', 3600):
             with self.subTest(scenario=invalid), self.assertRaises(h.Refused):
                 h.guest_deadline_seconds(invalid)
 
     def test_guest_budget_cannot_be_overridden_from_cli(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as result:
-            h.main(['--scenario', 'controller-restore', '--ubuntu', '22.04',
+            h.main(['--scenario', 'controller-restore-data', '--ubuntu', '22.04',
                     '--source-root', '/unused', '--source-sha', 'a' * 40,
                     '--output', '/unused', '--timeout', '0'])
         self.assertEqual(result.exception.code, 2)

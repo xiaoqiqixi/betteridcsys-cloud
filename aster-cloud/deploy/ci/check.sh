@@ -19,8 +19,9 @@ python3 -B "$repo/deploy/ci/test_cloud_mysql_grants.py" | tee "$scratch/mysql-gr
 root_tls='^TestRootTLSConnectorUsesExistingProtectedTransport$'
 # Parser/encoder and isolated namespace packet tests require distribution tools
 # and privileges. Both run without skips in their required Ubuntu22/24 matrices.
-separate_native='^(TestRootTLSConnectorUsesExistingProtectedTransport|TestNativeOVSParserFlows|TestNativeOVSParserMeters|TestNativeNATPacketFlowAndRevocation|TestNativeNATInternetEgressAndRevocation)$'
-go test -mod=readonly -race -count=1 -v -skip "$separate_native" -timeout=10m ./... | tee "$scratch/tests.log"
+# Isolate the memory-hard archive CLI suite before other packages; every package
+# still runs exactly once with race and its unchanged 10-minute timeout.
+python3 -I "$repo/deploy/ci/go-race.py" --native-mysql | tee "$scratch/tests.log"
 if grep -q -- '--- SKIP:' "$scratch/tests.log"; then
   echo 'MySQL acceptance must not skip any test.' >&2; exit 1
 fi

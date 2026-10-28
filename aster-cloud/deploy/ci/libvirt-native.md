@@ -210,30 +210,35 @@ passwords, SQL responses, seed contents and serial logs remain private scratch.
 
 ### Actual SQL restore extension
 
-`--scenario controller-restore` is a fixed superset of the provisioning scenario.
-Before the target VM starts, the existing SHA-pinned native MySQL fixture runs
-unprivileged with a private Unix socket. A test-only compiled source helper uses
-actual embedded migrations and the public snapshot API. The source server is
-stopped and cleaned before the target starts; only the encrypted package and
-separate recovery key enter private seed storage. The source host identity and
-materials are still synthetic: `real_source_database_snapshot=true` does NOT
-mean `source_host_export_verified=true`.
+Three mandatory scenarios replace the retired `controller-restore` name:
 
-The guest keeps every provisioning assertion and then invokes the actual fixed
-root `target-restore`/`target-data-status` entry points. It independently checks
-18 restored rows, binary/empty/NULL values, Unicode, microseconds, unsigned
-integers and deleted auto-increment history. With MySQL `super_read_only` on,
-reentry must verify without any row/DDL replay. Modified rows and a removed FK
-must cause explicit refusal, never an implicit reimport or repair. Installation
-state and target seal stay unchanged; no controller service is created.
+- `controller-restore-data`: provisioning identity/credential refusals, full import,
+  read-only reentry, material/data/constraint drift and foreign-database refusal.
+- `controller-restore-sessions`: actual fresh import/material prerequisites, failed
+  session transition, explicit same-intent recovery and exact postimage checks.
+- `controller-restore-configuration`: actual fresh import/material/session-revocation
+  prerequisites, target Origin/TLS plan, approved atomic configuration publication,
+  readonly reentry and explicit pre-rename recovery. Ordinary runtime stays fenced.
 
-The CI job has a 55-minute bound: up to 15 minutes for the isolated source
-fixture, the unchanged 30-minute target VM bound, plus build/download/cleanup.
-A terminated observation is not acceptance. No retry, source-hash relaxation,
-changed original image, or host-network exception is introduced. Serial data,
-credentials and source/target databases are not uploaded. Only validated,
-fixed-schema evidence is public. Full controller migration, activation, reboot,
-node authority and KVM are explicitly not established by this workload.
+Every scenario starts from a separately signed Ubuntu guest and a fresh actual,
+unprivileged, SHA-pinned native MySQL source snapshot. The source uses a private
+Unix socket and is stopped/cleaned before the VM starts. Only encrypted data and
+the separate recovery key enter private seed storage. Host identity/materials
+remain synthetic: `real_source_database_snapshot` is not source-host export proof.
+All scenarios independently check the 18 restored rows, including binary/empty/NULL,
+Unicode, microseconds, unsigned integers and deleted auto-increment history.
+
+All six Ubuntu22/24 × scenario jobs must pass at the same source. Reports contain
+only that scenario's executed negative checks; another scenario's flags are
+rejected, not filled with true or reported as a successful skip. Existing negative
+cases remain in the data/session scenarios. Configuration recovery uses a reachable
+interruption image made from the fixture's own files, not a claimed power-cut test.
+
+The existing 85-minute job and 3600-second VM budgets remain unchanged (15 minutes
+for isolated source SQL plus VM/setup/cleanup). No retries, encryption weakening,
+source-hash relaxation, signed-image substitution or host-network exceptions.
+Serial data, credentials and databases are never uploaded. Full migration,
+activation, reboot, node authority and KVM remain unproven by these workloads.
 
 
 First provisioning run `894e1d7` / `40582502777` did **not** pass: Ubuntu22
@@ -248,7 +253,7 @@ The restore workload generates its SQL package on the host and no longer
 embeds the compiled test executable in the cloud-init seed. The actual target
 controller and installer are still delivered and verified. The provisioning-only
 helper is stripped. This removes unnecessary seed work; it is **not yet evidence**
-that slow boot is resolved. The signed images and 30-minute VM bound stay fixed.
+that slow boot is resolved. At that historical step the signed images and 30-minute VM bound stayed fixed; current scenario budgets are specified above.
 
 `f61d6cf` passed both independent MySQL suites, including durable-proof failure
 and read-only structural verification. Its Ubuntu24 target reached the actual

@@ -78,8 +78,14 @@ func PlanTarget(operation string) (TargetPlan, error) {
 // public read-only behavior is unchanged. Internal actions may use this same
 // capability only before its cleanup; nothing is cached between commands.
 func planTargetArchive(operation string, action func(TargetPlan, *Archive) error) (TargetPlan, error) {
+	return planTargetArchiveMode(operation, false, action)
+}
+
+// Only publication commands may inspect an existing configuration. Their action
+// must rederive and verify it under the original seal before reporting success.
+func planTargetArchiveMode(operation string, configuration bool, action func(TargetPlan, *Archive) error) (TargetPlan, error) {
 	fail := func() (TargetPlan, error) { return TargetPlan{}, ErrInvalid }
-	if os.Geteuid() != 0 || !operationID.MatchString(operation) {
+	if os.Geteuid() != 0 || !operationID.MatchString(operation) || configuration && action == nil {
 		return fail()
 	}
 	dir := filepath.Join(targetRoot, operation)
@@ -140,6 +146,16 @@ func planTargetArchive(operation string, action func(TargetPlan, *Archive) error
 	}
 	// No existing live configuration or units may be adopted as a fresh target.
 	for _, path := range []string{"/etc/aster-controller", "/etc/systemd/system/aster-controller.service", "/etc/systemd/system/controller-heartbeat@.service", "/etc/systemd/system/controller-heartbeat@.timer"} {
+		if configuration && path == "/etc/aster-controller" {
+			if _, e := os.Lstat(path); e == nil {
+				if privateRuntimeDirectory(path) != nil {
+					return fail()
+				}
+			} else if !os.IsNotExist(e) {
+				return fail()
+			}
+			continue
+		}
 		if _, e := os.Lstat(path); !os.IsNotExist(e) {
 			return fail()
 		}
