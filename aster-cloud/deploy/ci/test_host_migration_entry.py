@@ -18,12 +18,12 @@ class HostMigrationEntry(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         value = json.loads(r.stdout)
         self.assertEqual(value['protocol'], 'aster.controller-migration/1')
-        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status'])
+        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status'])
         self.assertIs(value['export_restore'], False)
         self.assertIs(value['migration_ready'], False)
 
     def test_no_paths_shell_unit_or_implicit_resume_overrides(self):
-        for args in [(), ('isolate',), ('export',), ('target-plan',), ('target-provision',), ('target-restore',), ('target-restore', '--sql', 'PRIVATE_SENTINEL'), ('target-data-status', '--root', '/tmp'), ('target-database-plan', '--dsn', 'PRIVATE_SENTINEL'), ('target-provision', '--database', 'foreign'), ('target-provision', '--resume'), ('target-seal', '--operation', '../escape'), ('target-status', '--root', '/tmp'), ('export', '--operation', '../escape'), ('isolate', '--operation', '../escape'),
+        for args in [(), ('isolate',), ('export',), ('target-plan',), ('target-provision',), ('target-restore',), ('target-materials',), ('target-material-status', '--destination', '/tmp'), ('target-materials', '--dsn', 'PRIVATE_SENTINEL'), ('target-restore', '--sql', 'PRIVATE_SENTINEL'), ('target-data-status', '--root', '/tmp'), ('target-database-plan', '--dsn', 'PRIVATE_SENTINEL'), ('target-provision', '--database', 'foreign'), ('target-provision', '--resume'), ('target-seal', '--operation', '../escape'), ('target-status', '--root', '/tmp'), ('export', '--operation', '../escape'), ('isolate', '--operation', '../escape'),
                      ('plan', '--unit', 'ssh.service'), ('plan', '--root', '/tmp'),
                      ('plan', '--config', 'PRIVATE_SENTINEL'), ('plan', '--shell', '/bin/sh'),
                      ('resume-source', '--operation', 'A' * 32)]:

@@ -88,15 +88,19 @@ class NativeFixtureContract(unittest.TestCase):
             'maintenance_authentication_verified', 'maintenance_drift_refused', 'maintenance_nonroot_denied',
             'source_fixture_synthetic', 'database_restored', 'real_source_database_snapshot',
             'exact_rows_verified', 'read_only_reentry_verified', 'modified_data_refused',
-            'removed_constraint_refused', 'foreign_database_refused')}, **{key: False for key in (
-            'source_host_export_verified', 'node_takeover_verified', 'migration_ready', 'kvm_ready')}}
+            'removed_constraint_refused', 'foreign_database_refused', 'runtime_materials_staged',
+            'runtime_material_drift_refused', 'runtime_candidate_remains_fenced')}, **{key: False for key in (
+            'source_host_export_verified', 'node_takeover_verified', 'migration_ready', 'kvm_ready',
+            'configuration_published', 'sessions_revoked')}}
         self.assertEqual(h.public_result(result, metadata), result)
         for key in ('maintenance_authentication_verified', 'maintenance_drift_refused', 'maintenance_nonroot_denied',
                     'database_restored', 'real_source_database_snapshot', 'read_only_reentry_verified',
-                    'modified_data_refused', 'removed_constraint_refused', 'foreign_database_refused'):
+                    'modified_data_refused', 'removed_constraint_refused', 'foreign_database_refused',
+                    'runtime_materials_staged', 'runtime_material_drift_refused', 'runtime_candidate_remains_fenced'):
             with self.subTest(key=key), self.assertRaises(h.Refused):
                 h.public_result({**result, key: False}, metadata)
-        for key in ('source_host_export_verified', 'node_takeover_verified', 'migration_ready', 'kvm_ready'):
+        for key in ('source_host_export_verified', 'node_takeover_verified', 'migration_ready', 'kvm_ready',
+                    'configuration_published', 'sessions_revoked'):
             with self.subTest(key=key), self.assertRaises(h.Refused):
                 h.public_result({**result, key: True}, metadata)
         with self.assertRaises(h.Refused):

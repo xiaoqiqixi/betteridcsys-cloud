@@ -25,7 +25,7 @@ ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': str(ROOT), 'LANG': 'C.UT
        'MYSQL_TEST_LOGIN_FILE': str(ROOT / 'absent-login-file'), 'MYSQL_HISTFILE': '/dev/null'}
 PHASE = 'preflight'
 NONCE = None
-CODES = set('TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING TARGET_DEPENDENCIES_UNCONFIRMED TARGET_MYSQL_START_UNCONFIRMED TARGET_DATABASE_CREATE_UNCONFIRMED TARGET_DATABASE_INVENTORY_UNCONFIRMED TARGET_RESTORE_SERVER_INVENTORY_REJECTED TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED'.split())
+CODES = set('TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING TARGET_DEPENDENCIES_UNCONFIRMED TARGET_MYSQL_START_UNCONFIRMED TARGET_DATABASE_CREATE_UNCONFIRMED TARGET_DATABASE_INVENTORY_UNCONFIRMED TARGET_RESTORE_SERVER_INVENTORY_REJECTED TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED TARGET_MATERIALS_UNCONFIRMED'.split())
 APT_CODES = set('APT_PLAN_UNSAFE APT_DNS_FAILURE APT_TLS_FAILURE APT_SIGNATURE_FAILURE APT_METADATA_FAILURE APT_PACKAGE_UNAVAILABLE APT_DEPENDENCY_CONFLICT APT_LOCKED APT_COMMAND_REJECTED APT_COMMAND_UNAVAILABLE APT_COMMAND_TIMEOUT APT_OUTPUT_OVERSIZED'.split())
 
 
@@ -346,6 +346,8 @@ def execute(metadata):
         module.mysql_sql(directory, 'DROP DATABASE aster_native_foreign;\n')
         progress('target-import')
         entry('target-data-status', 'TARGET_IMPORT_NOT_STARTED')
+        entry('target-materials', 'TARGET_IMPORT_NOT_STARTED')
+        require(not (inputs / 'runtime').exists() and not (inputs / 'materials-started.json').exists())
         imported = json.loads(entry('target-restore').stdout)
         require(imported == {'schema': 1, 'operation_id': operation, 'database_restored': True,
             'read_only_verification': True, 'target_restore_approved': False, 'migration_ready': False,
@@ -369,6 +371,49 @@ def execute(metadata):
             # response/repeated root invocation must do only exact readback.
             require(json.loads(entry('target-restore').stdout) == imported)
             require(json.loads(entry('target-data-status').stdout) == imported)
+            progress('target-materials')
+            entry('target-material-status', 'TARGET_COMMAND_REJECTED')
+            require(not (inputs / 'runtime').exists() and not (inputs / 'materials-started.json').exists())
+            staged = json.loads(entry('target-materials').stdout)
+            require(staged == {'schema': 1, 'operation_id': operation, 'material_references': 6,
+                'materials_staged': True, 'read_only_verification': False, 'configuration_published': False,
+                'sessions_revoked': False, 'migration_ready': False, 'root_inventory_verified': True,
+                'database_restored': True, 'target_restore_approved': False})
+            candidate = inputs / 'runtime'
+            config = json.loads((candidate / 'config.json').read_bytes())
+            require(config['controller_id'] == controller and config['nodes'] == [] and
+                    Path(config['dsn_file']).read_bytes() == (directory / 'runtime-mysql-dsn').read_bytes().strip())
+            for field, value in (('billing_token_file', b'b' * 64), ('admin_read_token_file', b'r' * 64),
+                                 ('admin_write_token_file', b'w' * 64)):
+                require(Path(config[field]).parent == candidate and Path(config[field]).read_bytes() == value)
+            require(stat.S_IMODE(candidate.stat().st_mode) == 0o700)
+            for path in candidate.iterdir():
+                st = path.lstat()
+                require(stat.S_ISREG(st.st_mode) and st.st_uid == 0 and st.st_nlink == 1 and
+                        stat.S_IMODE(st.st_mode) == 0o600)
+                require(b'aster_source:private-password' not in path.read_bytes())
+            stage_hashes = {p.name: sha(p) for p in candidate.iterdir()}
+            intent_hash = sha(inputs / 'materials-started.json')
+            expected_stage = {**staged, 'read_only_verification': True}
+            require(json.loads(entry('target-materials').stdout) == expected_stage)
+            require(json.loads(entry('target-material-status').stdout) == expected_stage)
+            # Staged files do not grant runtime admission, even with a complete
+            # valid configuration and real restored database credentials.
+            denied_runtime = subprocess.run([str(version / 'bin/aster-controller'), 'check', '-config', str(candidate / 'config.json')],
+                env=ENV, capture_output=True, timeout=30)
+            require(denied_runtime.returncode == 78 and not denied_runtime.stdout and
+                    json.loads(denied_runtime.stderr).get('code') == 'CONTROLLER_MIGRATION_FENCED')
+            material = Path(config['billing_token_file'])
+            original = material.read_bytes()
+            try:
+                material.write_bytes(original + b'changed')
+                entry('target-materials', 'TARGET_COMMAND_REJECTED')
+                entry('target-material-status', 'TARGET_COMMAND_REJECTED')
+                require(material.read_bytes() == original + b'changed')
+            finally:
+                material.write_bytes(original)  # Fixture-only fault cleanup, not product repair.
+            require({p.name: sha(p) for p in candidate.iterdir()} == stage_hashes and
+                    sha(inputs / 'materials-started.json') == intent_hash)
         finally:
             module.mysql_sql(directory, 'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
         require({name: sha(directory / name) for name in records} == committed_hashes)
@@ -377,6 +422,8 @@ def execute(metadata):
         module.mysql_sql(directory, "UPDATE `" + database + "`.controller_nodes SET datacenter_id='changed' WHERE id='node-a';\n")
         entry('target-data-status', 'TARGET_COMMAND_REJECTED')
         entry('target-restore', 'TARGET_COMMAND_REJECTED')
+        entry('target-material-status', 'TARGET_COMMAND_REJECTED')
+        require({p.name: sha(p) for p in candidate.iterdir()} == stage_hashes)
         require(run(runtime_command, data=b"SELECT datacenter_id FROM controller_nodes WHERE id='node-a';\n").stdout == b'changed\n')
         module.mysql_sql(directory, "UPDATE `" + database + "`.controller_nodes SET datacenter_id=CONVERT(0xE9A699E6B8AF USING utf8mb4) WHERE id='node-a';\n")
         require(json.loads(entry('target-data-status').stdout) == imported)
@@ -386,7 +433,9 @@ def execute(metadata):
         require({name: sha(directory / name) for name in records} == committed_hashes and (sha(seal), sha(state)) == before)
         require(not Path('/etc/aster-controller').exists() and not Path('/etc/systemd/system/aster-controller.service').exists())
         report.update({key: True for key in ('database_restored', 'real_source_database_snapshot', 'exact_rows_verified',
-            'read_only_reentry_verified', 'modified_data_refused', 'removed_constraint_refused', 'foreign_database_refused')})
+            'read_only_reentry_verified', 'modified_data_refused', 'removed_constraint_refused', 'foreign_database_refused',
+            'runtime_materials_staged', 'runtime_material_drift_refused', 'runtime_candidate_remains_fenced')})
+        report.update({'configuration_published': False, 'sessions_revoked': False})
     return report
 
 

@@ -64,7 +64,7 @@ func targetArchive(command string, args []string) error {
 	var err error
 	if command == "migration-target-plan" {
 		report, err = controllerbackup.PlanTarget(*operation)
-	} else if command == "migration-target-database-plan" || command == "migration-target-provision-check" || command == "migration-target-import" || command == "migration-target-data-status" {
+	} else if command == "migration-target-database-plan" || command == "migration-target-provision-check" || command == "migration-target-import" || command == "migration-target-data-status" || command == "migration-target-materials" || command == "migration-target-material-status" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		if command == "migration-target-database-plan" {
@@ -73,6 +73,8 @@ func targetArchive(command string, args []string) error {
 			report, err = controllerbackup.ImportTargetDatabase(ctx, *operation)
 		} else if command == "migration-target-data-status" {
 			report, err = controllerbackup.VerifyTargetDatabase(ctx, *operation)
+		} else if command == "migration-target-materials" || command == "migration-target-material-status" {
+			report, err = controllerbackup.RestoreTargetMaterials(ctx, *operation, command == "migration-target-material-status")
 		} else {
 			report, err = controllerbackup.CheckTargetProvision(ctx, *operation)
 		}

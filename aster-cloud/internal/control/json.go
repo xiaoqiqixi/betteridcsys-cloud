@@ -12,7 +12,11 @@ import (
 // Every declared wire key is exact-case, required unless omitempty, and unique.
 // Null is allowed only for explicitly nullable pointers such as preset resources.
 func strict(raw []byte, target any) bool {
-	if len(raw) == 0 || len(raw) > 65536 || !utf8.Valid(raw) {
+	return strictBound(raw, target, 65536)
+}
+
+func strictBound(raw []byte, target any, maximum int) bool {
+	if len(raw) == 0 || len(raw) > maximum || !utf8.Valid(raw) {
 		return false
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))

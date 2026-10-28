@@ -171,7 +171,7 @@ func (a *Archive) ValidateSource(expectedCommit string) (SourceReport, error) {
 	if a == nil || !a.valid || !sourceSHA.MatchString(expectedCommit) || a.manifest.SourceCommit != expectedCommit {
 		return fail()
 	}
-	configRaw, e := a.readSmall("controller/config.json", 65536)
+	configRaw, e := a.readSmall("controller/config.json", control.MaxConfigBytes)
 	if e != nil {
 		return fail()
 	}

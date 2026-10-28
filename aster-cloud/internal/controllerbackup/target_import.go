@@ -31,12 +31,12 @@ type TargetDataReport struct {
 // Once import-started exists, this command cannot repeat DDL or INSERT. An
 // unknown response is resolved only by VerifyTargetDatabase's read-only check.
 func ImportTargetDatabase(ctx context.Context, operation string) (TargetDataReport, error) {
-	return targetData(ctx, operation, false)
+	return targetData(ctx, operation, false, nil)
 }
 func VerifyTargetDatabase(ctx context.Context, operation string) (TargetDataReport, error) {
-	return targetData(ctx, operation, true)
+	return targetData(ctx, operation, true, nil)
 }
-func targetData(ctx context.Context, operation string, verify bool) (TargetDataReport, error) {
+func targetData(ctx context.Context, operation string, verify bool, afterVerified func(TargetPlan, string, *Archive, targetDatabase) error) (TargetDataReport, error) {
 	var result TargetDataReport
 	err := withTargetArchive(operation, func(plan TargetPlan, sha string, a *Archive) error {
 		db, e := loadTargetDatabase(ctx, a, plan, sha)
@@ -96,10 +96,34 @@ func targetData(ctx context.Context, operation string, verify bool) (TargetDataR
 			return e
 		}
 		result = TargetDataReport{Schema: 1, OperationID: operation, DatabaseRestored: true, ReadOnlyVerification: verify, Data: confirmed}
+		if afterVerified != nil {
+			return afterVerified(plan, sha, a, db)
+		}
 		return nil
 	})
 	if err != nil {
 		return TargetDataReport{}, err
+	}
+	return result, nil
+}
+
+// RestoreTargetMaterials accepts only the existing operation's fixed private
+// paths. Exact database readback and material writes share one target seal lock;
+// an archived DSN, profile path or caller argument never chooses a destination.
+func RestoreTargetMaterials(ctx context.Context, operation string, verifyOnly bool) (RuntimeMaterialReport, error) {
+	var result RuntimeMaterialReport
+	_, err := targetData(ctx, operation, true, func(plan TargetPlan, sha string, a *Archive, db targetDatabase) error {
+		target := RuntimeTarget{Directory: filepath.Join(targetRoot, operation), DSN: db.runtimeDSN, PlanSHA256: sha}
+		var e error
+		if verifyOnly {
+			result, e = a.VerifyRuntimeMaterials(target)
+		} else {
+			result, e = a.RestoreRuntimeMaterials(target)
+		}
+		return e
+	})
+	if err != nil {
+		return RuntimeMaterialReport{}, err
 	}
 	return result, nil
 }

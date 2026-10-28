@@ -193,11 +193,15 @@ func readProtected(path string, private bool, maximum int64, owner uint32) ([]by
 	return raw, nil
 }
 
+// MaxConfigBytes bounds root-only configuration with room for all 64 profiles and pinned relocated
+// material references. Ordinary HTTP/protocol decoding retains its 64 KiB cap.
+const MaxConfigBytes = 256 << 10
+
 // ParseConfig validates configuration bytes without following any file reference
 // or opening a database/node connection. Restore inspection must stay offline.
 func ParseConfig(raw []byte) (Config, error) {
 	var c Config
-	if !strict(raw, &c) || !c.Valid() {
+	if !strictBound(raw, &c, MaxConfigBytes) || !c.Valid() {
 		return Config{}, ErrInput
 	}
 	for i, p := range c.Nodes {
@@ -207,7 +211,7 @@ func ParseConfig(raw []byte) (Config, error) {
 }
 
 func LoadConfig(path string) (Config, Secrets, error) {
-	raw, err := ReadProtected(path, true, 65536)
+	raw, err := ReadProtected(path, true, MaxConfigBytes)
 	c, parseErr := ParseConfig(raw)
 	if err != nil || parseErr != nil {
 		return Config{}, Secrets{}, ErrInput

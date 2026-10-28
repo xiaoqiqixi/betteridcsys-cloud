@@ -193,7 +193,7 @@ class Host:
     def __init__(self, installer):
         self.i = installer
         installer.check_target()
-        self.config_raw = installer.protected_read(str(CONFIG), 65536)
+        self.config_raw = installer.protected_read(str(CONFIG), 256 * 1024)
         self.config = installer.strict_json(self.config_raw)
         self.id = self.config.get('controller_id')
         require(isinstance(self.id, str) and NODE.fullmatch(self.id), 'CONTROLLER_ID_INVALID')
@@ -257,7 +257,7 @@ class Host:
         return h.hexdigest()
 
     def fresh_identity(self):
-        require(digest(self.i.protected_read(str(CONFIG), 65536)) == self.identity['configuration_sha256'] and
+        require(digest(self.i.protected_read(str(CONFIG), 256 * 1024)) == self.identity['configuration_sha256'] and
                 digest(self.i.protected_read(str(INSTALL_STATE), 1024 * 1024)) == self.identity['installation_sha256'] and
                 self.material_digest() == self.identity['runtime_materials_sha256'],
                 'HOST_SOURCE_IDENTITY_CHANGED')
@@ -685,7 +685,8 @@ class Target(Host):
 
     def unused_host(self):
         require(set(p.name for p in self.root.iterdir()) <=
-                {'request.json', 'backup.age', 'recovery.key', 'plan.json', 'target.lock', 'database-plan.json', 'database'}, 'TARGET_INPUT_INVENTORY_CHANGED')
+                {'request.json', 'backup.age', 'recovery.key', 'plan.json', 'target.lock', 'database-plan.json', 'database',
+                 'materials-started.json', 'runtime'}, 'TARGET_INPUT_INVENTORY_CHANGED')
         # A killed verification may leave private plaintext. Never silently
         # discard/reuse it, or turn an unreviewed partial run into success.
         require(not CONFIG.parent.exists() and not CONFIG.parent.is_symlink(), 'TARGET_CONFIGURATION_ALREADY_EXISTS')
@@ -846,6 +847,23 @@ class Target(Host):
                         'TARGET_SEAL_UNCONFIRMED')
                 if action in ('target-database-plan', 'target-provision', 'target-restore', 'target-data-status'):
                     return self.prepare_database(action)
+                if action in ('target-materials', 'target-material-status'):
+                    # Root-visible objects/grants and every restored data byte
+                    # must still match before even the material intent is made.
+                    self.prepare_database('target-data-status')
+                    result = self.target_command('materials' if action == 'target-materials' else 'material-status')
+                    require(set(result) == {'schema', 'operation_id', 'material_references', 'materials_staged',
+                            'read_only_verification', 'configuration_published', 'sessions_revoked', 'migration_ready'} and
+                            result['schema'] == 1 and result['operation_id'] == self.operation and
+                            type(result['material_references']) is int and 6 <= result['material_references'] <= 198 and
+                            (result['material_references'] - 6) % 3 == 0 and result['materials_staged'] is True and
+                            type(result['read_only_verification']) is bool and
+                            (action != 'target-material-status' or result['read_only_verification'] is True) and
+                            all(result[k] is False for k in ('configuration_published', 'sessions_revoked', 'migration_ready')),
+                            'TARGET_MATERIALS_UNCONFIRMED')
+                    self.unused_host()
+                    return {**result, 'root_inventory_verified': True, 'database_restored': True,
+                            'target_restore_approved': False}
                 return {**result, 'database_restored': False, 'target_restore_approved': False}
 
 
@@ -856,14 +874,14 @@ class Arguments(argparse.ArgumentParser):
 
 def main():
     parser = Arguments(description=__doc__)
-    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status'))
+    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status'))
     parser.add_argument('--operation')
     args = parser.parse_args()
     require((args.action in ('capabilities', 'plan') and args.operation is None) or
             (args.action not in ('capabilities', 'plan') and isinstance(args.operation, str) and OP.fullmatch(args.operation)),
             'EXACT_OPERATION_ID_REQUIRED')
     if args.action == 'capabilities':
-        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status'],
+        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status'],
                 'export_restore': False, 'migration_ready': False}
     if args.action.startswith('target-'):
         return Target(install_module(), args.operation).prepare(args.action)

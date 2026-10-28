@@ -245,7 +245,10 @@ def main():
         entry('target-provision', True)
         entry('target-restore', True)
         entry('target-data-status', True)
+        entry('target-materials', True)
+        entry('target-material-status', True)
         require(not (inputs / 'database').exists() and not (inputs / 'database-plan.json').exists() and
+                not (inputs / 'runtime').exists() and not (inputs / 'materials-started.json').exists() and
                 install_state.read_bytes() == original_installation and seal.read_bytes() == seal_raw,
                 'TARGET_INVALID_RECORDS_REACHED_PROVISION')
         checks.append('authenticated_but_invalid_records_refused_before_provision')

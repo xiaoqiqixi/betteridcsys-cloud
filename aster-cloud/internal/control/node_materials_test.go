@@ -2,9 +2,40 @@ package control
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestConfigRelocationPreservesFullApprovedNodeCapacity(t *testing.T) {
+	c := testConfig(testProfile())
+	c.Nodes = nil
+	for i := 0; i < 64; i++ {
+		n := testProfile()
+		n.ID = fmt.Sprintf("node-%02d", i)
+		c.Nodes = append(c.Nodes, n)
+		root := "/var/lib/aster-controller-restore/" + strings.Repeat("a", 32) + "/runtime/" + strings.Repeat("b", 100)
+		c.NodeMaterials = append(c.NodeMaterials, NodeMaterialBinding{NodeID: n.ID, ProfileSHA256: n.Digest(),
+			CAFile: root + ".ca", CASHA256: strings.Repeat("c", 64), ClientCertFile: root + ".cert", ClientCertSHA256: strings.Repeat("d", 64),
+			ClientKeyFile: root + ".key", ClientKeySHA256: strings.Repeat("e", 64)})
+	}
+	raw, e := json.Marshal(c)
+	if e != nil || len(raw) <= 65536 {
+		t.Fatal("fixture does not cross the old root-config budget", e)
+	}
+	loaded, e := ParseConfig(raw)
+	if e != nil {
+		t.Fatal("relocation reduced the approved 64-node capacity", e)
+	}
+	refs, e := loaded.RuntimeMaterials()
+	if e != nil || len(refs) != 198 {
+		t.Fatal("full approved material inventory lost", e)
+	}
+	var wire Config
+	if strict(raw, &wire) {
+		t.Fatal("root configuration budget widened ordinary protocol input")
+	}
+}
 
 func TestConfigNodeMaterialBindingsAreExactAndPreserveLegacyIdentity(t *testing.T) {
 	p := testProfile()

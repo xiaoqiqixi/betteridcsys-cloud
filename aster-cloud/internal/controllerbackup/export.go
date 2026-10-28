@@ -124,7 +124,7 @@ func ExportSealedSource(ctx context.Context, config control.Config, operation st
 	if !bytes.Equal(a, b) {
 		return ExportReport{}, ErrInvalid
 	}
-	configRaw, e := read("/etc/aster-controller/config.json", 65536)
+	configRaw, e := read("/etc/aster-controller/config.json", control.MaxConfigBytes)
 	if e != nil || digestBytes(configRaw) != p.Identity["configuration_sha256"] {
 		return ExportReport{}, ErrInvalid
 	}
