@@ -71,6 +71,13 @@ func targetHash(path string) (string, error) {
 // installation. It never imports SQL, follows source paths or contacts a node.
 // Its private temporary plaintext is removed before the plan is returned.
 func PlanTarget(operation string) (TargetPlan, error) {
+	return planTargetArchive(operation, nil)
+}
+
+// Keep one authenticated archive alive for one root command. PlanTarget's
+// public read-only behavior is unchanged. Internal actions may use this same
+// capability only before its cleanup; nothing is cached between commands.
+func planTargetArchive(operation string, action func(TargetPlan, *Archive) error) (TargetPlan, error) {
 	fail := func() (TargetPlan, error) { return TargetPlan{}, ErrInvalid }
 	if os.Geteuid() != 0 || !operationID.MatchString(operation) {
 		return fail()
@@ -142,22 +149,28 @@ func PlanTarget(operation string) (TargetPlan, error) {
 	if e != nil || hash != request.ArchiveSHA256 {
 		return fail()
 	}
-	var source SourceReport
+	var result TargetPlan
 	e = WithVerifiedArchive(archive, filepath.Join(dir, "recovery.key"), request.ControllerID, operation, dir, func(a *Archive) error {
-		var e error
-		source, e = a.ValidateSource(request.SourceCommit)
-		return e
+		source, e := a.ValidateSource(request.SourceCommit)
+		if e != nil || source.SourceMachineIDSHA256 == digestBytes(machine) {
+			return ErrInvalid
+		}
+		// Recheck ciphertext after authentication, before accepting a plan or
+		// entering any action. The action separately rechecks under its seal.
+		after, e := targetHash(archive)
+		if e != nil || after != hash {
+			return ErrInvalid
+		}
+		result = TargetPlan{1, "aster.controller-target/1", request.ControllerID, operation, request.SourceCommit, source.CanonicalConfigurationSHA256, hash, digestBytes(stateRaw), digestBytes(manifest), digestBytes(binary), digestBytes(machine), source.SourceMachineIDSHA256}
+		if action != nil {
+			return action(result, a)
+		}
+		return nil
 	})
-	if e != nil || source.SourceMachineIDSHA256 == digestBytes(machine) {
-		return fail()
+	if e != nil {
+		return TargetPlan{}, e
 	}
-	// Recheck the encrypted bytes after authentication; a replacement with
-	// different content must not become this plan's bound archive.
-	after, e := targetHash(archive)
-	if e != nil || after != hash {
-		return fail()
-	}
-	return TargetPlan{1, "aster.controller-target/1", request.ControllerID, operation, request.SourceCommit, source.CanonicalConfigurationSHA256, hash, digestBytes(stateRaw), digestBytes(manifest), digestBytes(binary), digestBytes(machine), source.SourceMachineIDSHA256}, nil
+	return result, nil
 }
 
 // SealTarget consumes an immutable plan written by the managed Python host

@@ -479,6 +479,45 @@ def execute(metadata):
         run(runtime_command, data=b"DELETE FROM controller_console_sessions WHERE token_hash=UNHEX(REPEAT('42',32));\n")
         require(json.loads(entry('target-session-status').stdout) == readonly_revoked)
         require(sha(session_intent) == session_hash and {p.name: sha(p) for p in candidate.iterdir()} == stage_hashes)
+        progress('target-configuration-plan')
+        cert_path, key_path = inputs / 'configuration-tls.crt', inputs / 'configuration-tls.key'
+        private(cert_path, b'')
+        private(key_path, b'')
+        run(['/usr/bin/openssl', 'req', '-x509', '-newkey', 'ed25519', '-nodes', '-days', '3',
+             '-subj', '/CN=source.invalid', '-addext', 'subjectAltName=DNS:source.invalid',
+             '-out', cert_path, '-keyout', key_path])
+        request = {'schema': 1, 'operation_id': operation,
+                   'target_plan_sha256': json.loads((inputs / 'database-plan.json').read_bytes())['target_plan_sha256'],
+                   'console_enabled': True, 'console_origin': 'https://source.invalid:9555',
+                   'listen': '127.0.0.1:9555', 'tls_mode': 'replacement'}
+        private(inputs / 'configuration-request.json', json.dumps(request, separators=(',', ':')).encode())
+        planned = json.loads(entry('target-configuration-plan').stdout)
+        require(set(planned) == {'schema','operation_id','plan','readonly','sessions_revoked','exact_database_verified',
+                                'configuration_published','migration_ready','root_inventory_verified','database_restored','target_restore_approved'} and
+                all(planned[k] is True for k in ('readonly','sessions_revoked','exact_database_verified','root_inventory_verified','database_restored')) and
+                all(planned[k] is False for k in ('configuration_published','migration_ready','target_restore_approved')) and
+                planned['schema'] == 1 and planned['operation_id'] == operation)
+        config_plan = planned['plan']
+        require(config_plan['controller_id'] == controller and config_plan['source_console'] is None and
+                config_plan['session_intent_sha256'] == session_hash and
+                config_plan['request_sha256'] == sha(inputs / 'configuration-request.json') and
+                all(config_plan[k] == request[k] for k in ('target_plan_sha256','console_enabled','console_origin','listen','tls_mode')) and
+                [f['name'] for f in config_plan['files']] == ['config.json','console.json','server.crt','server.key'])
+        module.mysql_sql(directory, 'SET GLOBAL super_read_only=ON;\n')
+        try:
+            require(json.loads(entry('target-configuration-plan').stdout) == planned)
+        finally:
+            module.mysql_sql(directory, 'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
+        original_cert = cert_path.read_bytes()
+        cert_path.write_bytes(b'unreviewed prefix\n' + original_cert)
+        entry('target-configuration-plan', 'TARGET_COMMAND_REJECTED')
+        cert_path.write_bytes(original_cert)  # Fixture restores only its own fault.
+        run(runtime_command, data=b"INSERT INTO controller_console_sessions VALUES(UNHEX(REPEAT('43',32)),NULL,'2026-10-28','2027-01-01');\n")
+        entry('target-configuration-plan', 'TARGET_COMMAND_REJECTED')
+        run(runtime_command, data=b"DELETE FROM controller_console_sessions WHERE token_hash=UNHEX(REPEAT('43',32));\n")
+        require(not (inputs / 'configuration-started.json').exists() and not (inputs / 'configuration-approval.json').exists() and
+                not Path('/etc/aster-controller').exists() and not Path('/etc/systemd/system/aster-controller.service').exists() and
+                sha(session_intent) == session_hash and {p.name: sha(p) for p in candidate.iterdir()} == stage_hashes)
         denied_runtime = subprocess.run([str(version / 'bin/aster-controller'), 'check', '-config', str(candidate / 'config.json')],
             env=ENV, capture_output=True, timeout=30)
         require(denied_runtime.returncode == 78 and not denied_runtime.stdout and
@@ -488,7 +527,9 @@ def execute(metadata):
         report.update({key: True for key in ('database_restored', 'real_source_database_snapshot', 'exact_rows_verified',
             'read_only_reentry_verified', 'modified_data_refused', 'removed_constraint_refused', 'foreign_database_refused',
             'runtime_materials_staged', 'runtime_material_drift_refused', 'runtime_candidate_remains_fenced',
-            'sessions_revoked', 'session_transition_exact_readback', 'session_transition_explicit_recovery')})
+            'sessions_revoked', 'session_transition_exact_readback', 'session_transition_explicit_recovery',
+            'configuration_plan_verified', 'configuration_plan_readonly', 'configuration_plan_tls_drift_refused',
+            'configuration_plan_requires_exact_session_postimage')})
         report.update({'configuration_published': False, 'session_browser_verified': False})
     return report
 

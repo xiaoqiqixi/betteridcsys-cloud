@@ -686,7 +686,8 @@ class Target(Host):
     def unused_host(self):
         require(set(p.name for p in self.root.iterdir()) <=
                 {'request.json', 'backup.age', 'recovery.key', 'plan.json', 'target.lock', 'database-plan.json', 'database',
-                 'materials-started.json', 'runtime', 'sessions-started.json'}, 'TARGET_INPUT_INVENTORY_CHANGED')
+                 'materials-started.json', 'runtime', 'sessions-started.json', 'configuration-request.json',
+                 'configuration-tls.crt', 'configuration-tls.key'}, 'TARGET_INPUT_INVENTORY_CHANGED')
         # A killed verification may leave private plaintext. Never silently
         # discard/reuse it, or turn an unreviewed partial run into success.
         require(not CONFIG.parent.exists() and not CONFIG.parent.is_symlink(), 'TARGET_CONFIGURATION_ALREADY_EXISTS')
@@ -862,6 +863,41 @@ class Target(Host):
                         result.get('admission_blocked') is True and result.get('guarded_processes_drained') is True and
                         result.get('source_isolated') is False and result.get('migration_ready') is False,
                         'TARGET_SEAL_UNCONFIRMED')
+                if action == 'target-configuration-plan':
+                    self.prepare_database('target-session-status')
+                    result = self.target_command('configuration-plan')
+                    fields = {'schema', 'operation_id', 'plan', 'readonly', 'sessions_revoked',
+                              'exact_database_verified', 'configuration_published', 'migration_ready'}
+                    require(set(result) == fields and result['schema'] == 1 and result['operation_id'] == self.operation and
+                            all(result[k] is True for k in ('readonly', 'sessions_revoked', 'exact_database_verified')) and
+                            result['configuration_published'] is False and result['migration_ready'] is False,
+                            'TARGET_CONFIGURATION_PLAN_UNCONFIRMED')
+                    config = result['plan']
+                    request_raw = self.i.protected_read(str(self.root / 'configuration-request.json'), 8192)
+                    request = self.i.strict_json(request_raw)
+                    database_plan = self.read(self.root / 'database-plan.json')
+                    require(isinstance(config, dict) and set(config) == {'schema', 'protocol', 'controller_id', 'operation_id',
+                            'target_plan_sha256', 'source_configuration_sha256', 'source_manifest_sha256',
+                            'material_manifest_sha256', 'session_intent_sha256', 'request_sha256',
+                            'canonical_configuration_sha256', 'source_console', 'console_enabled', 'console_origin',
+                            'listen', 'tls_mode', 'certificate_not_before', 'certificate_not_after', 'files'} and
+                            config['schema'] == 1 and config['protocol'] == 'aster.controller-configuration/1' and
+                            config['controller_id'] == plan['controller_id'] and config['operation_id'] == self.operation and
+                            config['target_plan_sha256'] == database_plan['target_plan_sha256'] and
+                            config['source_configuration_sha256'] == plan['canonical_configuration_sha256'] and
+                            config['request_sha256'] == digest(request_raw) and
+                            config['session_intent_sha256'] == digest(self.i.protected_read(str(self.root / 'sessions-started.json'),65536)) and
+                            all(config[k] == request[k] for k in ('console_enabled','console_origin','listen','tls_mode')) and
+                            all(isinstance(config[k], str) and SHA.fullmatch(config[k]) for k in config if k.endswith('_sha256')),
+                            'TARGET_CONFIGURATION_PLAN_UNCONFIRMED')
+                    files = config['files']
+                    require(isinstance(files, list) and len(files) == 4 and
+                            [f.get('name') for f in files if isinstance(f,dict)] == ['config.json','console.json','server.crt','server.key'] and
+                            all(set(f) == {'name','size','sha256'} and type(f['size']) is int and 0 < f['size'] <= 1 << 20 and
+                                isinstance(f['sha256'],str) and SHA.fullmatch(f['sha256']) for f in files),
+                            'TARGET_CONFIGURATION_PLAN_UNCONFIRMED')
+                    self.unused_host()
+                    return {**result, 'root_inventory_verified': True, 'database_restored': True, 'target_restore_approved': False}
                 if action in ('target-database-plan', 'target-provision', 'target-restore', 'target-data-status',
                               'target-revoke-sessions', 'target-session-status', 'target-session-resume'):
                     return self.prepare_database(action)
@@ -895,14 +931,14 @@ class Arguments(argparse.ArgumentParser):
 
 def main():
     parser = Arguments(description=__doc__)
-    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume'))
+    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan'))
     parser.add_argument('--operation')
     args = parser.parse_args()
     require((args.action in ('capabilities', 'plan') and args.operation is None) or
             (args.action not in ('capabilities', 'plan') and isinstance(args.operation, str) and OP.fullmatch(args.operation)),
             'EXACT_OPERATION_ID_REQUIRED')
     if args.action == 'capabilities':
-        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume'],
+        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan'],
                 'export_restore': False, 'migration_ready': False}
     if args.action.startswith('target-'):
         return Target(install_module(), args.operation).prepare(args.action)

@@ -28,31 +28,30 @@ type TargetDatabasePlan struct {
 }
 
 func withTargetArchive(operation string, action func(TargetPlan, string, *Archive) error) error {
-	plan, e := PlanTarget(operation)
-	if e != nil {
-		return e
-	}
-	dir := filepath.Join(targetRoot, operation)
-	raw, e := targetRead(filepath.Join(dir, "plan.json"), 4096)
-	var approved TargetPlan
-	if e != nil || !exactSourceRecord(raw, &approved) || approved != plan {
-		return ErrInvalid
-	}
-	canonical, e := json.Marshal(approved)
-	if e != nil {
-		return ErrInvalid
-	}
-	planSHA := digestBytes(canonical)
-	if _, e = targetRead(filepath.Join("/var/lib/aster-controller", plan.ControllerID, "target-restore.json"), 4096); e != nil {
-		return ErrInvalid
-	}
-	host, e := controllerhost.Open(plan.ControllerID, plan.CanonicalConfigurationSHA256)
-	if e != nil {
-		return e
-	}
-	defer host.Close()
-	return host.WithSealedTarget(operation, planSHA, func() error {
-		return WithVerifiedArchive(filepath.Join(dir, "backup.age"), filepath.Join(dir, "recovery.key"), plan.ControllerID, operation, dir, func(a *Archive) error {
+	_, e := planTargetArchive(operation, func(plan TargetPlan, a *Archive) error {
+		dir := filepath.Join(targetRoot, operation)
+		raw, e := targetRead(filepath.Join(dir, "plan.json"), 4096)
+		var approved TargetPlan
+		if e != nil || !exactSourceRecord(raw, &approved) || approved != plan {
+			return ErrInvalid
+		}
+		canonical, e := json.Marshal(approved)
+		if e != nil {
+			return ErrInvalid
+		}
+		planSHA := digestBytes(canonical)
+		if _, e = targetRead(filepath.Join("/var/lib/aster-controller", plan.ControllerID, "target-restore.json"), 4096); e != nil {
+			return ErrInvalid
+		}
+		host, e := controllerhost.Open(plan.ControllerID, plan.CanonicalConfigurationSHA256)
+		if e != nil {
+			return e
+		}
+		defer host.Close()
+		return host.WithSealedTarget(operation, planSHA, func() error {
+			// Reuse authenticated staged bytes, not a cached success receipt.
+			// Source semantics and current ciphertext are still checked while
+			// holding the exact target seal, before SQL or material effects.
 			if _, e := a.ValidateSource(plan.SourceCommit); e != nil {
 				return e
 			}
@@ -62,6 +61,7 @@ func withTargetArchive(operation string, action func(TargetPlan, string, *Archiv
 			return action(plan, planSHA, a)
 		})
 	})
+	return e
 }
 
 func PlanTargetDatabase(ctx context.Context, operation string) (TargetDatabasePlan, error) {

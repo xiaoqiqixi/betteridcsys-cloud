@@ -18,7 +18,7 @@ class HostMigrationEntry(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         value = json.loads(r.stdout)
         self.assertEqual(value['protocol'], 'aster.controller-migration/1')
-        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume'])
+        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan'])
         self.assertIs(value['export_restore'], False)
         self.assertIs(value['migration_ready'], False)
 
@@ -44,6 +44,18 @@ class HostMigrationEntry(unittest.TestCase):
                     self.assertEqual(r.returncode, 1)
                     self.assertEqual(r.stdout, b'')
                     self.assertNotIn(b'PRIVATE_SENTINEL', r.stderr)
+
+    def test_configuration_plan_has_no_freeform_host_or_secret_overrides(self):
+        for args in ((), ('--operation', '../escape'), ('--operation', 'a' * 32, '--force'),
+                     ('--operation', 'a' * 32, '--config', 'PRIVATE_SENTINEL'),
+                     ('--operation', 'a' * 32, '--origin', 'https://foreign.invalid'),
+                     ('--operation', 'a' * 32, '--cert', 'PRIVATE_SENTINEL'),
+                     ('--operation', 'a' * 32, '--session-proof', 'PRIVATE_SENTINEL')):
+            with self.subTest(args=args):
+                r = self.invoke('target-configuration-plan', *args)
+                self.assertEqual(r.returncode, 1)
+                self.assertEqual(r.stdout, b'')
+                self.assertNotIn(b'PRIVATE_SENTINEL', r.stderr)
 
 
 if __name__ == '__main__':

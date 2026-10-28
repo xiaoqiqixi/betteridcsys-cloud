@@ -90,7 +90,9 @@ class NativeFixtureContract(unittest.TestCase):
             'exact_rows_verified', 'read_only_reentry_verified', 'modified_data_refused',
             'removed_constraint_refused', 'foreign_database_refused', 'runtime_materials_staged',
             'runtime_material_drift_refused', 'runtime_candidate_remains_fenced',
-            'sessions_revoked', 'session_transition_exact_readback', 'session_transition_explicit_recovery')}, **{key: False for key in (
+            'sessions_revoked', 'session_transition_exact_readback', 'session_transition_explicit_recovery',
+            'configuration_plan_verified', 'configuration_plan_readonly', 'configuration_plan_tls_drift_refused',
+            'configuration_plan_requires_exact_session_postimage')}, **{key: False for key in (
             'source_host_export_verified', 'node_takeover_verified', 'migration_ready', 'kvm_ready',
             'configuration_published', 'session_browser_verified')}}
         self.assertEqual(h.public_result(result, metadata), result)
@@ -98,7 +100,9 @@ class NativeFixtureContract(unittest.TestCase):
                     'database_restored', 'real_source_database_snapshot', 'read_only_reentry_verified',
                     'modified_data_refused', 'removed_constraint_refused', 'foreign_database_refused',
                     'runtime_materials_staged', 'runtime_material_drift_refused', 'runtime_candidate_remains_fenced',
-            'sessions_revoked', 'session_transition_exact_readback', 'session_transition_explicit_recovery'):
+            'sessions_revoked', 'session_transition_exact_readback', 'session_transition_explicit_recovery',
+            'configuration_plan_verified', 'configuration_plan_readonly', 'configuration_plan_tls_drift_refused',
+            'configuration_plan_requires_exact_session_postimage'):
             with self.subTest(key=key), self.assertRaises(h.Refused):
                 h.public_result({**result, key: False}, metadata)
         for key in ('source_host_export_verified', 'node_takeover_verified', 'migration_ready', 'kvm_ready',
