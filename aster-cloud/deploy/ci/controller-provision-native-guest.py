@@ -25,7 +25,7 @@ ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': str(ROOT), 'LANG': 'C.UT
        'MYSQL_TEST_LOGIN_FILE': str(ROOT / 'absent-login-file'), 'MYSQL_HISTFILE': '/dev/null'}
 PHASE = 'preflight'
 NONCE = None
-CODES = set('TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING TARGET_DEPENDENCIES_UNCONFIRMED TARGET_MYSQL_START_UNCONFIRMED TARGET_DATABASE_CREATE_UNCONFIRMED TARGET_DATABASE_INVENTORY_UNCONFIRMED TARGET_RESTORE_SERVER_INVENTORY_REJECTED'.split())
+CODES = set('TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING TARGET_DEPENDENCIES_UNCONFIRMED TARGET_MYSQL_START_UNCONFIRMED TARGET_DATABASE_CREATE_UNCONFIRMED TARGET_DATABASE_INVENTORY_UNCONFIRMED TARGET_RESTORE_SERVER_INVENTORY_REJECTED TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED'.split())
 APT_CODES = set('APT_PLAN_UNSAFE APT_DNS_FAILURE APT_TLS_FAILURE APT_SIGNATURE_FAILURE APT_METADATA_FAILURE APT_PACKAGE_UNAVAILABLE APT_DEPENDENCY_CONFLICT APT_LOCKED APT_COMMAND_REJECTED APT_COMMAND_UNAVAILABLE APT_COMMAND_TIMEOUT APT_OUTPUT_OVERSIZED'.split())
 
 
@@ -210,7 +210,8 @@ def execute(metadata):
                 'target_restore_approved': False, 'migration_ready': False}
     require(json.loads(entry('target-provision').stdout) == expected)
     directory = inputs / 'database'
-    private_files = ('mysql-provision.json', 'restore-provision.json', 'runtime-mysql-dsn', 'migration-mysql-dsn')
+    private_files = ('mysql-provision.json', 'restore-provision.json', 'runtime-mysql-dsn', 'migration-mysql-dsn',
+                     'maintenance-auth-intent.json', 'maintenance-auth-verified.json')
     hashes = {name: sha(directory / name) for name in private_files}
     for name in private_files:
         st = (directory / name).lstat()
@@ -220,6 +221,58 @@ def execute(metadata):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     database, runtime_user, migration_user = module.restore_database_names(operation)
+    progress('target-maintenance')
+    # The package-created maintenance account is hardened, not allowlisted by
+    # name. Check real peer authentication and refusal without credential reset.
+    maintenance = json.loads((directory / 'maintenance-auth-intent.json').read_bytes())
+    require(maintenance['before']['mode'] in ('password', 'root-socket'))
+    expected_maintenance = {'plugin': 'auth_socket', 'mapping': 'root', 'locked': 'N'}
+    maintenance_sql = "SELECT JSON_OBJECT('plugin',plugin,'mapping',authentication_string,'locked',account_locked) FROM mysql.user WHERE User='debian-sys-maint' AND Host='localhost';\n"
+    require(module._query(directory, maintenance_sql) == expected_maintenance)
+    maint_command = ['/usr/bin/mysql', '--no-defaults', '--no-login-paths', '--protocol=SOCKET',
+        '--socket=/run/mysqld/mysqld.sock', '--user=debian-sys-maint', '--batch', '--raw', '--skip-column-names', '--skip-reconnect', '--connect-timeout=5']
+    require(run(maint_command, data=b'SELECT CURRENT_USER();\n').stdout == b'debian-sys-maint@localhost\n')
+    denied = subprocess.run(['/usr/sbin/runuser', '--user', 'nobody', '--', *maint_command],
+        input=b'SELECT CURRENT_USER();\n', env={**ENV, 'HOME': '/nonexistent'}, cwd='/',
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+    require(denied.returncode == 1 and not denied.stdout and re.match(rb'^ERROR (1045|1698) \(28000\)', denied.stderr),
+            'TARGET_NATIVE_REFUSAL_UNCONFIRMED')
+    # Simulate loss of only the completion acknowledgement: immutable intent
+    # plus exact authentication/grants can reconstruct that same confirmation.
+    confirmation = directory / 'maintenance-auth-verified.json'
+    retained_confirmation = ROOT / 'retained-maintenance-confirmation.json'
+    confirmation.rename(retained_confirmation)
+    require(json.loads(entry('target-provision').stdout) == expected)
+    require(sha(confirmation) == sha(retained_confirmation) == hashes['maintenance-auth-verified.json'])
+    # Test-owned tampering is restored ONLY by this disposable fixture. The
+    # production command must leave every changed credential untouched.
+    for alteration in ("IDENTIFIED WITH auth_socket AS 'nobody'", "IDENTIFIED WITH caching_sha2_password BY RANDOM PASSWORD"):
+        module.mysql_sql(directory, "ALTER USER 'debian-sys-maint'@'localhost' " + alteration + ";\n")
+        changed = module.mysql_sql(directory, "SELECT SHA2(CONCAT(plugin,CHAR(0),authentication_string),256) FROM mysql.user WHERE User='debian-sys-maint' AND Host='localhost';\n")
+        entry('target-provision', 'TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED' if "'nobody'" in alteration else 'TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED')
+        require(module.mysql_sql(directory, "SELECT SHA2(CONCAT(plugin,CHAR(0),authentication_string),256) FROM mysql.user WHERE User='debian-sys-maint' AND Host='localhost';\n") == changed)
+        require({name: sha(directory / name) for name in private_files} == hashes)
+        module.mysql_sql(directory, "ALTER USER 'debian-sys-maint'@'localhost' IDENTIFIED WITH auth_socket AS 'root';\n")
+    grant_database = database.replace('_', '\\_')
+    module.mysql_sql(directory, "GRANT SELECT ON `" + grant_database + "`.* TO 'debian-sys-maint'@'localhost';\n")
+    altered_grants = module.mysql_sql(directory, "SHOW GRANTS FOR 'debian-sys-maint'@'localhost';\n")
+    entry('target-provision', 'TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED')
+    require(module.mysql_sql(directory, "SHOW GRANTS FOR 'debian-sys-maint'@'localhost';\n") == altered_grants)
+    module.mysql_sql(directory, "REVOKE SELECT ON `" + grant_database + "`.* FROM 'debian-sys-maint'@'localhost';\n")
+    module.mysql_sql(directory, "CREATE USER 'debian-sys-maint'@'%' ACCOUNT LOCK;\n")
+    entry('target-provision', 'TARGET_RESTORE_SERVER_INVENTORY_REJECTED')
+    module.mysql_sql(directory, "DROP USER 'debian-sys-maint'@'%';\n")
+    # auth_socket permits a same-named OS user as well as AS 'root'. A newly
+    # introduced NSS principal must therefore block all further restore steps.
+    run(['/usr/sbin/useradd', '--no-create-home', '--no-user-group', '--gid', '65534',
+         '--shell', '/usr/sbin/nologin', 'debian-sys-maint'])
+    try:
+        entry('target-provision', 'TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED')
+        require(module._query(directory, maintenance_sql) == expected_maintenance)
+    finally:
+        run(['/usr/sbin/userdel', 'debian-sys-maint'])
+    require(json.loads(entry('target-provision').stdout) == expected)
+    require({name: sha(directory / name) for name in private_files} == hashes)
     progress('target-credentials')
     binding = json.loads((directory / 'restore-provision.json').read_bytes())
     require(binding['operation_id'] == operation and binding['collation'] == 'utf8mb4_bin')
@@ -261,7 +314,7 @@ def execute(metadata):
     # The empty owned DB remains unactivated, with its real provenance marker.
     info = module._query(directory, "SELECT JSON_OBJECT('tables',COUNT(*)) FROM information_schema.TABLES WHERE TABLE_SCHEMA='" + database + "';\n")
     require(info == {'tables': 1})
-    true = 'passed real_apt real_systemd real_mysql actual_installer actual_controller target_sealed exact_encoding_preserved credentials_verified runtime_ddl_denied foreign_account_refused lost_credential_refused_without_reset same_operation_preserved source_fixture_synthetic'.split()
+    true = 'passed real_apt real_systemd real_mysql actual_installer actual_controller target_sealed exact_encoding_preserved credentials_verified runtime_ddl_denied foreign_account_refused lost_credential_refused_without_reset same_operation_preserved maintenance_authentication_verified maintenance_drift_refused maintenance_nonroot_denied source_fixture_synthetic'.split()
     false = 'database_restored source_host_export_verified node_takeover_verified migration_ready kvm_ready'.split()
     report = {**{k: True for k in true}, **{k: False for k in false}, 'schema': 1, 'scenario': metadata['scenario'],
               **{k: metadata[k] for k in ('source_sha', 'ubuntu', 'image_sha256')}}
@@ -331,7 +384,7 @@ def main():
     except Exception as error:
         report = {'schema': 1, 'passed': False, 'code': str(error) if isinstance(error, Refused) else 'TARGET_NATIVE_ASSERTION_FAILED',
                   'phase': PHASE, 'kvm_ready': False, **{k: metadata[k] for k in ('source_sha', 'ubuntu', 'image_sha256')}}
-        if report['code'] == 'TARGET_RESTORE_SERVER_INVENTORY_REJECTED':
+        if report['code'] == 'TARGET_RESTORE_SERVER_INVENTORY_REJECTED' or report['code'].startswith('TARGET_RESTORE_MAINTENANCE_'):
             report['diagnostics'] = inventory_diagnostics(NONCE)
     with open('/dev/ttyS0', 'w') as console:
         console.write('ASTER_LIBVIRT_NATIVE_RESULT_' + NONCE + ' ' + base64.b64encode(json.dumps(report).encode()).decode() + '\n')

@@ -50,7 +50,7 @@ RELAY_PROOF = {}
 SANDBOX_PROOF = {}
 RELAY_EVENTS = {"spawned", "dns-ok", "dns-failed", "dns-nonpublic", "connect-ok", "connect-failed", "guest-first-bytes", "server-first-bytes", "guest-eof", "server-eof", "timeout", "io-failed"}
 BOOT_STAGES = {"bootcmd", "boot-mask:start", "boot-mask:done", "boot-hosts:start", "boot-hosts:done", "runcmd-enter"}
-GUEST_PHASES = {"preflight", "prepare", "inspect", "resume", "image-and-config", "doctor", "controller-install", "target-plan", "target-provision", "target-credentials", "target-grants", "target-refusals", "target-import", "target-readback", "target-data-refusals"}
+GUEST_PHASES = {"preflight", "prepare", "inspect", "resume", "image-and-config", "doctor", "controller-install", "target-plan", "target-provision", "target-maintenance", "target-credentials", "target-grants", "target-refusals", "target-import", "target-readback", "target-data-refusals"}
 DIAGNOSTIC_COMMANDS = {"apt-update", "apt-simulate", "apt-install", "network-rules-readonly", "other-fixed-command"} | {
     "systemd-" + name for name in ("start", "stop", "enable", "disable", "daemon-reload", "show", "is-active")} | {
     "virsh-" + name for name in ("net-list", "list", "capabilities")}
@@ -99,7 +99,7 @@ class Refused(Exception):
     """Only bounded fixed diagnostic codes may leave the private VM harness."""
 
 
-GUEST_ERROR_CODES |= set("TARGET_NATIVE_COMMAND_FAILED TARGET_NATIVE_OUTPUT_BOUND TARGET_NATIVE_ASSERTION_FAILED TARGET_NATIVE_REFUSAL_UNCONFIRMED TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING TARGET_DEPENDENCIES_UNCONFIRMED TARGET_MYSQL_START_UNCONFIRMED TARGET_DATABASE_CREATE_UNCONFIRMED TARGET_DATABASE_INVENTORY_UNCONFIRMED TARGET_RESTORE_SERVER_INVENTORY_REJECTED".split())
+GUEST_ERROR_CODES |= set("TARGET_NATIVE_COMMAND_FAILED TARGET_NATIVE_OUTPUT_BOUND TARGET_NATIVE_ASSERTION_FAILED TARGET_NATIVE_REFUSAL_UNCONFIRMED TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING TARGET_DEPENDENCIES_UNCONFIRMED TARGET_MYSQL_START_UNCONFIRMED TARGET_DATABASE_CREATE_UNCONFIRMED TARGET_DATABASE_INVENTORY_UNCONFIRMED TARGET_RESTORE_SERVER_INVENTORY_REJECTED TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED".split())
 
 
 def require(condition, code):
@@ -760,7 +760,7 @@ def run_vm(arguments, work, metadata):
         RELAY_PROOF["lifecycle"] = cleanup_relays(work, metadata)
 
 
-PROVISION_TRUE = set("passed real_apt real_systemd real_mysql actual_installer actual_controller target_sealed exact_encoding_preserved credentials_verified runtime_ddl_denied foreign_account_refused lost_credential_refused_without_reset same_operation_preserved source_fixture_synthetic".split())
+PROVISION_TRUE = set("passed real_apt real_systemd real_mysql actual_installer actual_controller target_sealed exact_encoding_preserved credentials_verified runtime_ddl_denied foreign_account_refused lost_credential_refused_without_reset same_operation_preserved maintenance_authentication_verified maintenance_drift_refused maintenance_nonroot_denied source_fixture_synthetic".split())
 PROVISION_FALSE = set("database_restored source_host_export_verified node_takeover_verified migration_ready kvm_ready".split())
 RESTORE_TRUE = PROVISION_TRUE | set("database_restored real_source_database_snapshot exact_rows_verified read_only_reentry_verified modified_data_refused removed_constraint_refused foreign_database_refused".split())
 RESTORE_FALSE = PROVISION_FALSE - {'database_restored'}

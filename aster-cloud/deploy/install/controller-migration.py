@@ -21,6 +21,7 @@ import subprocess
 import sys
 
 PROTOCOL = 'aster.controller-migration/1'
+RESTORE_ERRORS = set('TARGET_RESTORE_SERVER_INVENTORY_REJECTED TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED'.split())
 SYSTEMD = Path('/etc/systemd/system')
 CONFIG = Path('/etc/aster-controller/config.json')
 INSTALL_STATE = Path('/var/lib/aster-cloud-installer/controller/state.json')
@@ -725,7 +726,8 @@ class Target(Host):
         require(not (directory / 'import-started.json').exists() and not (directory / 'import-started.json').is_symlink(),
                 'TARGET_IMPORT_ALREADY_STARTED_USE_DATA_STATUS')
         require(set(p.name for p in directory.iterdir()) <= {'dependencies.json', 'mysql-provision.json',
-                'restore-provision.json', 'runtime-mysql-dsn', 'migration-mysql-dsn', 'mysql-client-home'},
+                'restore-provision.json', 'runtime-mysql-dsn', 'migration-mysql-dsn', 'mysql-client-home',
+                'maintenance-auth-intent.json', 'maintenance-auth-verified.json'},
                 'TARGET_DATABASE_INVENTORY_CHANGED')
         # Only the manifest-checked sibling bundled with this installation.
         module = self.i.provisioning_module()
@@ -751,7 +753,7 @@ class Target(Host):
         except module.ProvisionError as error:
             # Never leak DSNs, arbitrary database errors or output. Preserve
             # journals/partial installation; explicit same operation may resume.
-            if error.code and (error.code.startswith('APT_') or error.code == 'TARGET_RESTORE_SERVER_INVENTORY_REJECTED'):
+            if error.code and (error.code.startswith('APT_') or error.code in RESTORE_ERRORS):
                 raise Refused(error.code) from None
             raise Refused(stage) from None
 
@@ -761,7 +763,8 @@ class Target(Host):
         self.i.protected_path(str(directory), directory=True, private=True)
         require(stat.S_IMODE(directory.stat().st_mode) == 0o700, 'TARGET_DATABASE_DIRECTORY_UNSAFE')
         allowed = {'dependencies.json', 'mysql-provision.json', 'restore-provision.json', 'runtime-mysql-dsn',
-                   'migration-mysql-dsn', 'mysql-client-home', 'import-approval.json', 'import-started.json', 'structure.json'}
+                   'migration-mysql-dsn', 'mysql-client-home', 'import-approval.json', 'import-started.json', 'structure.json',
+                   'maintenance-auth-intent.json', 'maintenance-auth-verified.json'}
         require(set(p.name for p in directory.iterdir()) <= allowed, 'TARGET_DATABASE_INVENTORY_CHANGED')
         module = self.i.provisioning_module()
         try:
@@ -795,8 +798,8 @@ class Target(Host):
                     data.get('target_activation_approved') is False and data.get('migration_ready') is False,
                     'TARGET_IMPORTED_DATA_UNCONFIRMED')
             return {**result, 'root_inventory_verified': True}
-        except module.ProvisionError:
-            raise Refused('TARGET_RESTORE_INVENTORY_UNCONFIRMED') from None
+        except module.ProvisionError as error:
+            raise Refused(error.code if error.code in RESTORE_ERRORS and error.code != 'TARGET_RESTORE_SERVER_INVENTORY_REJECTED' else 'TARGET_RESTORE_INVENTORY_UNCONFIRMED') from None
 
     def prepare(self, action):
         with self.installation_lock():

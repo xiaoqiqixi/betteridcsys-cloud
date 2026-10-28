@@ -62,6 +62,7 @@ class NativeFixtureContract(unittest.TestCase):
                   'exact_encoding_preserved': True, 'credentials_verified': True,
                   'runtime_ddl_denied': True, 'foreign_account_refused': True,
                   'lost_credential_refused_without_reset': True, 'same_operation_preserved': True,
+                  'maintenance_authentication_verified': True, 'maintenance_drift_refused': True, 'maintenance_nonroot_denied': True,
                   'source_fixture_synthetic': True, 'database_restored': False,
                   'source_host_export_verified': False, 'node_takeover_verified': False,
                   'migration_ready': False, 'kvm_ready': False}
@@ -84,12 +85,14 @@ class NativeFixtureContract(unittest.TestCase):
             'passed', 'real_apt', 'real_systemd', 'real_mysql', 'actual_installer', 'actual_controller',
             'target_sealed', 'exact_encoding_preserved', 'credentials_verified', 'runtime_ddl_denied',
             'foreign_account_refused', 'lost_credential_refused_without_reset', 'same_operation_preserved',
+            'maintenance_authentication_verified', 'maintenance_drift_refused', 'maintenance_nonroot_denied',
             'source_fixture_synthetic', 'database_restored', 'real_source_database_snapshot',
             'exact_rows_verified', 'read_only_reentry_verified', 'modified_data_refused',
             'removed_constraint_refused', 'foreign_database_refused')}, **{key: False for key in (
             'source_host_export_verified', 'node_takeover_verified', 'migration_ready', 'kvm_ready')}}
         self.assertEqual(h.public_result(result, metadata), result)
-        for key in ('database_restored', 'real_source_database_snapshot', 'read_only_reentry_verified',
+        for key in ('maintenance_authentication_verified', 'maintenance_drift_refused', 'maintenance_nonroot_denied',
+                    'database_restored', 'real_source_database_snapshot', 'read_only_reentry_verified',
                     'modified_data_refused', 'removed_constraint_refused', 'foreign_database_refused'):
             with self.subTest(key=key), self.assertRaises(h.Refused):
                 h.public_result({**result, key: False}, metadata)

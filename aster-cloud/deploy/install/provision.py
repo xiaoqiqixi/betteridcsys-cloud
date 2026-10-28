@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import pwd
 import re
 import secrets
 import stat
@@ -898,20 +899,133 @@ def restore_database_names(operation):
     return "aster_cloud_restore_" + operation, "aster_r_" + operation[:23], "aster_m_" + operation[:23]
 
 
-def _restore_server_inventory(state_dir, database, runtime_user, migration_user):
-    # Root-visible account/role inventory, not a migrator's filtered metadata.
-    # Unknown accounts (including anonymous/remote root) are never revoked or
-    # adopted. Socket-only MySQL is checked again even on exact-operation resume.
+def _restore_server_baseline(state_dir, database, runtime_user, migration_user):
+    # Root's auth_socket mapping must not authorize another OS principal. The
+    # vendor account is inspected separately, not accepted merely by its name.
     info = _query(state_dir,
-        "SELECT JSON_OBJECT('root',CURRENT_USER(),'tcp_disabled',@@skip_networking,"
+        "SELECT JSON_OBJECT('root',CURRENT_USER(),'uuid',@@server_uuid,'tcp_disabled',@@skip_networking,"
+        "'partial_revokes',@@partial_revokes,'mandatory_roles',@@mandatory_roles,"
         "'mysqlx',(SELECT COUNT(*) FROM information_schema.PLUGINS WHERE PLUGIN_NAME='mysqlx' AND PLUGIN_STATUS='ACTIVE'),"
         "'roles',(SELECT COUNT(*) FROM mysql.role_edges),'default_roles',(SELECT COUNT(*) FROM mysql.default_roles),"
         "'foreign_schemas',(SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME NOT IN ('mysql','sys','information_schema','performance_schema','" + database + "')),"
-        "'accounts',(SELECT COUNT(*) FROM mysql.user WHERE NOT (Host='localhost' AND ("
-        "(User='root' AND plugin='auth_socket') OR (User IN ('mysql.infoschema','mysql.session','mysql.sys') AND account_locked='Y') OR "
-        "(User IN ('" + runtime_user + "','" + migration_user + "') AND plugin='caching_sha2_password')))));\n")
-    if info != {'root': 'root@localhost', 'tcp_disabled': 1, 'mysqlx': 0, 'roles': 0, 'default_roles': 0, 'accounts': 0, 'foreign_schemas': 0}:
-        fail("Restore requires a dedicated socket-only server and exact local account inventory", code="TARGET_RESTORE_SERVER_INVENTORY_REJECTED")
+        "'database_exists',(SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='" + database + "'),"
+        "'application_accounts',(SELECT COUNT(*) FROM mysql.user WHERE BINARY User IN ('" + runtime_user + "','" + migration_user + "')),"
+        "'vendor_count',(SELECT COUNT(*) FROM mysql.user WHERE BINARY User='debian-sys-maint'),"
+        "'accounts',(SELECT COUNT(*) FROM mysql.user WHERE BINARY User<>'debian-sys-maint' AND NOT (BINARY Host='localhost' AND ("
+        "(BINARY User='root' AND BINARY plugin='auth_socket' AND BINARY authentication_string IN ('','root')) OR "
+        "(BINARY User IN ('mysql.infoschema','mysql.session','mysql.sys') AND account_locked='Y') OR "
+        "(BINARY User IN ('" + runtime_user + "','" + migration_user + "') AND BINARY plugin='caching_sha2_password')))));\n")
+    expected = {'root': 'root@localhost', 'tcp_disabled': 1, 'mysqlx': 0, 'roles': 0, 'default_roles': 0,
+                'accounts': 0, 'foreign_schemas': 0, 'partial_revokes': 0, 'mandatory_roles': ''}
+    if (set(info) != set(expected) | {'uuid', 'database_exists', 'application_accounts', 'vendor_count'} or
+            any(info[k] != v for k, v in expected.items()) or
+            not isinstance(info['uuid'], str) or not re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}', info['uuid']) or
+            type(info['vendor_count']) is not int or info['vendor_count'] not in (0, 1)):
+        fail("Dedicated restore server inventory changed", code="TARGET_RESTORE_SERVER_INVENTORY_REJECTED")
+    if not info['vendor_count']:
+        return info, {'mode': 'absent', 'auth_sha256': '', 'grants_sha256': ''}
+    # auth_socket also accepts an OS user with the SAME name as the MySQL user,
+    # even with AS 'root'. Never permit that second principal to exist.
+    try:
+        pwd.getpwnam('debian-sys-maint')
+    except KeyError:
+        pass
+    else:
+        fail("Maintenance OS identity is not root-only", code="TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED")
+    profile = _query(state_dir,
+        "SELECT JSON_OBJECT('local',BINARY Host='localhost','unlocked',account_locked='N',"
+        "'attributes_clear',COALESCE(JSON_LENGTH(User_attributes),0)=0,"
+        "'mode',CASE WHEN BINARY plugin='auth_socket' AND BINARY authentication_string='root' THEN 'root-socket' "
+        "WHEN BINARY plugin IN ('mysql_native_password','caching_sha2_password') AND OCTET_LENGTH(authentication_string)>=32 THEN 'password' ELSE 'unapproved' END,"
+        "'auth_sha256',SHA2(CONCAT(plugin,CHAR(0),authentication_string),256)) "
+        "FROM mysql.user WHERE BINARY User='debian-sys-maint';\n")
+    if (set(profile) != {'local', 'unlocked', 'attributes_clear', 'mode', 'auth_sha256'} or
+            any(profile[k] != 1 for k in ('local', 'unlocked', 'attributes_clear')) or
+            profile['mode'] not in ('password', 'root-socket') or not isinstance(profile['auth_sha256'], str) or
+            not re.fullmatch(r'[a-f0-9]{64}', profile['auth_sha256'])):
+        fail("Maintenance identity is outside the fixed policy", code="TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED")
+    grants = mysql_sql(state_dir, "SHOW GRANTS FOR 'debian-sys-maint'@'localhost';\n")
+    if not grants or len(grants) > 65536:
+        fail("Maintenance privileges cannot be verified", code="TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED")
+    return info, {'mode': profile['mode'], 'auth_sha256': profile['auth_sha256'],
+                  'grants_sha256': hashlib.sha256(grants).hexdigest()}
+
+
+def _restore_maintenance(state_dir, operation, database, runtime_user, migration_user, *, prepare=False):
+    """Harden only this operation's fresh MySQL; never reset an existing host.
+
+    Immutable intent precedes the single fixed ALTER. On lost acknowledgement,
+    the exact intended root-socket state can be verified, not blindly rewritten.
+    A completed receipt makes any later credential/grant drift a refusal.
+    """
+    codename = root_target()
+    dependency_raw = read_private(str(state_dir / 'dependencies.json'))
+    dependency = _json(dependency_raw)
+    if (dependency.get('schema') != 1 or dependency.get('status') != 'dependencies-installed' or
+            dependency.get('component') != 'controller' or dependency.get('with_mysql') is not True or
+            dependency.get('codename') != codename or dependency.get('mysql_transport') != 'unix-socket-only-verified' or
+            'packages-installed' not in dependency.get('steps', [])):
+        fail("Maintenance policy requires the owned fresh package transaction", code="TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED")
+    info, profile = _restore_server_baseline(state_dir, database, runtime_user, migration_user)
+    fixed = {'schema': 1, 'operation_id': operation, 'server_uuid': info['uuid'],
+             'dependencies_sha256': hashlib.sha256(dependency_raw).hexdigest()}
+    intent_path, verified_path = (state_dir / ('maintenance-auth-' + name + '.json') for name in ('intent', 'verified'))
+    def publish(path, value):
+        raw = (json.dumps(value, sort_keys=True) + '\n').encode()
+        write_new(path, raw)
+        fd = os.open(state_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        return raw
+    if intent_path.exists() or intent_path.is_symlink():
+        intent_raw = read_private(str(intent_path))
+        intent = _json(intent_raw)
+        if (set(intent) != set(fixed) | {'before'} or type(intent['schema']) is not int or any(intent[k] != v for k, v in fixed.items()) or
+                not isinstance(intent['before'], dict) or set(intent['before']) != {'mode', 'auth_sha256', 'grants_sha256'}):
+            fail("Maintenance intent binding changed", code="TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED")
+    else:
+        if (not prepare or verified_path.exists() or verified_path.is_symlink() or
+                info['database_exists'] != 0 or info['application_accounts'] != 0):
+            fail("Unrecorded maintenance identity cannot be adopted", code="TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED")
+        intent = {**fixed, 'before': profile}
+        intent_raw = publish(intent_path, intent)
+    before = intent['before']
+    if (before['mode'] not in ('absent', 'password', 'root-socket') or
+            any(not isinstance(before[k], str) or not re.fullmatch(r'[a-f0-9]{64}' if before['mode'] != 'absent' else r'', before[k])
+                for k in ('auth_sha256', 'grants_sha256'))):
+        fail("Maintenance intent malformed", code="TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED")
+    wanted = {'mode': 'absent', 'auth_sha256': '', 'grants_sha256': ''} if before['mode'] == 'absent' else {
+        'mode': 'root-socket', 'auth_sha256': hashlib.sha256(b'auth_socket\x00root').hexdigest(),
+        'grants_sha256': before['grants_sha256']}
+    if before['mode'] == 'root-socket' and before != wanted:
+        fail("Maintenance intent mapping is invalid", code="TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED")
+    verified = {'schema': 1, 'intent_sha256': hashlib.sha256(intent_raw).hexdigest(), 'profile': wanted}
+    if verified_path.exists() or verified_path.is_symlink():
+        if read_private(str(verified_path)) != (json.dumps(verified, sort_keys=True) + '\n').encode() or profile != wanted:
+            fail("Verified maintenance authentication changed; never reset", code="TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED")
+        return
+    if not prepare:
+        fail("Maintenance authentication is not verified", code="TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED")
+    if profile != wanted:
+        if before['mode'] != 'password' or profile != before:
+            fail("Maintenance outcome is ambiguous; never reset", code="TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED")
+        # No password, grant, account name, path or SQL comes from caller input.
+        mysql_sql(state_dir, "ALTER USER 'debian-sys-maint'@'localhost' IDENTIFIED WITH auth_socket AS 'root';\n")
+        after_info, profile = _restore_server_baseline(state_dir, database, runtime_user, migration_user)
+        if after_info != info or profile != wanted:
+            fail("Maintenance conversion outcome unconfirmed", code="TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED")
+    publish(verified_path, verified)
+
+
+def _restore_server_inventory(state_dir, database, runtime_user, migration_user):
+    # Read-only every time: the fixed vendor exception needs immutable fresh-
+    # install provenance, exact root-socket identity, unchanged grants and NSS.
+    operation = state_dir.parent.name
+    if restore_database_names(operation) != (database, runtime_user, migration_user):
+        fail("Restore operation binding changed", code="TARGET_RESTORE_SERVER_INVENTORY_REJECTED")
+    _restore_maintenance(state_dir, operation, database, runtime_user, migration_user)
 
 
 def provision_restore_mysql(operation, charset, collation, *, resume=False):
@@ -942,6 +1056,7 @@ def provision_restore_mysql(operation, charset, collation, *, resume=False):
             os.fsync(fd)
         finally:
             os.close(fd)
+    _restore_maintenance(state_dir, operation, database, runtime_user, migration_user, prepare=True)
     _restore_server_inventory(state_dir, database, runtime_user, migration_user)
     # Validate actual encoding support without interpreting arbitrary SQL.
     encoding = _query(state_dir, "SELECT JSON_OBJECT('matches',COUNT(*)) FROM information_schema.COLLATIONS WHERE COLLATION_NAME='" +
