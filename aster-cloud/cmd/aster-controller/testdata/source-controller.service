@@ -1,0 +1,43 @@
+[Unit]
+Description=Aster Cloud controller (root-reviewed native install)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/opt/aster-cloud/controller/versions/0.1.0-dev.1-dddddddddddddddd/bin/aster-controller serve -config /etc/aster-controller/config.json -console-origin https://source.invalid:9443 -ui-dir /opt/aster-cloud/controller/versions/0.1.0-dev.1-dddddddddddddddd/ui
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+SystemCallArchitectures=native
+LimitNOFILE=1024
+TimeoutStopSec=45
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=1000
+PrivateDevices=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+MemoryMax=256M
+TasksMax=64
+StateDirectory=aster-controller
+StateDirectoryMode=0700
+RestartPreventExitStatus=78
+
+[Install]
+WantedBy=multi-user.target

@@ -364,6 +364,7 @@ def supervisor(binary, systemd=False):
                 expected['encrypted_export_verified'] = True
                 expected['exported_source_local_resume_denied'] = True
                 expected['archived_source_bindings_verified'] = True
+                expected['source_console_entrypoint_verified'] = True
                 expected['relocated_node_materials_verified'] = True
             require(completion == expected, 'CANCEL_PROTOCOL')
             child.stdin.close()
@@ -388,6 +389,7 @@ def supervisor(binary, systemd=False):
                       'source_isolation_observed_before_resume': systemd,
                       'encrypted_export_verified': systemd, 'exported_source_local_resume_denied': systemd,
                       'archived_source_bindings_verified': systemd,
+                      'source_console_entrypoint_verified': systemd,
                       'relocated_node_materials_verified': systemd,
                       'reboot_verified': False, 'source_isolated': False, 'migration_ready': False}
         finally:

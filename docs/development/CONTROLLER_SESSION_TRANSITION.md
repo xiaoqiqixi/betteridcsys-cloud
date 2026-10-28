@@ -61,4 +61,4 @@ MySQL 的自增计数器不随事务回滚还原，见 [InnoDB AUTO_INCREMENT](h
 
 随后全套本地 Go race（真实临时 SQL）通过，516 个顶级测试通过、无运行时 SKIP；5 个 Linux/root/OVS/NAT 专属测试按既有独立门禁明确排除，不称全平台验收。最终只调整测试取消后及时释放阻塞器，避免干扰同服务器其他包；`control` 与 `controllerbackup` 并发实库 race 再次通过，分别 133.037 / 89.358 秒。vet 和四个 Linux amd64 构建通过。测试后已确认没有遗留测试库，关闭本轮 MySQL 进程并移除私有数据/凭据，未改系统服务或用户证书信任。
 
-配置发布与受限验证启动的下一阶段见[配置发布合同](CONTROLLER_CONFIGURATION_PUBLICATION.md)。该合同明确记录尚缺的 Origin 证据、原封存与新配置摘要的衔接；目前未据此启动目标服务或宣称迁移完成。
+配置发布与受限验证启动的下一阶段见[配置发布合同](CONTROLLER_CONFIGURATION_PUBLICATION.md)。新导出已补原管理入口证据；旧包没有该证据时仍为未知。目标 Origin/TLS 批准、原封存与新配置摘要衔接尚未完成，目前未据此启动目标服务或宣称迁移完成。

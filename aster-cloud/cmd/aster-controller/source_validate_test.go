@@ -177,6 +177,9 @@ func TestControllerSourceValidation(t *testing.T) {
 	if json.Unmarshal(out, &report) != nil || report["source_bindings_verified"] != true || report["runtime_materials_verified"] != true || report["material_references"] != float64(6) || report["database_semantics_verified"] != false || report["target_restore_approved"] != false || report["migration_ready"] != false || report["publisher_provenance_verified"] != false {
 		t.Fatalf("overclaimed or missing offline evidence: %s", out)
 	}
+	if entry, exists := report["console_entrypoint"]; !exists || entry != nil {
+		t.Fatalf("legacy archive must report unknown console, not disabled or inferred: %s", out)
+	}
 	// Fixed canonical JSON fixture digest, calculated independently with Python.
 	if report["canonical_configuration_sha256"] != "d8bb3d67a219d2a0bd740a59f3e5f31a42cc0b07186bdbd5ec3ce2cb30b6e428" || report["source_machine_id_sha256"] != strings.Repeat("e", 64) {
 		t.Fatalf("missing target identity bindings: %s", out)
@@ -211,6 +214,74 @@ func TestControllerSourceValidation(t *testing.T) {
 		expectedSource = strings.Repeat("c", 40)
 		defer func() { expectedSource = strings.Repeat("b", 40) }()
 		refused(t, files)
+	})
+	t.Run("authenticated managed console entrypoint", func(t *testing.T) {
+		unit, err := os.ReadFile("testdata/source-controller.service")
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidate := sourceWithControllerUnit(t, files, unit)
+		if err := os.WriteFile(archive, sourceArchive(t, candidate, key), 0600); err != nil {
+			t.Fatal(err)
+		}
+		out, diag, err := invoke()
+		var proof map[string]any
+		if err != nil || len(diag) != 0 || json.Unmarshal(out, &proof) != nil {
+			t.Fatalf("managed console source was not readable: %v %s %s", err, out, diag)
+		}
+		entry, ok := proof["console_entrypoint"].(map[string]any)
+		if !ok || entry["enabled"] != true || entry["origin"] != "https://source.invalid:9443" || entry["unit_sha256"] != sourceHash(unit) || proof["migration_ready"] != false {
+			t.Fatalf("source console lost or overclaimed: %s", out)
+		}
+	})
+	t.Run("known API-only entrypoint differs from legacy unknown", func(t *testing.T) {
+		unit, err := os.ReadFile("testdata/source-controller.service")
+		if err != nil {
+			t.Fatal(err)
+		}
+		unit = bytes.Replace(unit, []byte(" -console-origin https://source.invalid:9443 -ui-dir /opt/aster-cloud/controller/versions/0.1.0-dev.1-dddddddddddddddd/ui"), nil, 1)
+		candidate := sourceWithControllerUnit(t, files, unit)
+		if err := os.WriteFile(archive, sourceArchive(t, candidate, key), 0600); err != nil {
+			t.Fatal(err)
+		}
+		out, diag, err := invoke()
+		var proof map[string]any
+		if err != nil || len(diag) != 0 || json.Unmarshal(out, &proof) != nil {
+			t.Fatalf("API-only source rejected: %v %s %s", err, out, diag)
+		}
+		entry, ok := proof["console_entrypoint"].(map[string]any)
+		if !ok || entry["enabled"] != false || entry["origin"] != "" || entry["unit_sha256"] != sourceHash(unit) {
+			t.Fatalf("API-only proof not explicit: %s", out)
+		}
+	})
+	t.Run("console entrypoint rejects altered or unbound service data", func(t *testing.T) {
+		unit, err := os.ReadFile("testdata/source-controller.service")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, changed := range map[string][]byte{
+			"wrong installation version": bytes.ReplaceAll(unit, []byte("0.1.0-dev.1"), []byte("0.1.0-dev.2")),
+			"wrong source config path":   bytes.ReplaceAll(unit, []byte("/etc/aster-controller/config.json"), []byte("/tmp/other.json")),
+			"wrong UI directory":         bytes.ReplaceAll(unit, []byte("dddddddddddddddd/ui"), []byte("dddddddddddddddd/other")),
+			"additional startup command": bytes.ReplaceAll(unit, []byte("Restart=on-failure"), []byte("ExecStartPre=/bin/true\nRestart=on-failure")),
+			"duplicate executable":       bytes.ReplaceAll(unit, []byte("Restart=on-failure"), []byte("ExecStart=/bin/true\nRestart=on-failure")),
+			"modified sandbox":           bytes.ReplaceAll(unit, []byte("ProtectSystem=strict"), []byte("ProtectSystem=false")),
+			"oversized unit":             bytes.Repeat([]byte("x"), 16385),
+			"empty unit":                 nil,
+		} {
+			t.Run(name, func(t *testing.T) { refused(t, sourceWithControllerUnit(t, files, changed)) })
+		}
+		for _, origin := range []string{"http://source.invalid", "https://source.invalid:0", "https://source.invalid:65536", "https://source.invalid:", "https://source.invalid/path", "https://user@source.invalid", "https://source.invalid?x", "https://source.invalid#x", "https://source.invalid -other-flag true", "https://[not-an-ip]", "https://source.invalid%25"} {
+			t.Run(origin, func(t *testing.T) {
+				changed := bytes.ReplaceAll(unit, []byte("https://source.invalid:9443"), []byte(origin))
+				refused(t, sourceWithControllerUnit(t, files, changed))
+			})
+		}
+		t.Run("authenticated unit digest must match original plan", func(t *testing.T) {
+			candidate := sourceWithControllerUnit(t, files, unit)
+			candidate["source/controller.service"] = bytes.ReplaceAll(unit, []byte("source.invalid"), []byte("another.invalid"))
+			refused(t, candidate)
+		})
 	})
 	t.Run("Unicode node material paths and deduplication", func(t *testing.T) {
 		candidate := sourceWithNode(t, files)
@@ -342,6 +413,28 @@ func TestControllerSourceValidation(t *testing.T) {
 	if e != nil || len(entries) != 2 {
 		t.Fatal("staged plaintext was not cleaned")
 	}
+}
+
+// Independent archived source fixture, not a call into the production parser.
+func sourceWithControllerUnit(t *testing.T, files map[string][]byte, unit []byte) map[string][]byte {
+	t.Helper()
+	candidate := map[string][]byte{}
+	for name, raw := range files {
+		candidate[name] = bytes.Clone(raw)
+	}
+	candidate["source/controller.service"] = bytes.Clone(unit)
+	var plan map[string]any
+	if err := json.Unmarshal(candidate["source/plan.json"], &plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range plan["units"].([]any) {
+		u := value.(map[string]any)
+		if u["name"] == "aster-controller.service" {
+			u["sha256"] = sourceHash(unit)
+		}
+	}
+	candidate["source/plan.json"] = sourceJSON(plan)
+	return candidate
 }
 
 // Independent Python encoder checks interoperability with the already-shipped

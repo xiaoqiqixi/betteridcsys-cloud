@@ -141,6 +141,10 @@ func ExportSealedSource(ctx context.Context, config control.Config, operation st
 	if !bytes.Equal(a, b) {
 		return ExportReport{}, ErrInvalid
 	}
+	unit, e := exportSourceConsole(plan, installation, config, operation)
+	if e != nil {
+		return ExportReport{}, ErrInvalid
+	}
 	// All references originate in the validated config. An export-intent path
 	// can never widen this allowlist to arbitrary host files.
 	refs, e := config.RuntimeMaterials()
@@ -152,6 +156,7 @@ func ExportSealedSource(ctx context.Context, config control.Config, operation st
 		return ExportReport{}, ErrInvalid
 	}
 	files := map[string][]byte{"controller/config.json": configRaw, "source/installation.json": installation, "source/plan.json": plan, "source/isolated.json": isolated}
+	files[sourceControllerUnit] = unit
 	var dsn []byte
 	for i, ref := range refs {
 		raw, e := control.ReadProtected(ref.Path, ref.Private, ref.Maximum)

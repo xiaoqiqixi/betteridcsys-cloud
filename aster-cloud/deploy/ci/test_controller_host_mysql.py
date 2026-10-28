@@ -420,6 +420,11 @@ def worker(binary):
                 validated['material_references'] == 9 and not validated['database_semantics_verified'] and
                 not validated['publisher_provenance_verified'] and not validated['target_restore_approved'] and
                 not validated['migration_ready'], 'ACTUAL_SOURCE_MATERIALS_UNCONFIRMED')
+        plan = json.loads((directory / 'plan.json').read_bytes())
+        controller_unit = next(u for u in plan['units'] if u['name'] == 'aster-controller.service')
+        require(validated.get('console_entrypoint') == {
+                    'enabled': True, 'origin': origin, 'unit_sha256': controller_unit['sha256']},
+                'ACTUAL_SOURCE_CONSOLE_ENTRYPOINT_LOST')
         wrong_source = ('0' if source[0] != '0' else '1') + source[1:]
         rejected = run([*validation_args, '-source-commit', wrong_source], denied=True)
         require(rejected.returncode == 1 and not rejected.stdout and
@@ -434,6 +439,7 @@ def worker(binary):
         send(sys.stdout.buffer, {'phase': 'complete', 'strict_tls': True, 'same_identity_restart': True,
                                 'hosted_opt_parent_hardened': opt_hardened,
                                 'encrypted_export_verified': True, 'exported_source_local_resume_denied': True,
+                                'source_console_entrypoint_verified': True,
                                 'archived_source_bindings_verified': True, 'relocated_node_materials_verified': True})
     finally:
         # Fresh-path checks above establish ownership before any installation;
