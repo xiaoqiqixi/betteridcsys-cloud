@@ -10,7 +10,6 @@ import (
 	"io"
 	"reflect"
 	"regexp"
-	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -328,15 +327,9 @@ func asciiJSON(s string) string {
 	return b.String()
 }
 func (a *Archive) validateMaterials(c control.Config, expectedSHA string) (int, error) {
-	type ref struct {
-		label, path string
-		max         int64
-	}
-	refs := []ref{{"dsn_file", c.DSNFile, 4096}, {"tls_cert_file", c.TLSCertFile, 65536}, {"tls_key_file", c.TLSKeyFile, 65536}, {"billing_token_file", c.BillingTokenFile, 4096}, {"admin_read_token_file", c.AdminReadTokenFile, 4096}, {"admin_write_token_file", c.AdminWriteTokenFile, 4096}}
-	nodes := append([]control.NodeProfile(nil), c.Nodes...)
-	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
-	for _, n := range nodes {
-		refs = append(refs, ref{n.ID + ":ca_file", n.CAFile, 1 << 20}, ref{n.ID + ":client_cert_file", n.ClientCertFile, 1 << 20}, ref{n.ID + ":client_key_file", n.ClientKeyFile, 1 << 20})
+	refs, err := c.RuntimeMaterials()
+	if err != nil {
+		return 0, ErrInvalid
 	}
 	var index []Material
 	if _, e := a.sourceRecord("controller/materials.json", 256<<10, &index); e != nil || len(index) != len(refs) {
@@ -356,22 +349,22 @@ func (a *Archive) validateMaterials(c control.Config, expectedSHA string) (int, 
 	contents := map[string][]byte{}
 	var digestInput strings.Builder
 	for _, r := range refs {
-		m, ok := byLabel[r.label]
-		if !ok || m.Path != r.path || strings.ContainsAny(r.path, "\x00\r\n") {
+		m, ok := byLabel[r.Label]
+		if !ok || m.Path != r.Path || strings.ContainsAny(r.Path, "\x00\r\n") || r.ExpectedSHA256 != "" && r.ExpectedSHA256 != m.SHA256 {
 			return 0, ErrInvalid
 		}
 		name := "materials/" + m.SHA256 + ".bin"
-		raw, e := a.readSmall(name, r.max)
+		raw, e := a.readSmall(name, r.Maximum)
 		if e != nil || len(raw) == 0 || digestBytes(raw) != m.SHA256 {
 			return 0, ErrInvalid
 		}
-		if sha, exists := byPath[r.path]; exists && sha != m.SHA256 {
+		if sha, exists := byPath[r.Path]; exists && sha != m.SHA256 {
 			return 0, ErrInvalid
 		}
-		byPath[r.path] = m.SHA256
+		byPath[r.Path] = m.SHA256
 		used[name] = true
-		contents[r.label] = raw
-		digestInput.WriteString("[" + asciiJSON(r.label) + "," + asciiJSON(r.path) + "," + asciiJSON(m.SHA256) + "]\n")
+		contents[r.Label] = raw
+		digestInput.WriteString("[" + asciiJSON(r.Label) + "," + asciiJSON(r.Path) + "," + asciiJSON(m.SHA256) + "]\n")
 	}
 	if digestBytes([]byte(digestInput.String())) != expectedSHA {
 		return 0, ErrInvalid
@@ -408,7 +401,7 @@ func (a *Archive) validateMaterials(c control.Config, expectedSHA string) (int, 
 	if _, e := tls.X509KeyPair(contents["tls_cert_file"], contents["tls_key_file"]); e != nil {
 		return 0, ErrInvalid
 	}
-	for _, n := range nodes {
+	for _, n := range c.Nodes {
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(contents[n.ID+":ca_file"]) {
 			return 0, ErrInvalid

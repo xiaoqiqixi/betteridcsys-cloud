@@ -134,3 +134,9 @@ Ubuntu22/24 的固定场景扩展为 `controller-restore`，保留原专用库�
 `4065ab6` 的 Ubuntu22 原生结果已越过 `target-provision`，在新加的 `target-maintenance` 测试命令处失败，不能据此声称整链通过。排查发现该测试误用 `--no-login-paths`：[MySQL 8.0.44 的选项解析](https://github.com/mysql/mysql-server/blob/mysql-8.0.44/mysys/my_default.cc)没有此选项，[8.4 的解析](https://github.com/mysql/mysql-server/blob/mysql-8.4.0/mysys/my_default.cc)才包含它。失败报告没有原始 stderr，因此这个兼容缺陷有源码依据，实际正向回归仍须新 SHA 原生测试确认。
 
 测试改用与生产引导相同的 `--no-defaults` 加显式 `MYSQL_TEST_LOGIN_FILE`。root 与 nobody 使用同一个全新、空的 root 所有 `0755` 目录，不读取用户登录文件，也不把 `/root` 不可访问误当认证拒绝；测试后只删除自己创建的空目录。root 必须实际查询到维护身份，非 root 必须收到明确 MySQL 认证错误，非零退出、连接失败或无响应都不能算通过。细分登录、确认、漂移及 NSS 阶段便于定位，公开报告仍只输出固定枚举，不输出 stderr、参数或凭据。生产认证策略和拒绝断言不变。
+
+`047bea4` 的 [CI 40659241428](https://github.com/xiaoqiqixi/betteridcsys-cloud/actions/runs/40659241428) 最终为 13/14 通过。Ubuntu22 的原生准备、维护身份认证、导入与只读重入作业通过；Ubuntu24 在 guest 启动前因 `HOST_NETWORK_CHANGED_BEFORE_VM` 拒绝，不能把它记成 Ubuntu24 恢复通过。网络保护未放宽，也未取消仍在运行的作业。两平台独立 MySQL 与既有管理台浏览器回归通过，不等于完整主控迁移已交付。
+
+### 保留节点身份的材料重定位
+
+节点历史 profile 包含文件路径，直接改路径会改变已批准摘要。运行时与再次导出通过可选的 root 配置 `node_materials` 读取绑定后的材料，保留原 profile，并逐份验证摘要和文件保护；不存在静默回退。配置、真实 mTLS 和再次导出的合同见[节点材料连续性](CONTROLLER_RUNTIME_MATERIALS.md)。此能力不解除目标封存，不等于已完成目标材料落盘或会话撤销。

@@ -213,21 +213,47 @@ class Host:
                          'source_commit': source, 'bundle_sha256': bundle_sha, 'machine_id_sha256': digest(machine),
                          'runtime_materials_sha256': self.material_digest()}
 
-    def material_digest(self):
-        # A config file with unchanged path strings is not an unchanged source
-        # when its DSN, tokens or TLS files have been replaced underneath it.
-        # Only digests enter the private journal; no secret bytes reach output.
+    def material_records(self):
+        # Hash effective locations, not historical profile path strings. The
+        # installed Go command independently checks each profile binding before
+        # isolation/export; this read-only helper never authorizes a new path.
+        bindings = self.config.get('node_materials', [])
+        require(isinstance(bindings, list) and len(bindings) <= len(self.nodes), 'RUNTIME_MATERIAL_BINDING_INVALID')
+        mapped = {}
+        for item in bindings:
+            require(isinstance(item, dict) and set(item) == {'node_id', 'profile_sha256', 'ca_file', 'ca_sha256',
+                    'client_cert_file', 'client_cert_sha256', 'client_key_file', 'client_key_sha256'} and
+                    isinstance(item['node_id'], str) and item['node_id'] in self.node_ids and
+                    item['node_id'] not in mapped and all(isinstance(item[k], str) and SHA.fullmatch(item[k])
+                    for k in ('profile_sha256', 'ca_sha256', 'client_cert_sha256', 'client_key_sha256')),
+                    'RUNTIME_MATERIAL_BINDING_INVALID')
+            mapped[item['node_id']] = item
         fields = [(key, self.config.get(key), key != 'tls_cert_file', 65536 if key.startswith('tls_') else 4096)
                   for key in ('dsn_file', 'tls_cert_file', 'tls_key_file', 'billing_token_file',
                               'admin_read_token_file', 'admin_write_token_file')]
+        pins = {}
         for node in sorted(self.nodes, key=lambda n: n['id']):
-            fields += [(node['id'] + ':' + key, node.get(key), key == 'client_key_file', 1024 * 1024)
+            effective = mapped.get(node['id'], node)
+            fields += [(node['id'] + ':' + key, effective.get(key), key == 'client_key_file', 1024 * 1024)
                        for key in ('ca_file', 'client_cert_file', 'client_key_file')]
-        h = hashlib.sha256()
+            if node['id'] in mapped:
+                for key in ('ca', 'client_cert', 'client_key'):
+                    pins[node['id'] + ':' + key + '_file'] = effective[key + '_sha256']
+        records = []
         for label, path, private, maximum in fields:
             require(isinstance(path, str), 'RUNTIME_MATERIAL_REFERENCE_INVALID')
             raw = self.i.protected_read(path, maximum, private)
-            h.update(json.dumps([label, path, digest(raw)], separators=(',', ':')).encode() + b'\n')
+            sha = digest(raw)
+            require(label not in pins or pins[label] == sha, 'RUNTIME_MATERIAL_BINDING_CHANGED')
+            records.append({'label': label, 'path': path, 'sha256': sha})
+        return records
+
+    def material_digest(self):
+        # Same digest order and encoding as existing source receipts. Secret
+        # bytes never enter a public response or the private reference index.
+        h = hashlib.sha256()
+        for record in self.material_records():
+            h.update(json.dumps([record['label'], record['path'], record['sha256']], separators=(',', ':')).encode() + b'\n')
         return h.hexdigest()
 
     def fresh_identity(self):
@@ -587,14 +613,7 @@ class Host:
             for name in ('export-started.json', 'recovery.key', 'backup.age', 'exported.json'):
                 path = directory / name
                 require(not path.exists() and not path.is_symlink(), 'EXPORT_ALREADY_STARTED')
-            fields = [(key, self.config[key], key != 'tls_cert_file', 65536 if key.startswith('tls_') else 4096)
-                      for key in ('dsn_file', 'tls_cert_file', 'tls_key_file', 'billing_token_file',
-                                  'admin_read_token_file', 'admin_write_token_file')]
-            for node in self.nodes:
-                fields += [(node['id'] + ':' + key, node[key], key == 'client_key_file', 1024 * 1024)
-                           for key in ('ca_file', 'client_cert_file', 'client_key_file')]
-            materials = [{'label': label, 'path': path, 'sha256': digest(self.i.protected_read(path, maximum, private))}
-                         for label, path, private, maximum in sorted(fields)]
+            materials = sorted(self.material_records(), key=lambda m: m['label'])
             self.fresh_identity()
             self.write(directory / 'export-started.json', {
                 'schema': 1, 'controller_id': self.id, 'operation_id': operation,

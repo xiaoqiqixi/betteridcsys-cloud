@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"aster/cloud/internal/control"
 	"aster/cloud/internal/controllerbackup"
 	"aster/cloud/migrations"
 	"bytes"
@@ -221,6 +222,40 @@ func TestControllerSourceValidation(t *testing.T) {
 		if e != nil || len(diag) != 0 || json.Unmarshal(out, &proof) != nil || proof["material_references"] != float64(9) {
 			t.Fatalf("Python-source digest interoperability: %v %s %s", e, out, diag)
 		}
+	})
+	t.Run("relocated node materials survive offline reexport validation", func(t *testing.T) {
+		candidate := sourceWithNode(t, files)
+		config, err := control.ParseConfig(candidate["controller/config.json"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document map[string]any
+		var index []map[string]string
+		json.Unmarshal(candidate["controller/config.json"], &document)
+		json.Unmarshal(candidate["controller/materials.json"], &index)
+		binding := map[string]string{"node_id": "fixture-node", "profile_sha256": config.Nodes[0].Digest()}
+		for _, entry := range index {
+			if field, ok := strings.CutPrefix(entry["label"], "fixture-node:"); ok {
+				entry["path"] = "/unavailable-target/relocated/" + field
+				binding[field] = entry["path"]
+				binding[strings.TrimSuffix(field, "_file")+"_sha256"] = entry["sha256"]
+			}
+		}
+		document["node_materials"] = []any{binding}
+		candidate["controller/config.json"], candidate["controller/materials.json"] = sourceJSON(document), sourceJSON(index)
+		sourceRebind(t, candidate)
+		if e := os.WriteFile(archive, sourceArchive(t, candidate, key), 0600); e != nil {
+			t.Fatal(e)
+		}
+		out, diag, err := invoke()
+		var proof map[string]any
+		if err != nil || len(diag) != 0 || json.Unmarshal(out, &proof) != nil || proof["material_references"] != float64(9) {
+			t.Fatalf("relocated source materials not verified: %v %s %s", err, out, diag)
+		}
+		binding["client_key_sha256"] = strings.Repeat("0", 64)
+		candidate["controller/config.json"] = sourceJSON(document)
+		sourceRebind(t, candidate)
+		refused(t, candidate)
 	})
 	t.Run("archived source owner binds to archived DSN only", func(t *testing.T) {
 		candidate := map[string][]byte{}

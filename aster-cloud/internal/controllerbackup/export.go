@@ -143,30 +143,24 @@ func ExportSealedSource(ctx context.Context, config control.Config, operation st
 	}
 	// All references originate in the validated config. An export-intent path
 	// can never widen this allowlist to arbitrary host files.
-	type reference struct {
-		label, path string
-		private     bool
-		maximum     int64
+	refs, e := config.RuntimeMaterials()
+	if e != nil {
+		return ExportReport{}, ErrInvalid
 	}
-	refs := []reference{{"dsn_file", config.DSNFile, true, 4096}, {"tls_cert_file", config.TLSCertFile, false, 65536}, {"tls_key_file", config.TLSKeyFile, true, 65536},
-		{"billing_token_file", config.BillingTokenFile, true, 4096}, {"admin_read_token_file", config.AdminReadTokenFile, true, 4096}, {"admin_write_token_file", config.AdminWriteTokenFile, true, 4096}}
-	for _, node := range config.Nodes {
-		refs = append(refs, reference{node.ID + ":ca_file", node.CAFile, false, 1 << 20}, reference{node.ID + ":client_cert_file", node.ClientCertFile, false, 1 << 20}, reference{node.ID + ":client_key_file", node.ClientKeyFile, true, 1 << 20})
-	}
-	sort.Slice(refs, func(i, j int) bool { return refs[i].label < refs[j].label })
+	sort.Slice(refs, func(i, j int) bool { return refs[i].Label < refs[j].Label })
 	if len(intent.Materials) != len(refs) {
 		return ExportReport{}, ErrInvalid
 	}
 	files := map[string][]byte{"controller/config.json": configRaw, "source/installation.json": installation, "source/plan.json": plan, "source/isolated.json": isolated}
 	var dsn []byte
 	for i, ref := range refs {
-		raw, e := control.ReadProtected(ref.path, ref.private, ref.maximum)
+		raw, e := control.ReadProtected(ref.Path, ref.Private, ref.Maximum)
 		m := intent.Materials[i]
-		if e != nil || m.Label != ref.label || m.Path != ref.path || m.SHA256 != digestBytes(raw) {
+		if e != nil || m.Label != ref.Label || m.Path != ref.Path || m.SHA256 != digestBytes(raw) || ref.ExpectedSHA256 != "" && ref.ExpectedSHA256 != m.SHA256 {
 			return ExportReport{}, ErrInvalid
 		}
 		files["materials/"+m.SHA256+".bin"] = raw
-		if ref.label == "dsn_file" {
+		if ref.Label == "dsn_file" {
 			dsn = raw
 		}
 	}

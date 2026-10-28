@@ -124,6 +124,19 @@ def worker(binary):
                        'endpoint': 'https://127.0.0.1:9', 'allowed_cidrs': ['127.0.0.1/32'],
                        'ca_file': str(config_dir / 'cert.pem'), 'client_cert_file': str(config_dir / 'cert.pem'),
                        'client_key_file': str(config_dir / 'key.pem'), 'server_certificate_sha256': hashlib.sha256(der).hexdigest()}]}
+        # A previously relocated controller must still fence and export the
+        # real effective materials. The historical node paths do not exist.
+        node = config['nodes'][0]
+        actual_paths = {key: node[key] for key in ('ca_file', 'client_cert_file', 'client_key_file')}
+        for key in actual_paths:
+            node[key] = str(config_dir / ('retired-source-' + key))
+            require(not Path(node[key]).exists(), 'RETIRED_MATERIAL_PATH_PRESENT')
+        binding = {'node_id': node['id'], 'profile_sha256': hashlib.sha256(
+            json.dumps(node, separators=(',', ':')).encode()).hexdigest()}
+        for key, path in actual_paths.items():
+            binding[key] = path
+            binding[key.removesuffix('_file') + '_sha256'] = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        config['node_materials'] = [binding]
         # A closed loopback port: a heartbeat may fail its connection, but can
         # never reach a real node or write a successful capability receipt.
         with socket.socket() as probe:
@@ -368,6 +381,20 @@ def worker(binary):
         refused_export = cli('migration-export', '-operation', exported_operation, denied=True)
         require(refused_export.returncode == 1 and not refused_export.stdout and
                 json.loads(refused_export.stderr).get('code') == 'COMMAND_FAILED', 'UNAUTHORIZED_EXPORT_NOT_REFUSED')
+        # This source has no files at its historical node-profile paths. A
+        # changed effective key must fail explicitly before export is started,
+        # even when its PEM still parses and the key pair is otherwise valid.
+        key_path = Path(actual_paths['client_key_file'])
+        key_bytes = key_path.read_bytes()
+        try:
+            key_path.write_bytes(key_bytes + b'\n')
+            require(migrate('export', exported_operation, denied=True).get('error') ==
+                    'RUNTIME_MATERIAL_BINDING_CHANGED', 'RELOCATED_MATERIAL_DRIFT_NOT_REFUSED')
+            require(not (state / 'host-migrations' / exported_operation / 'export-started.json').exists(),
+                    'MATERIAL_DRIFT_STARTED_EXPORT')
+        finally:
+            key_path.write_bytes(key_bytes)
+        require(all(not Path(node[k]).exists() for k in actual_paths), 'RETIRED_MATERIAL_PATH_RECREATED')
         exported = migrate('export', exported_operation)
         directory = state / 'host-migrations' / exported_operation
         archive, recovery = directory / 'backup.age', directory / 'recovery.key'
@@ -407,7 +434,7 @@ def worker(binary):
         send(sys.stdout.buffer, {'phase': 'complete', 'strict_tls': True, 'same_identity_restart': True,
                                 'hosted_opt_parent_hardened': opt_hardened,
                                 'encrypted_export_verified': True, 'exported_source_local_resume_denied': True,
-                                'archived_source_bindings_verified': True})
+                                'archived_source_bindings_verified': True, 'relocated_node_materials_verified': True})
     finally:
         # Fresh-path checks above establish ownership before any installation;
         # only this fixture's role files and exact operation stages are removed.

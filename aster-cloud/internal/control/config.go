@@ -37,17 +37,19 @@ type Config struct {
 	NetworkProfiles      []NetworkProfile      `json:"network_profiles,omitempty"`
 	OverlayClusters      []OverlayCluster      `json:"overlay_clusters,omitempty"`
 	DirectPublicProfiles []DirectPublicProfile `json:"direct_public_profiles,omitempty"`
+	NodeMaterials        []NodeMaterialBinding `json:"node_materials,omitempty"`
 }
 type NodeProfile struct {
-	ID                      string   `json:"id"`
-	DatacenterID            string   `json:"datacenter_id"`
-	GroupID                 string   `json:"group_id"`
-	Endpoint                string   `json:"endpoint"`
-	AllowedCIDRs            []string `json:"allowed_cidrs"`
-	CAFile                  string   `json:"ca_file"`
-	ClientCertFile          string   `json:"client_cert_file"`
-	ClientKeyFile           string   `json:"client_key_file"`
-	ServerCertificateSHA256 string   `json:"server_certificate_sha256"`
+	ID                      string               `json:"id"`
+	DatacenterID            string               `json:"datacenter_id"`
+	GroupID                 string               `json:"group_id"`
+	Endpoint                string               `json:"endpoint"`
+	AllowedCIDRs            []string             `json:"allowed_cidrs"`
+	CAFile                  string               `json:"ca_file"`
+	ClientCertFile          string               `json:"client_cert_file"`
+	ClientKeyFile           string               `json:"client_key_file"`
+	ServerCertificateSHA256 string               `json:"server_certificate_sha256"`
+	materials               *NodeMaterialBinding `json:"-"`
 }
 type Preset struct {
 	ID               string                  `json:"id"`
@@ -198,6 +200,9 @@ func ParseConfig(raw []byte) (Config, error) {
 	if !strict(raw, &c) || !c.Valid() {
 		return Config{}, ErrInput
 	}
+	for i, p := range c.Nodes {
+		c.Nodes[i], _ = c.nodeWithMaterials(p) // Valid checked every binding.
+	}
 	return c, nil
 }
 
@@ -245,7 +250,7 @@ func (c Config) Valid() bool {
 		}
 		seen[n.ID] = true
 	}
-	if !c.validOverlayClusters() {
+	if !c.validNodeMaterials() || !c.validOverlayClusters() {
 		return false
 	}
 	if len(c.NetworkProfiles) > 256 {
@@ -308,7 +313,7 @@ func (c Config) approvesTaskNetwork(t nodeproto.NodeTask) bool {
 func (c Config) Node(id string) (NodeProfile, bool) {
 	for _, n := range c.Nodes {
 		if n.ID == id {
-			return n, true
+			return c.nodeWithMaterials(n)
 		}
 	}
 	return NodeProfile{}, false
@@ -329,7 +334,7 @@ func (p NodeProfile) Valid() bool {
 			return false
 		}
 	}
-	return true
+	return p.materials == nil || p.materials.matches(p)
 }
 func (p NodeProfile) Digest() string { raw, _ := json.Marshal(p); return nodeproto.Digest(raw) }
 func (c Config) Candidates(r controllerapi.Request) []Candidate {
@@ -337,6 +342,11 @@ func (c Config) Candidates(r controllerapi.Request) []Candidate {
 		return nil
 	}
 	add := func(n NodeProfile, resources controllerapi.Resources, profileID string) (Candidate, bool) {
+		var ok bool
+		n, ok = c.nodeWithMaterials(n)
+		if !ok {
+			return Candidate{}, false
+		}
 		candidate := Candidate{Node: n, ProfileSHA: n.Digest(), Resources: resources, DirectPublicRequired: c.directRequired(n.ID) && resources.NetworkType == "normal"}
 		if resources.NetworkType == "vpc" {
 			profile, ok := c.NetworkProfile(profileID)
@@ -406,9 +416,19 @@ func (c Config) Candidates(r controllerapi.Request) []Candidate {
 func loadNodeTLS(p NodeProfile) (*tls.Config, error) { return loadNodeTLSOwned(p, 0) }
 
 func loadNodeTLSOwned(p NodeProfile, owner uint32) (*tls.Config, error) {
-	ca, e1 := readProtected(p.CAFile, false, 65536, owner)
-	cert, e2 := readProtected(p.ClientCertFile, false, 65536, owner)
-	key, e3 := readProtected(p.ClientKeyFile, true, 65536, owner)
+	caPath, certPath, keyPath := p.CAFile, p.ClientCertFile, p.ClientKeyFile
+	if b := p.materials; b != nil {
+		if !b.matches(p) {
+			return nil, ErrUnavailable
+		}
+		caPath, certPath, keyPath = b.CAFile, b.ClientCertFile, b.ClientKeyFile
+	}
+	ca, e1 := readProtected(caPath, false, 65536, owner)
+	cert, e2 := readProtected(certPath, false, 65536, owner)
+	key, e3 := readProtected(keyPath, true, 65536, owner)
+	if b := p.materials; b != nil && (!pinnedMaterial(ca, b.CASHA256) || !pinnedMaterial(cert, b.ClientCertSHA256) || !pinnedMaterial(key, b.ClientKeySHA256)) {
+		return nil, ErrUnavailable
+	}
 	pool := x509.NewCertPool()
 	pair, e4 := tls.X509KeyPair(cert, key)
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || !pool.AppendCertsFromPEM(ca) {
