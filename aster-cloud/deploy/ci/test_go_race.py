@@ -2,6 +2,7 @@
 """Public runner scheduling contract. Fake go is a process boundary, not SQL/crypto evidence."""
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -29,17 +30,29 @@ elif os.environ.get('FAIL_GROUP')=='1':raise SystemExit(1)
             calls=[json.loads(line) for line in (root/'calls').read_text().splitlines()] if (root/'calls').exists() else []
             return result,calls
 
-    def test_all_current_and_future_packages_run_once_with_unchanged_budget(self):
+    def test_all_current_and_future_tests_run_once_with_unchanged_budget(self):
         for args in ((),('--native-mysql',)):
             result,calls=self.invoke(*args)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(calls[0],['list','-mod=readonly','./...'])
-            runs=calls[1:];self.assertEqual(len(runs),2)
+            runs=calls[1:];self.assertEqual(len(runs),3)
             self.assertEqual(runs[0][-1],PACKAGES[0])
-            self.assertEqual([p for run in runs for p in run if p.startswith('aster/cloud/')],PACKAGES)
+            self.assertEqual(runs[1][-1],PACKAGES[0])
+            self.assertEqual(runs[0][runs[0].index('-run')+1],'^TestControllerSourceValidation$')
+            self.assertNotIn('-run',runs[1])
             for run in runs:
                 self.assertEqual(run[:6],['test','-mod=readonly','-race','-count=1','-v','-timeout=10m'])
-                self.assertEqual('-skip' in run,bool(args))
+            # Every top-level controller test is selected once, including future
+            # tests; the source case retains all its children and helper process.
+            for test in ('TestControllerSourceValidation','TestControllerArchiveInspection','TestFutureControllerCase'):
+                selected=0
+                for run in runs[:2]:
+                    include=run[run.index('-run')+1] if '-run' in run else '.*'
+                    exclude=run[run.index('-skip')+1] if '-skip' in run else '^$'
+                    selected+=bool(re.search(include,test) and not re.search(exclude,test))
+                self.assertEqual(selected,1,test)
+            self.assertEqual([p for p in runs[2] if p.startswith('aster/cloud/')],PACKAGES[1:])
+            self.assertEqual('-skip' in runs[2],bool(args))
 
     def test_failure_stops_without_claiming_later_packages_passed(self):
         result,calls=self.invoke(fail=True)
