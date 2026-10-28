@@ -229,16 +229,30 @@ def execute(metadata):
     expected_maintenance = {'plugin': 'auth_socket', 'mapping': 'root', 'locked': 'N'}
     maintenance_sql = "SELECT JSON_OBJECT('plugin',plugin,'mapping',authentication_string,'locked',account_locked) FROM mysql.user WHERE User='debian-sys-maint' AND Host='localhost';\n"
     require(module._query(directory, maintenance_sql) == expected_maintenance)
-    maint_command = ['/usr/bin/mysql', '--no-defaults', '--no-login-paths', '--protocol=SOCKET',
+    # Ubuntu's MySQL 8.0 has no --no-login-paths (introduced in 8.4).
+    # Use the documented login-file override, as production bootstrap does.
+    # Both OS identities can traverse this empty root-owned directory; an
+    # inaccessible /root path must not masquerade as an authentication denial.
+    client_home = Path('/run') / ('aster-native-mysql-client-' + NONCE)
+    client_home.mkdir(mode=0o755)
+    client_home.chmod(0o755)
+    client_env = {**ENV, 'HOME': str(client_home), 'MYSQL_TEST_LOGIN_FILE': str(client_home / 'absent-login-file')}
+    require(not list(client_home.iterdir()))
+    maint_command = ['/usr/bin/mysql', '--no-defaults', '--protocol=SOCKET',
         '--socket=/run/mysqld/mysqld.sock', '--user=debian-sys-maint', '--batch', '--raw', '--skip-column-names', '--skip-reconnect', '--connect-timeout=5']
-    require(run(maint_command, data=b'SELECT CURRENT_USER();\n').stdout == b'debian-sys-maint@localhost\n')
-    denied = subprocess.run(['/usr/sbin/runuser', '--user', 'nobody', '--', *maint_command],
-        input=b'SELECT CURRENT_USER();\n', env={**ENV, 'HOME': '/nonexistent'}, cwd='/',
+    progress('target-maintenance-root-login')
+    require(run(maint_command, env=client_env, data=b'SELECT CURRENT_USER();\n').stdout == b'debian-sys-maint@localhost\n')
+    progress('target-maintenance-nonroot-login')
+    denied = subprocess.run(['/usr/sbin/runuser', '--preserve-environment', '--user', 'nobody', '--', *maint_command],
+        input=b'SELECT CURRENT_USER();\n', env=client_env, cwd='/',
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
     require(denied.returncode == 1 and not denied.stdout and re.match(rb'^ERROR (1045|1698) \(28000\)', denied.stderr),
             'TARGET_NATIVE_REFUSAL_UNCONFIRMED')
+    require(not list(client_home.iterdir()))
+    client_home.rmdir()  # Only the exact empty directory this fixture created.
     # Simulate loss of only the completion acknowledgement: immutable intent
     # plus exact authentication/grants can reconstruct that same confirmation.
+    progress('target-maintenance-confirmation')
     confirmation = directory / 'maintenance-auth-verified.json'
     retained_confirmation = ROOT / 'retained-maintenance-confirmation.json'
     confirmation.rename(retained_confirmation)
@@ -246,6 +260,7 @@ def execute(metadata):
     require(sha(confirmation) == sha(retained_confirmation) == hashes['maintenance-auth-verified.json'])
     # Test-owned tampering is restored ONLY by this disposable fixture. The
     # production command must leave every changed credential untouched.
+    progress('target-maintenance-drift')
     for alteration in ("IDENTIFIED WITH auth_socket AS 'nobody'", "IDENTIFIED WITH caching_sha2_password BY RANDOM PASSWORD"):
         module.mysql_sql(directory, "ALTER USER 'debian-sys-maint'@'localhost' " + alteration + ";\n")
         changed = module.mysql_sql(directory, "SELECT SHA2(CONCAT(plugin,CHAR(0),authentication_string),256) FROM mysql.user WHERE User='debian-sys-maint' AND Host='localhost';\n")
@@ -264,6 +279,7 @@ def execute(metadata):
     module.mysql_sql(directory, "DROP USER 'debian-sys-maint'@'%';\n")
     # auth_socket permits a same-named OS user as well as AS 'root'. A newly
     # introduced NSS principal must therefore block all further restore steps.
+    progress('target-maintenance-nss')
     run(['/usr/sbin/useradd', '--no-create-home', '--no-user-group', '--gid', '65534',
          '--shell', '/usr/sbin/nologin', 'debian-sys-maint'])
     try:

@@ -451,6 +451,17 @@ class NativeFixtureContract(unittest.TestCase):
         report["source_sha"] = "b" * 40
         with self.assertRaises(h.Refused): h.public_result(report, self.metadata())
 
+    def test_maintenance_failure_stage_distinguishes_authentication_from_fixture_setup(self):
+        report = dict(self.metadata(), schema=1, passed=False, kvm_ready=False,
+                      code='TARGET_NATIVE_COMMAND_FAILED', stderr='PRIVATE', argv=['PRIVATE'])
+        for phase in ('target-maintenance-root-login', 'target-maintenance-nonroot-login',
+                      'target-maintenance-confirmation', 'target-maintenance-drift', 'target-maintenance-nss'):
+            with self.subTest(phase=phase):
+                output = h.public_result({**report, 'phase': phase}, self.metadata())
+                self.assertEqual(output['phase'], phase)
+                self.assertFalse(output['passed'])
+                self.assertNotIn('PRIVATE', json.dumps(output))
+
     def test_mysql_failure_diagnostics_export_only_fixed_bounded_counts(self):
         fields = ('current_root', 'root_socket', 'tcp_disabled', 'mysqlx_active', 'roles', 'default_roles',
                   'foreign_schemas', 'other_accounts', 'vendor_count', 'vendor_local', 'vendor_root_socket', 'vendor_password')

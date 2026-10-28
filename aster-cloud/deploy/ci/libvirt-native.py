@@ -50,7 +50,7 @@ RELAY_PROOF = {}
 SANDBOX_PROOF = {}
 RELAY_EVENTS = {"spawned", "dns-ok", "dns-failed", "dns-nonpublic", "connect-ok", "connect-failed", "guest-first-bytes", "server-first-bytes", "guest-eof", "server-eof", "timeout", "io-failed"}
 BOOT_STAGES = {"bootcmd", "boot-mask:start", "boot-mask:done", "boot-hosts:start", "boot-hosts:done", "runcmd-enter"}
-GUEST_PHASES = {"preflight", "prepare", "inspect", "resume", "image-and-config", "doctor", "controller-install", "target-plan", "target-provision", "target-maintenance", "target-credentials", "target-grants", "target-refusals", "target-import", "target-readback", "target-data-refusals"}
+GUEST_PHASES = {"preflight", "prepare", "inspect", "resume", "image-and-config", "doctor", "controller-install", "target-plan", "target-provision", "target-maintenance", "target-maintenance-root-login", "target-maintenance-nonroot-login", "target-maintenance-confirmation", "target-maintenance-drift", "target-maintenance-nss", "target-credentials", "target-grants", "target-refusals", "target-import", "target-readback", "target-data-refusals"}
 DIAGNOSTIC_COMMANDS = {"apt-update", "apt-simulate", "apt-install", "network-rules-readonly", "other-fixed-command"} | {
     "systemd-" + name for name in ("start", "stop", "enable", "disable", "daemon-reload", "show", "is-active")} | {
     "virsh-" + name for name in ("net-list", "list", "capabilities")}
