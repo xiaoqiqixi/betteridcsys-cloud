@@ -178,8 +178,9 @@ jobs:
           - os: ubuntu-24.04
             ubuntu: '24.04'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 55
-    # 15m bounded isolated source SQL fixture plus the unchanged 30m target VM cap.
+    timeout-minutes: 85
+    # 15m isolated source SQL + fixed 60m expanded restore VM + setup/cleanup.
+    # Simpler libvirt/provision VMs keep 30m; no automatic retry or gate waiver.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

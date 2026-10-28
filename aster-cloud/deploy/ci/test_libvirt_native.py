@@ -720,7 +720,24 @@ class NativeFixtureContract(unittest.TestCase):
         self.assertIn('require(result.get("passed") is True, "GUEST_ACCEPTANCE_FAILED")', source)
         self.assertIn('public = public_result(result, metadata)', source)
         self.assertIn('"progress": VM_PROGRESS, "guest_result_seen": GUEST_RESULT_SEEN', source)
-        self.assertIn('deadline = time.monotonic() + 1800', source)
+        self.assertIn('deadline = started + guest_budget', source)
+
+    def test_guest_budget_is_fixed_per_reviewed_scenario(self):
+        # Restore includes source-data readback and material drift cases; the
+        # simpler libvirt/provision scenarios retain their existing bounds.
+        self.assertEqual(h.guest_deadline_seconds('libvirt'), 1800)
+        self.assertEqual(h.guest_deadline_seconds('controller-provision'), 1800)
+        self.assertEqual(h.guest_deadline_seconds('controller-restore'), 3600)
+        for invalid in (None, '', 'restore', 'controller-restore ', 3600):
+            with self.subTest(scenario=invalid), self.assertRaises(h.Refused):
+                h.guest_deadline_seconds(invalid)
+
+    def test_guest_budget_cannot_be_overridden_from_cli(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as result:
+            h.main(['--scenario', 'controller-restore', '--ubuntu', '22.04',
+                    '--source-root', '/unused', '--source-sha', 'a' * 40,
+                    '--output', '/unused', '--timeout', '0'])
+        self.assertEqual(result.exception.code, 2)
 
     def test_real_proc_sandbox_contract_requires_identity_caps_and_two_filters(self):
         fields = {"Uid": [str(os.getuid())] * 4, "Gid": [str(os.getgid())] * 4,

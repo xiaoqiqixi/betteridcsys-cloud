@@ -706,8 +706,18 @@ def make_seed(work, root, source_sha, image_provenance, scenario="libvirt"):
     return seed, metadata
 
 
+def guest_deadline_seconds(scenario):
+    # Fixed scenario policy, not a caller-controlled/disabled timeout. Run
+    # 40663478295 spent 13–18m in signed guest bootstrap before restore checks;
+    # the full encrypted import/readback/material suite needs its own budget.
+    require(scenario in ('libvirt', 'controller-provision', 'controller-restore'),
+            'FIXED_GUEST_SCENARIO_REQUIRED')
+    return 3600 if scenario == 'controller-restore' else 1800
+
+
 def run_vm(arguments, work, metadata):
     global GUEST_RESULT_SEEN, RELAY_PROOF, SANDBOX_PROOF
+    guest_budget = guest_deadline_seconds(metadata.get('scenario', 'libvirt'))
     progress_pattern = ("ASTER_LIBVIRT_NATIVE_PROGRESS_" + metadata["nonce"] + " ").encode()
     progress_allowed = GUEST_PHASES | {name + ":" + outcome for name in DIAGNOSTIC_COMMANDS for outcome in ("start", "done", "failed")} | BOOT_STAGES
     started = time.monotonic()
@@ -718,11 +728,9 @@ def run_vm(arguments, work, metadata):
     selector = selectors.DefaultSelector(); selector.register(process.stdout, selectors.EVENT_READ)
     try:
         SANDBOX_PROOF.update(verify_running_sandbox(process))
-        # Run 40504806662 on signed Ubuntu22 reached real libvirt preparation,
-        # resume and image verification at 1170s; a 1200s whole-VM cap killed
-        # the final doctor phase. Keep a finite 30m bound (40m job), no retry,
-        # and require the same complete guest report and assertions.
-        deadline = time.monotonic() + 1800
+        # Count sandbox startup in the fixed cap too. No retry or relaxed
+        # report/assertion/crypto strength; expiration remains a failure.
+        deadline = started + guest_budget
         with (work / "private-serial.log").open("xb") as log:
             (work / "private-serial.log").chmod(0o600)
             while time.monotonic() < deadline:
