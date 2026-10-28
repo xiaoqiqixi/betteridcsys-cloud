@@ -63,6 +63,29 @@ func exerciseSessionTransition(t *testing.T, ctx context.Context, a *controllerb
 			t.Fatal("operation binding changed without rejecting persisted intent", e)
 		}
 	}
+	// The bounded schema wait must not turn duplicate operation attempts into
+	// queued retries. A second connection already owns this exact operation.
+	blocker, e := db.Conn(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	operationLock := "aster_restore_" + untrusted["operation_id"].(string)
+	func() {
+		defer blocker.Close()
+		var owned int
+		if e := blocker.QueryRowContext(ctx, "SELECT GET_LOCK(?,5)", operationLock).Scan(&owned); e != nil || owned != 1 {
+			t.Fatal("fixture operation lock unavailable", e)
+		}
+		defer blocker.ExecContext(context.Background(), "DO RELEASE_LOCK(?)", operationLock)
+		short, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if _, e := a.ResumeSessionRevocation(short, db, owner, dsn, proof, binding, intent); e != controllerbackup.ErrInvalid || short.Err() != nil {
+			t.Fatal("duplicate operation was queued instead of refused", e, short.Err())
+		}
+	}()
+	if _, e := a.VerifyRestoredDatabase(ctx, db, owner, dsn, proof); e != nil {
+		t.Fatal("duplicate attempt changed the preimage", e)
+	}
 	// A consumed AUTO_INCREMENT without a committed row is a real MySQL
 	// rollback state, not a new intent or a reason to drop/change the table.
 	tx, e := db.BeginTx(ctx, nil)
@@ -81,7 +104,9 @@ func exerciseSessionTransition(t *testing.T, ctx context.Context, a *controllerb
 	if _, e := verify(); e != controllerbackup.ErrInvalid {
 		t.Fatal("rolled-back audit must not count as successful revocation", e)
 	}
-	report, e := a.ResumeSessionRevocation(ctx, db, owner, dsn, proof, binding, intent)
+	report, e := resumeAfterSchemaLock(t, ctx, db, untrusted["operation_id"].(string), func(call context.Context) (controllerbackup.SessionRevocationReport, error) {
+		return a.ResumeSessionRevocation(call, db, owner, dsn, proof, binding, intent)
+	})
 	if e != nil || !report.SessionsRevoked || report.RevokedSessions != 2 || !report.ExactDatabaseVerified || !report.AuditAppended || report.ReadOnlyVerification || report.MigrationReady || report.TargetActivationApproved {
 		t.Fatal("explicit same-intent resume must remove both authenticated and anonymous sessions", report, e)
 	}
@@ -150,4 +175,133 @@ func exerciseSessionTransition(t *testing.T, ctx context.Context, a *controllerb
 			t.Fatal("fixture-only repair did not restore exact postimage", e)
 		}
 	}
+}
+
+// A schema migration elsewhere on the same MySQL server uses the same named
+// lock. Observe the actual blocked SQL request, not a guessed sleep or mocked
+// query. Releasing that lock must let this one explicit resume proceed without
+// replaying the operation. This is also a deterministic reproduction of the
+// parallel-package Ubuntu22 failure at the public recovery boundary.
+func resumeAfterSchemaLock(t *testing.T, ctx context.Context, db *sql.DB, operation string, resume func(context.Context) (controllerbackup.SessionRevocationReport, error)) (controllerbackup.SessionRevocationReport, error) {
+	t.Helper()
+	blocker, e := db.Conn(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer blocker.Close()
+	var locked int
+	if e = blocker.QueryRowContext(ctx, "SELECT GET_LOCK('aster_controller_schema_v1',5)").Scan(&locked); e != nil || locked != 1 {
+		t.Fatal("fixture must actually hold the schema lock", e)
+	}
+	released := false
+	release := func() {
+		if released {
+			return
+		}
+		cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		var unlocked int
+		if e := blocker.QueryRowContext(cleanup, "SELECT RELEASE_LOCK('aster_controller_schema_v1')").Scan(&unlocked); e != nil || unlocked != 1 {
+			t.Error("fixture schema lock release failed", e)
+		}
+		released = true
+	}
+	defer release()
+	type outcome struct {
+		report controllerbackup.SessionRevocationReport
+		err    error
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	unchanged := func() {
+		t.Helper()
+		var sessions, audit int
+		if blocker.QueryRowContext(ctx, "SELECT COUNT(*) FROM controller_console_sessions").Scan(&sessions) != nil || sessions != 2 ||
+			blocker.QueryRowContext(ctx, "SELECT COUNT(*) FROM controller_identity_audit").Scan(&audit) != nil || audit != 1 {
+			t.Fatal("waiting recovery changed the restored preimage")
+		}
+	}
+	for _, cancelWaiting := range []bool{true, false} {
+		call, cancel := context.WithTimeout(ctx, 8*time.Second)
+		done := make(chan outcome, 1)
+		settled := false
+		go func() { r, e := resume(call); done <- outcome{r, e} }()
+		defer func() {
+			cancel()
+			if !settled {
+				release()
+				select {
+				case <-done:
+				case <-time.After(3 * time.Second):
+					t.Error("owned recovery goroutine did not settle")
+				}
+			}
+		}()
+		waiting := false
+		for !waiting {
+			select {
+			case r := <-done:
+				settled = true
+				t.Fatalf("explicit recovery returned before a temporary schema lock was released: %v", r.err)
+			case <-call.Done():
+				t.Fatal("actual schema wait was not observed", call.Err())
+			case <-ticker.C:
+				var count int
+				q := "SELECT COUNT(*) FROM performance_schema.metadata_locks m JOIN performance_schema.threads t ON t.THREAD_ID=m.OWNER_THREAD_ID WHERE m.OBJECT_TYPE='USER LEVEL LOCK' AND m.OBJECT_NAME='aster_controller_schema_v1' AND m.LOCK_STATUS='PENDING' AND t.PROCESSLIST_ID=IS_USED_LOCK(?)"
+				if e := blocker.QueryRowContext(call, q, "aster_restore_"+operation).Scan(&count); e != nil {
+					t.Fatal("real metadata-lock observation unavailable", e)
+				}
+				waiting = count == 1
+			}
+		}
+		unchanged()
+		if cancelWaiting {
+			cancel()
+		} else {
+			release()
+		}
+		select {
+		case r := <-done:
+			settled = true
+			if !cancelWaiting {
+				return r.report, r.err
+			}
+			if r.err != controllerbackup.ErrInvalid || call.Err() != context.Canceled || r.report.SessionsRevoked {
+				t.Fatal("cancelled schema wait was accepted", r.err, r.report)
+			}
+			unchanged()
+			// MySQL may notice the closed socket only when its bounded GET_LOCK
+			// wait returns. Client cancellation must not be mistaken for instant
+			// server-side release, nor followed by an automatic operation retry.
+			// Release the fixture blocker now so unrelated packages sharing this
+			// isolated server are not held for an entire five-second deadline.
+			release()
+			cleanup, stop := context.WithTimeout(ctx, 8*time.Second)
+			for {
+				var free int
+				if e := blocker.QueryRowContext(cleanup, "SELECT IS_FREE_LOCK(?)", "aster_restore_"+operation).Scan(&free); e != nil {
+					stop()
+					t.Fatal("cancelled wait did not release its operation lock within the bound", e)
+				}
+				if free == 1 {
+					break
+				}
+				select {
+				case <-cleanup.Done():
+					stop()
+					t.Fatal("cancelled wait retained the operation lock beyond the server wait budget")
+				case <-ticker.C:
+				}
+			}
+			stop()
+			unchanged()
+			if e := blocker.QueryRowContext(ctx, "SELECT GET_LOCK('aster_controller_schema_v1',5)").Scan(&locked); e != nil || locked != 1 {
+				t.Fatal("fixture failed to restore schema contention for the successful call", e)
+			}
+			released = false
+		case <-time.After(3 * time.Second):
+			t.Fatal("recovery did not settle after schema release or cancellation")
+		}
+	}
+	panic("unreachable")
 }

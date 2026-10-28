@@ -324,12 +324,20 @@ func (a *Archive) changeSessions(ctx context.Context, db *sql.DB, receipt []byte
 			_, _ = conn.ExecContext(c, "DO RELEASE_LOCK(?)", acquired[i])
 		}
 	}()
-	for _, name := range []string{"aster_restore_" + p.OperationID, "aster_controller_schema_v1"} {
+	// Duplicate attempts of this same operation still fail immediately. The
+	// schema guard is server-wide and is also used by other controller databases:
+	// wait with the same bounded budget as Migrate/SnapshotDatabase, before any
+	// transaction or write, rather than rejecting a momentarily busy schema.
+	// This is one lock acquisition, not a retry of the session transition.
+	for _, lock := range []struct {
+		name string
+		wait int
+	}{{"aster_restore_" + p.OperationID, 0}, {"aster_controller_schema_v1", 5}} {
 		var locked int
-		if conn.QueryRowContext(ctx, "SELECT GET_LOCK(?,0)", name).Scan(&locked) != nil || locked != 1 {
+		if conn.QueryRowContext(ctx, "SELECT GET_LOCK(?,?)", lock.name, lock.wait).Scan(&locked) != nil || locked != 1 {
 			return fail()
 		}
-		acquired = append(acquired, name)
+		acquired = append(acquired, lock.name)
 	}
 	for _, q := range []string{"SET SESSION information_schema_stats_expiry=0", "SET SESSION sql_quote_show_create=1",
 		"SET SESSION sql_mode='STRICT_ALL_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION,NO_AUTO_VALUE_ON_ZERO'", "SET SESSION foreign_key_checks=1"} {

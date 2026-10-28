@@ -45,3 +45,20 @@ MySQL 的自增计数器不随事务回滚还原，见 [InnoDB AUTO_INCREMENT](h
 - 实库测试新增已登录/匿名会话、保留历史审计及删除高 ID、回滚计数、绑定篡改、重复事件、额外会话、密码/资源行和外键变化拒绝、源库不变。原生夹具新增真实只读 SQL 拒绝、显式恢复、只读重入、材料阶段联动及仍然封存。
 
 上述实库和原生新增用例尚待本次源码 CI 实际运行。本机无本轮隔离 MySQL，编译或本地 race 通过不等于 SQL 验收。配置发布、实际 HTTPS 旧 Cookie 失效/重新登录、源退役和节点接管仍未完成；当前输出明确 `target_activation_approved=false`、`migration_ready=false`，原生报告明确 `session_browser_verified=false`。
+
+## 2026-10-28：结构锁竞争修正
+
+`2b4eb8f` 的 [CI 40676867833](https://github.com/xiaoqiqixi/betteridcsys-cloud/actions/runs/40676867833) 中，Ubuntu24 的独立实库通过，Ubuntu22 在显式会话恢复断言失败；不是前一轮测试包超时。两个原生恢复作业仍须取各自最终结果，不能把单项结果合并成整轮成功。
+
+`aster_controller_schema_v1` 是 MySQL 服务级的命名锁，其他控制数据库的迁移也会持有它。会话转换原先以零等待申请该锁，因此短暂占用就拒绝整个显式恢复。原始用例在独立本地 MySQL 单独运行通过；增加真实锁竞争后，原实现稳定返回拒绝，修正后通过。MySQL 的锁语义见 [GET_LOCK](https://dev.mysql.com/doc/refman/8.4/en/locking-functions.html)，等待观测使用 [metadata_locks](https://dev.mysql.com/doc/refman/8.4/en/performance-schema-metadata-locks-table.html)，不是 mock SQL 或用 sleep 猜测已进入事务。
+
+- 操作专属锁保持零等待，重复操作不排队、不隐式重做。
+- 结构锁改为和既有迁移/快照相同的单次、最多 5 秒等待；它发生在事务和数据写入之前。没有业务重试，没有放宽完整数据库前后像、意图或高水位检查。
+- 回归先确认真实 MySQL 已出现本操作的 `PENDING` 锁，再分别取消等待、释放锁。等待和取消不能改变会话/审计，取消后必须观测原操作锁在有限时间内释放；之后的新调用仍是独立显式恢复。
+- 客户端取消不代表服务端已经即时释放：实际 MySQL 可能直到有界 `GET_LOCK` 返回才发现连接关闭。测试不以客户端返回替代服务端锁状态，也不趁此自动重试。
+
+本地临时 MySQL 为 Homebrew 校验包的 **8.4.13 / macOS arm64**，只运行私有 Unix socket，TCP/mysqlx 关闭，不安装系统服务、不使用财务库。原始全恢复用例 82.65 秒通过；新增竞争的旧实现 67.15 秒失败；修正后同一竞争用例 67.40 秒通过；补全重复操作、取消和清理观测后的完整归档恢复包 84.83 秒通过。这个证据不替代 CI 固定 MySQL8.4.11、Ubuntu22/24、原生服务或浏览器验收。
+
+随后全套本地 Go race（真实临时 SQL）通过，516 个顶级测试通过、无运行时 SKIP；5 个 Linux/root/OVS/NAT 专属测试按既有独立门禁明确排除，不称全平台验收。最终只调整测试取消后及时释放阻塞器，避免干扰同服务器其他包；`control` 与 `controllerbackup` 并发实库 race 再次通过，分别 133.037 / 89.358 秒。vet 和四个 Linux amd64 构建通过。测试后已确认没有遗留测试库，关闭本轮 MySQL 进程并移除私有数据/凭据，未改系统服务或用户证书信任。
+
+配置发布与受限验证启动的下一阶段见[配置发布合同](CONTROLLER_CONFIGURATION_PUBLICATION.md)。该合同明确记录尚缺的 Origin 证据、原封存与新配置摘要的衔接；目前未据此启动目标服务或宣称迁移完成。
