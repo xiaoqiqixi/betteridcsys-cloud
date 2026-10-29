@@ -33,7 +33,9 @@ APT_CODES = set('APT_PLAN_UNSAFE APT_DNS_FAILURE APT_TLS_FAILURE APT_SIGNATURE_F
 
 
 class Refused(Exception):
-    pass
+    def __init__(self, code, *, refusal=None):
+        super().__init__(code)
+        self.refusal = refusal
 
 
 def require(condition, code='TARGET_NATIVE_ASSERTION_FAILED'):
@@ -57,8 +59,18 @@ def run(argv, *, env=None, denied=None, timeout=1860, data=None):
         try:
             error = json.loads(p.stderr)
         except (ValueError, UnicodeError):
-            raise Refused('TARGET_NATIVE_REFUSAL_UNCONFIRMED') from None
-        require(p.returncode == 1 and not p.stdout and error == {'error': denied}, 'TARGET_NATIVE_REFUSAL_UNCONFIRMED')
+            error = None
+        if not (p.returncode == 1 and not p.stdout and error == {'error': denied}):
+            # Never publish argv, stderr, DSNs or arbitrary exception text.
+            # A refusal with a different cause is still a failed assertion.
+            valid = isinstance(error, dict) and set(error) == {'error'} and isinstance(error['error'], str)
+            observed = error['error'] if valid else None
+            safe_codes = CODES | APT_CODES
+            raise Refused('TARGET_NATIVE_REFUSAL_UNCONFIRMED', refusal={
+                'expected': denied if denied in safe_codes else 'unrecognized',
+                'observed': observed if observed in safe_codes else 'unrecognized',
+                'exit_kind': {0: 'success', 1: 'refused'}.get(p.returncode, 'other'),
+                'stdout_empty': not p.stdout, 'error_envelope_valid': valid})
     elif p.returncode:
         try:
             error = json.loads(p.stderr).get('error')
@@ -812,6 +824,8 @@ def main():
                   'phase': PHASE, 'kvm_ready': False, **{k: metadata[k] for k in ('source_sha', 'ubuntu', 'image_sha256')}}
         if report['code'] == 'TARGET_RESTORE_SERVER_INVENTORY_REJECTED' or report['code'].startswith('TARGET_RESTORE_MAINTENANCE_'):
             report['diagnostics'] = inventory_diagnostics(NONCE)
+        if isinstance(error, Refused) and error.refusal is not None:
+            report.setdefault('diagnostics', {})['refusal'] = error.refusal
     with open('/dev/ttyS0', 'w') as console:
         console.write('ASTER_LIBVIRT_NATIVE_RESULT_' + NONCE + ' ' + base64.b64encode(json.dumps(report).encode()).decode() + '\n')
         console.flush()

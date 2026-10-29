@@ -832,6 +832,12 @@ def public_result(result, metadata):
     diagnostics = result.get("diagnostics")
     if isinstance(diagnostics, dict):
         safe = {}
+        refusal = diagnostics.get('refusal')
+        if (isinstance(refusal, dict) and set(refusal) == {'expected', 'observed', 'exit_kind', 'stdout_empty', 'error_envelope_valid'} and
+                all(isinstance(refusal[k], str) and refusal[k] in GUEST_ERROR_CODES | {'unrecognized'} for k in ('expected', 'observed')) and
+                isinstance(refusal['exit_kind'], str) and refusal['exit_kind'] in {'success', 'refused', 'other'} and
+                all(type(refusal[k]) is bool for k in ('stdout_empty', 'error_envelope_valid'))):
+            safe['refusal'] = dict(refusal)
         inventory_error = diagnostics.get('mysql_inventory_error')
         if isinstance(inventory_error, str) and inventory_error in {
                 'inventory_timeout', 'inventory_output_bound', 'inventory_command_failed', 'inventory_json_invalid',

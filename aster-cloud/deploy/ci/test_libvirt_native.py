@@ -133,6 +133,41 @@ class NativeFixtureContract(unittest.TestCase):
         self.assertEqual(h.IMAGES["22.04"][0], "jammy")
         self.assertEqual(h.IMAGES["24.04"][0], "noble")
 
+    def test_denial_mismatch_retains_only_fixed_codes_from_actual_child_process(self):
+        guest = load('native_denial_diagnostics', 'controller-provision-native-guest.py')
+        expected = 'TARGET_VERIFICATION_SESSIONS_ACTIVE'
+        actual = 'TARGET_VERIFICATION_CONNECTION_INVENTORY_UNCONFIRMED'
+        cases = [
+            (1, {'error': actual}, '', actual, True, 'refused'),
+            (1, {'error': 'PRIVATE_CREDENTIAL'}, '', 'unrecognized', True, 'refused'),
+            (1, {'error': actual, 'secret': 'PRIVATE_CREDENTIAL'}, '', 'unrecognized', False, 'refused'),
+            (0, {'error': expected}, '', expected, True, 'success'),
+            (2, {'error': expected}, '', expected, True, 'other'),
+            (1, {'error': expected}, 'PRIVATE_CREDENTIAL', expected, True, 'refused'),
+        ]
+        for status, envelope, stdout, observed, valid, kind in cases:
+            command = [sys.executable, '-I', '-c',
+                       'import json,sys; sys.stdout.write(sys.argv[1]); sys.stderr.write(sys.argv[2]); sys.exit(int(sys.argv[3]))',
+                       stdout, json.dumps(envelope), str(status)]
+            with self.subTest(status=status, envelope=envelope, stdout=bool(stdout)):
+                with self.assertRaises(guest.Refused) as caught:
+                    guest.run(command, denied=expected)
+                self.assertEqual(str(caught.exception), 'TARGET_NATIVE_REFUSAL_UNCONFIRMED')
+                diagnostic = {'expected': expected, 'observed': observed, 'exit_kind': kind,
+                              'stdout_empty': not stdout, 'error_envelope_valid': valid}
+                self.assertEqual(caught.exception.refusal, diagnostic)
+                result = {**self.metadata(), 'schema': 1, 'passed': False, 'kvm_ready': False,
+                          'code': str(caught.exception), 'phase': 'target-verification-revoke-active-session',
+                          'diagnostics': {'refusal': diagnostic, 'private': 'PRIVATE_CREDENTIAL'}}
+                public = h.public_result(result, {**self.metadata(), 'scenario': 'controller-restore-configuration'})
+                self.assertEqual(public['diagnostics'], {'refusal': diagnostic})
+                self.assertNotIn('PRIVATE', json.dumps(public))
+                result['diagnostics']['refusal'] = {**diagnostic, 'observed': 'PRIVATE_CREDENTIAL'}
+                self.assertNotIn('refusal', h.public_result(result, self.metadata())['diagnostics'])
+        # Exact original denial still succeeds; diagnostics never relax it.
+        guest.run([sys.executable, '-I', '-c', 'import sys;sys.stderr.write(sys.argv[1]);sys.exit(1)',
+                   json.dumps({'error': expected})], denied=expected)
+
     def test_restore_scenarios_require_their_own_evidence_not_other_scenario_claims(self):
         # Independent report contract. These samples test validation only; they
         # are not fabricated evidence that a native guest executed successfully.
