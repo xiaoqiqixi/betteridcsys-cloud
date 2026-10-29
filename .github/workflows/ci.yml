@@ -65,6 +65,7 @@ jobs:
           python3 -B aster-cloud/deploy/ci/test_cloud_installer.py
           python3 -B aster-cloud/deploy/ci/test_cloud_release_verifier.py
           python3 -B aster-cloud/deploy/ci/test_libvirt_native.py
+          python3 -B aster-cloud/deploy/ci/test_network_readiness.py
           python3 -B aster-cloud/deploy/ci/test_prepare_cloud_runner.py
           python3 -B aster-cloud/deploy/ci/native-mysql/test_mysql_distribution.py
           python3 -B aster-cloud/deploy/ci/native-mysql/test_mysql_native.py
@@ -120,6 +121,9 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install --no-install-recommends -y qemu-system-x86 qemu-utils cloud-image-utils gnupg
+      - name: Read-only host network readiness before native baseline
+        timeout-minutes: 4
+        run: python3 -I aster-cloud/deploy/ci/network-readiness.py
       - name: Real signed Ubuntu guest APT, systemd and libvirt; no fake KVM device
         env:
           TEST_UBUNTU: ${{ matrix.ubuntu }}
@@ -193,6 +197,9 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install --no-install-recommends -y qemu-system-x86 qemu-utils cloud-image-utils gnupg libaio1t64 libssl3t64 libtirpc3t64
+      - name: Read-only host network readiness before native baseline
+        timeout-minutes: 4
+        run: python3 -I aster-cloud/deploy/ci/network-readiness.py
       - name: Actual signed Ubuntu target provisioning, import and read-only recovery
         env:
           TEST_UBUNTU: ${{ matrix.ubuntu }}
