@@ -1,0 +1,162 @@
+//go:build linux
+
+package controllerhost_test
+
+// Native process fixture, compiled separately from the shipped controller. It
+// calls only the public host API and real Linux fd/credential/process APIs.
+import (
+	"aster/cloud/internal/controllerhost"
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
+	"strconv"
+	"syscall"
+	"testing"
+)
+
+func TestNativeVerificationLeaseFixture(t *testing.T) {
+	role := os.Getenv("ASTER_GUARD_FIXTURE_ROLE")
+	if role == "child" {
+		groups, err := os.Getgroups()
+		if err != nil || os.Getuid() != 65534 || os.Geteuid() != 65534 || os.Getgid() != 65534 || len(groups) != 0 {
+			os.Exit(20)
+		}
+		guard := os.NewFile(3, "inherited-verification-guard")
+		commands := os.NewFile(4, "fixture-control")
+		notice := os.NewFile(5, "fixture-notice")
+		var st syscall.Stat_t
+		if syscall.Fstat(3, &st) != nil || st.Uid != 0 || st.Nlink != 1 || st.Mode&0777 != 0600 {
+			os.Exit(21)
+		}
+		entries, err := os.ReadDir("/proc/self/fd")
+		if err != nil {
+			os.Exit(29)
+		}
+		guards := 0
+		for _, entry := range entries {
+			fd, err := strconv.Atoi(entry.Name())
+			if err != nil {
+				os.Exit(30)
+			}
+			var other syscall.Stat_t
+			if syscall.Fstat(fd, &other) == nil && other.Dev == st.Dev && other.Ino == st.Ino {
+				guards++
+			}
+		}
+		if guards != 1 {
+			os.Exit(31)
+		} // parent raw lease MUST be CLOEXEC
+		fmt.Fprintln(notice, "ready")
+		scanner := bufio.NewScanner(commands)
+		for scanner.Scan() {
+			switch scanner.Text() {
+			case "unlock":
+				if syscall.Flock(int(guard.Fd()), syscall.LOCK_UN) != nil {
+					os.Exit(22)
+				}
+			case "lock":
+				if syscall.Flock(int(guard.Fd()), syscall.LOCK_SH|syscall.LOCK_NB) != nil {
+					os.Exit(23)
+				}
+			case "exit":
+				os.Exit(0)
+			default:
+				os.Exit(24)
+			}
+			fmt.Fprintln(notice, scanner.Text())
+		}
+		os.Exit(25)
+	}
+	if role != "parent" || os.Geteuid() != 0 {
+		os.Exit(26)
+	}
+	id, operation := os.Getenv("ASTER_GUARD_FIXTURE_ID"), os.Getenv("ASTER_GUARD_FIXTURE_OPERATION")
+	const configuration = "1111111111111111111111111111111111111111111111111111111111111111"
+	const plan = "2222222222222222222222222222222222222222222222222222222222222222"
+	h, err := controllerhost.Open(id, configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = h.PrepareTarget(operation, plan); err != nil {
+		t.Fatal(err)
+	}
+	other, err := controllerhost.Open(id, configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	called := false
+	for _, op := range []string{"", "../escape", "ffffffffffffffffffffffffffffffff"} {
+		file, err := h.PrepareVerificationRuntime(op, plan, func() error { called = true; return nil })
+		if !errors.Is(err, controllerhost.ErrInvalid) || file != nil || called {
+			t.Fatal("invalid operation admitted")
+		}
+	}
+	if file, err := h.PrepareVerificationRuntime(operation, configuration, func() error { called = true; return nil }); !errors.Is(err, controllerhost.ErrInvalid) || file != nil || called {
+		t.Fatal("wrong plan admitted")
+	}
+	if file, err := h.PrepareVerificationRuntime(operation, plan, nil); !errors.Is(err, controllerhost.ErrInvalid) || file != nil {
+		t.Fatal("missing approval accepted")
+	}
+	refused := errors.New("fixture approval denied")
+	if file, err := h.PrepareVerificationRuntime(operation, plan, func() error { return refused }); !errors.Is(err, refused) || file != nil {
+		t.Fatal("failed approval acquired runtime authority")
+	}
+	if status, err := h.TargetStatus(operation, plan); err != nil || !status.GuardedDrained {
+		t.Fatal("failed approval retained a lease")
+	}
+	wrong, err := controllerhost.Open(id, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file, err := wrong.PrepareVerificationRuntime(operation, plan, func() error { called = true; return nil }); !errors.Is(err, controllerhost.ErrInvalid) || file != nil || called {
+		t.Fatal("wrong configuration admitted")
+	}
+	wrong.Close()
+	guard, err := h.PrepareVerificationRuntime(operation, plan, func() error {
+		if _, err := other.TargetStatus(operation, plan); !errors.Is(err, controllerhost.ErrBusy) {
+			return errors.New("approval did not hold exclusive control")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file, err := other.PrepareVerificationRuntime(operation, plan, func() error { called = true; return nil }); !errors.Is(err, controllerhost.ErrBusy) || file != nil || called {
+		t.Fatal("duplicate launch admitted")
+	}
+	if err := h.Admit(); !errors.Is(err, controllerhost.ErrFenced) {
+		t.Fatal("ordinary admission unfenced")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := exec.Command(executable, "-test.run=^TestNativeVerificationLeaseFixture$")
+	child.Env = []string{"ASTER_GUARD_FIXTURE_ROLE=child", "PATH=/usr/bin:/bin"}
+	child.ExtraFiles = []*os.File{guard, os.NewFile(3, "fixture-child-commands"), os.NewFile(4, "fixture-child-notices")}
+	// Deliberately NO Pdeathsig in this lock fixture: the observer must prove a
+	// surviving child's independent guard, not accidentally rely on its death.
+	child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534, Groups: []uint32{}}}
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	guard.Close()
+	h.Close()
+	other.Close()
+	for i := 0; i < 3; i++ {
+		runtime.GC()
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(map[string]int{"child_pid": child.Process.Pid}); err != nil {
+		os.Exit(27)
+	}
+	commands := bufio.NewScanner(os.Stdin)
+	if !commands.Scan() || commands.Text() != "exit" {
+		os.Exit(28)
+	}
+	os.Exit(0) // only actual process exit releases the retained parent descriptor
+}

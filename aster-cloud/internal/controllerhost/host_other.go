@@ -2,6 +2,8 @@
 
 package controllerhost
 
+import "os"
+
 type Host struct{}
 
 func Open(string, string) (*Host, error)                  { return nil, ErrUnavailable }
@@ -18,3 +20,7 @@ func (*Host) PrepareTarget(string, string) (Status, error) { return Status{}, Er
 func (*Host) TargetStatus(string, string) (Status, error) { return Status{}, ErrUnavailable }
 
 func (*Host) WithSealedTarget(string, string, func() error) error { return ErrUnavailable }
+
+func (*Host) PrepareVerificationRuntime(string, string, func() error) (*os.File, error) {
+	return nil, ErrUnavailable
+}

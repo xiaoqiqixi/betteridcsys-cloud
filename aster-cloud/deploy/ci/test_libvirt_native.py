@@ -1001,5 +1001,37 @@ class WorkflowRestoreEvidenceContract(unittest.TestCase):
                 self.assertNotEqual(self.run_gate(reports).returncode, 0)
 
 
+class VerificationGuardWorkflowContract(unittest.TestCase):
+    """Synthetic report validation ONLY; not native guard execution evidence."""
+
+    def test_actual_guard_gate_requires_exact_source_complete_boolean_proofs(self):
+        workflow = (HERE.parents[2] / '.github/workflows/ci.yml').read_text()
+        step = workflow.split('      - name: Independent root and non-root verification process guards (not service activation)\n')
+        self.assertEqual(len(step), 2)
+        body = step[1].split('      - name:', 1)[0]
+        program = textwrap.dedent(body.split("          python3 -I - <<'PYTEST'\n", 1)[1].split('          PYTEST\n', 1)[0])
+        yes = 'passed real_linux_processes nonroot_child independent_parent_child_locks parent_descriptor_not_inherited child_unlock_retains_parent_guard parent_exit_retains_child_guard both_processes_exited_before_drain target_seal_unchanged'.split()
+        no = 'http_started mysql_verified migration_ready'.split()
+        valid = {'schema': 1, 'source_sha': 'a'*40, **dict.fromkeys(yes, True), **dict.fromkeys(no, False)}
+        with tempfile.TemporaryDirectory(prefix='aster-guard-report-contract-') as scratch:
+            def invoke(report):
+                (Path(scratch)/'verification-guard.json').write_text(json.dumps(report))
+                return subprocess.run([sys.executable, '-I', '-'], input=program, text=True,
+                                      env={**os.environ, 'RUNNER_TEMP': scratch, 'GITHUB_SHA': 'a'*40},
+                                      capture_output=True, timeout=10)
+            self.assertEqual(invoke(valid).returncode, 0)
+            for field in yes + no:
+                for wrong in (None, 1, not valid[field]):
+                    report = dict(valid)
+                    if wrong is None:
+                        del report[field]
+                    else:
+                        report[field] = wrong
+                    with self.subTest(field=field, value=wrong):
+                        self.assertNotEqual(invoke(report).returncode, 0)
+            for change in ({'source_sha': 'b'*40}, {'schema': 2}, {'unknown': True}):
+                self.assertNotEqual(invoke({**valid, **change}).returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
