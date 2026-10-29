@@ -131,10 +131,26 @@ def main():
             r = run(['/usr/bin/python3', '-I', helper, action, '--operation', operation],
                     denied=denied, allowed_codes=codes)
             if denied:
-                require(r.returncode == 1 and json.loads(r.stderr).get('error') in {
+                # Preserve the exact accepted-denial set. On failure record only
+                # a code present as a literal in the installed, owned helpers,
+                # never raw stderr, file paths, credentials or arbitrary fields.
+                try:
+                    value = json.loads(r.stderr)
+                except (ValueError, UnicodeError):
+                    value = None
+                code = value.get('error') if isinstance(value, dict) and set(value) == {'error'} else None
+                known = set()
+                for name in ('controller-migration.py', 'install.py', 'provision.py'):
+                    tree = ast.parse((helper.parent / name).read_text())
+                    known.update(node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)
+                                 and isinstance(node.value, str) and node.value.isupper()
+                                 and all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789' for c in node.value))
+                diagnostic = code if isinstance(code, str) and code in known else 'UNRECOGNIZED_ERROR'
+                require(r.returncode == 1 and code in {
                     'TARGET_COMMAND_REJECTED', 'TARGET_IMMUTABLE_PLAN_CHANGED',
                     'TARGET_CONTROLLER_UNIT_ALREADY_EXISTS', 'TARGET_CONFIGURATION_ALREADY_EXISTS',
-                    'TARGET_INPUT_INVENTORY_CHANGED'}, 'TARGET_DENIAL_NOT_CONFIRMED_' + PHASE)
+                    'TARGET_INPUT_INVENTORY_CHANGED'},
+                    'TARGET_DENIAL_NOT_CONFIRMED_' + PHASE + '_' + action + '_' + diagnostic)
             return r
         def fixture(directory, machine=None):
             env = {**ENV, 'ASTER_SOURCE_CLI_FIXTURE': '1', 'ASTER_FIXTURE_DIR': str(directory),

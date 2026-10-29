@@ -9,12 +9,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+
 	"reflect"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 // Observe the actual isolated database boundary, including unknown future
@@ -99,8 +103,8 @@ func TestMySQLVerificationConsoleRejectsBusinessAndIdentityWrites(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	operation := strings.Repeat("a", 32)
-	handler, err := NewVerificationConsole(store, testConfig(testProfile()), auth, operation)
+	operation := id()
+	handler, err := NewVerificationConsole(context.Background(), verificationSQLStore(t, store, operation), testConfig(testProfile()), identity.Config{Origin: "https://" + server.Listener.Addr().String()}, operation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,8 +178,8 @@ func TestMySQLVerificationConsoleReadsRestoredStateWithoutClaimingNodeConnection
 	if err != nil {
 		t.Fatal(err)
 	}
-	operation := strings.Repeat("b", 32)
-	handler, err := NewVerificationConsole(store, config, auth, operation)
+	operation := id()
+	handler, err := NewVerificationConsole(context.Background(), verificationSQLStore(t, store, operation), config, identity.Config{Origin: "https://" + server.Listener.Addr().String()}, operation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,11 +319,8 @@ func TestMySQLVerificationConsoleUsesRealIdentityWithoutGrantExpansion(t *testin
 	root.login(t, admin.Email)
 	limited := root.createUser(t, "verify-limited@example.invalid", "custom", []string{"instances.read"})
 	server := httptest.NewUnstartedServer(nil)
-	auth, err := identity.New(store.DB, identity.Config{Origin: "https://" + server.Listener.Addr().String()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler, err := NewVerificationConsole(store, config, auth, strings.Repeat("e", 32))
+	operation := id()
+	handler, err := NewVerificationConsole(context.Background(), verificationSQLStore(t, store, operation), config, identity.Config{Origin: "https://" + server.Listener.Addr().String()}, operation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -413,4 +414,55 @@ func TestMySQLVerificationConsoleUsesRealIdentityWithoutGrantExpansion(t *testin
 	if status != 403 || consoleHTTPError(t, raw) != "FORBIDDEN" {
 		t.Fatal("new login elevated limited user", status)
 	}
+}
+
+func TestMySQLVerificationConsoleRejectsBroadDatabaseIdentity(t *testing.T) {
+	store := consoleHTTPStore(t)
+	handler, err := NewVerificationConsole(context.Background(), store, testConfig(testProfile()), identity.Config{Origin: "https://verify.example.invalid"}, id())
+	if err == nil || handler != nil {
+		t.Fatal("verification accepted full application/database administrator privileges")
+	}
+}
+
+// Actual account/grant boundary on the isolated fixture. The ordinary fixture
+// connection owns cleanup; the verification service receives only this DSN.
+func verificationSQLStore(t *testing.T, admin *SQLStore, operation string) *SQLStore {
+	t.Helper()
+	var database string
+	if admin.DB.QueryRow("SELECT DATABASE()").Scan(&database) != nil {
+		t.Fatal("fixture database unavailable")
+	}
+	policy, err := identity.VerificationDatabasePolicy(database, operation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	password := id() + id()
+	if _, err = admin.DB.Exec("CREATE USER `" + policy.User + "`@`localhost` IDENTIFIED BY '" + password + "'"); err != nil {
+		t.Fatal("isolated verification account creation failed")
+	}
+	t.Cleanup(func() {
+		if _, err := admin.DB.Exec("DROP USER `" + policy.User + "`@`localhost`"); err != nil {
+			t.Error("isolated verification account cleanup failed")
+		}
+	})
+	for _, grant := range policy.Grants {
+		if _, err = admin.DB.Exec(grant); err != nil {
+			t.Fatal("isolated verification grant failed")
+		}
+	}
+	raw := os.Getenv("ASTER_CLOUD_TEST_DSN")
+	if raw == "" {
+		raw = os.Getenv("ASTER_MYSQL_TEST_DSN")
+	}
+	cfg, err := mysql.ParseDSN(raw)
+	if err != nil {
+		t.Fatal("invalid private fixture connection")
+	}
+	cfg.User, cfg.Passwd, cfg.DBName = policy.User, password, database
+	store, err := OpenDSN(cfg.FormatDSN())
+	if err != nil {
+		t.Fatal("verification connection failed")
+	}
+	t.Cleanup(func() { store.DB.Close() })
+	return store
 }

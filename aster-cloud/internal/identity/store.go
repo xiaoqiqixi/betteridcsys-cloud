@@ -370,14 +370,11 @@ func (s *Service) anonymousSession(ctx context.Context, peer string) (string, er
 	if err := s.reserveAnonymous(ctx, peer); err != nil {
 		return "", err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, closeTransaction, err := s.authenticationTransaction(ctx)
 	if err != nil {
 		return "", err
 	}
-	defer tx.Rollback()
-	if err = identityLock(ctx, tx); err != nil {
-		return "", err
-	}
+	defer closeTransaction()
 	if _, err = tx.ExecContext(ctx, "DELETE FROM controller_console_sessions WHERE expires_at<=? LIMIT 100", s.now()); err != nil {
 		return "", err
 	}
@@ -505,14 +502,11 @@ func (s *Service) login(ctx context.Context, email, password, oldToken, addr str
 	valid := verifyPassword(hash, []byte(password))
 	// Serialize login issuance with disable/password/role changes to avoid issuing
 	// a new session from a credential snapshot that was concurrently revoked.
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, closeTransaction, err := s.authenticationTransaction(ctx)
 	if err != nil {
 		return User{}, "", err
 	}
-	defer tx.Rollback()
-	if err = identityLock(ctx, tx); err != nil {
-		return User{}, "", err
-	}
+	defer closeTransaction()
 	u, lookupErr := scanUser(tx.QueryRowContext(ctx, "SELECT "+userColumns+" FROM controller_console_users WHERE id=?", uid))
 	var currentHash string
 	if lookupErr == nil {
@@ -550,14 +544,11 @@ func (s *Service) login(ctx context.Context, email, password, oldToken, addr str
 	return u, raw, tx.Commit()
 }
 func (s *Service) logout(ctx context.Context, raw string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, closeTransaction, err := s.authenticationTransaction(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-	if err = identityLock(ctx, tx); err != nil {
-		return err
-	}
+	defer closeTransaction()
 	h := tokenHash(raw)
 	var uid sql.NullString
 	err = tx.QueryRowContext(ctx, "SELECT user_id FROM controller_console_sessions WHERE token_hash=? FOR UPDATE", h[:]).Scan(&uid)

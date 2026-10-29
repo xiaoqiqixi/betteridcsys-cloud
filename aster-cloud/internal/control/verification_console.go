@@ -12,8 +12,12 @@ import (
 // NewVerificationConsole constructs only the restricted HTTP surface. It does
 // not admit a process, waive the target seal, create SQL credentials, or start
 // background workers. Its caller must hold independently verified host authority.
-func NewVerificationConsole(store *SQLStore, config Config, auth *identity.Service, operation string) (http.Handler, error) {
-	if store == nil || store.DB == nil || auth == nil || !nodeproto.ValidID(operation) {
+func NewVerificationConsole(ctx context.Context, store *SQLStore, config Config, identityConfig identity.Config, operation string) (http.Handler, error) {
+	if store == nil || store.DB == nil || !nodeproto.ValidID(operation) {
+		return nil, ErrInput
+	}
+	auth, err := identity.NewVerification(ctx, store.DB, identityConfig, operation)
+	if err != nil {
 		return nil, ErrInput
 	}
 	console := Console{Store: store, Config: config, Identity: auth}

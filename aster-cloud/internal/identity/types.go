@@ -73,11 +73,12 @@ type Config struct {
 	Now        func() time.Time
 }
 type Service struct {
-	db     *sql.DB
-	origin string
-	host   string
-	ttl    time.Duration
-	nowFn  func() time.Time
+	db               *sql.DB
+	origin           string
+	host             string
+	ttl              time.Duration
+	nowFn            func() time.Time
+	verificationLock string // Set only after exact SQL policy validation.
 }
 
 func New(db *sql.DB, cfg Config) (*Service, error) {
