@@ -1335,22 +1335,36 @@ def verification_revocation_plan(operation, plan_sha256, charset, collation):
     return {'plan':value,'plan_sha256':hashlib.sha256(raw).hexdigest(),'account_locked':locked=='Y'}
 
 
-def verification_connection_inventory(state, user):
+def verification_connection_inventory_sql(user):
     if not isinstance(user,str) or not re.fullmatch('aster_v_[a-f0-9]{23}',user):
         fail('Unexpected SQL identity',code='TARGET_VERIFICATION_IDENTITY_REJECTED')
+    # MySQL 8.0's documented GTID compressor is FOREGROUND with a process ID
+    # but is not a client. Exclude only its complete fixed internal shape;
+    # unknown/partially matching rows still block drain. COALESCE is essential:
+    # a NULL command/name must not disappear through SQL three-valued logic.
+    # https://dev.mysql.com/doc/refman/8.0/en/replication-gtids-concepts.html
+    internal_gtid = ("COALESCE((BINARY NAME='thread/sql/compress_gtid_table' AND "
+                     "PROCESSLIST_USER IS NULL AND PROCESSLIST_HOST IS NULL AND PROCESSLIST_DB IS NULL AND "
+                     "BINARY PROCESSLIST_COMMAND='Daemon' AND CONNECTION_TYPE IS NULL),FALSE)")
     # A root username alone does not prove PROCESS visibility. This actual
     # performance_schema table exposes all rows to any SELECT-capable reader;
     # require enabled collection, zero lost instances and a positive observer.
-    info = _query(state,
+    return (
         "SELECT JSON_OBJECT('enabled',@@performance_schema,"
         "'observer',(SELECT COUNT(*) FROM performance_schema.threads WHERE PROCESSLIST_ID=CONNECTION_ID() AND BINARY PROCESSLIST_USER='root'),"
         "'lost',(SELECT CAST(VARIABLE_VALUE AS UNSIGNED) FROM performance_schema.global_status WHERE VARIABLE_NAME='Performance_schema_thread_instances_lost'),"
         "'active',(SELECT COUNT(*) FROM performance_schema.threads WHERE TYPE='FOREGROUND' AND BINARY PROCESSLIST_USER='"+user+"'),"
+        "'internal_gtid',(SELECT COUNT(*) FROM performance_schema.threads WHERE TYPE='FOREGROUND' AND PROCESSLIST_ID IS NOT NULL AND "+internal_gtid+"),"
         "'pending',(SELECT COUNT(*) FROM performance_schema.threads WHERE TYPE='FOREGROUND' AND PROCESSLIST_ID IS NOT NULL AND "
-        "(PROCESSLIST_USER IS NULL OR BINARY PROCESSLIST_USER='unauthenticated user')));\n")
-    if (set(info) != {'enabled','observer','lost','active','pending'} or info['enabled'] != 1 or
+        "(PROCESSLIST_USER IS NULL OR BINARY PROCESSLIST_USER='unauthenticated user') AND NOT "+internal_gtid+"));\n")
+
+
+def verification_connection_inventory(state, user):
+    info = _query(state, verification_connection_inventory_sql(user))
+    if (set(info) != {'enabled','observer','lost','active','pending','internal_gtid'} or info['enabled'] != 1 or
             info['observer'] != 1 or info['lost'] != 0 or
-            any(type(info[k]) is not int or info[k]<0 for k in ('observer','lost','active','pending'))):
+            any(type(info[k]) is not int or info[k]<0 for k in ('observer','lost','active','pending','internal_gtid')) or
+            info['internal_gtid'] > 1):
         fail('Complete SQL connection visibility unavailable',code='TARGET_VERIFICATION_CONNECTION_INVENTORY_UNCONFIRMED')
     return info
 

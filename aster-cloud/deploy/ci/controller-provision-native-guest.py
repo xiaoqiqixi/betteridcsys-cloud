@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import select
+import socket
 import stat
 import subprocess
 import sys
@@ -770,6 +771,32 @@ def execute(metadata):
         require(held.returncode==0)
         require(sha(directory/'verification-revoke-started.json')==revoke_plan['plan_sha256'])
         entry('target-verification-prepare','TARGET_VERIFICATION_REVOCATION_STARTED')
+        # Ubuntu's actual MySQL 8.0 GTID daemon is not a client connection.
+        # Require the independent positive shape, not absence by assumption.
+        progress('target-verification-revoke-pending-auth')
+        inventory = module.verification_connection_inventory(directory,vuser)
+        require(inventory['active']==0 and inventory['pending']==0 and inventory['internal_gtid']==1,
+                'TARGET_VERIFICATION_CONNECTION_INVENTORY_UNCONFIRMED')
+        pending = socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+        pending.settimeout(10)
+        connect_timeout = module._query(directory,"SELECT JSON_OBJECT('value',@@global.connect_timeout);\n")['value']
+        require(type(connect_timeout) is int and 2<=connect_timeout<=31536000)
+        try:
+            # This deliberately incomplete handshake must outlive the full
+            # archive verification under TCG. Only this owned fixture changes
+            # its server timeout; production settings and job budgets do not.
+            module.mysql_sql(directory,'SET GLOBAL connect_timeout=300;\n')
+            pending.connect('/run/mysqld/mysqld.sock')
+            greeting = pending.recv(4096)
+            require(len(greeting)>5 and greeting[4]==10,'TARGET_VERIFICATION_CONNECTION_INVENTORY_UNCONFIRMED')
+            inventory = module.verification_connection_inventory(directory,vuser)
+            require(inventory['active']==0 and inventory['pending']==1 and inventory['internal_gtid']==1,
+                    'TARGET_VERIFICATION_CONNECTION_INVENTORY_UNCONFIRMED')
+            entry('target-verification-revoke-status','TARGET_VERIFICATION_SESSIONS_ACTIVE')
+            require(not (directory/'verification-revoked.json').exists())
+        finally:
+            pending.close()
+            module.mysql_sql(directory,'SET GLOBAL connect_timeout='+str(connect_timeout)+';\n')
         progress('target-verification-revoke-readonly-recovery')
         module.mysql_sql(directory,'SET GLOBAL super_read_only=ON;\n')
         try:
@@ -807,7 +834,8 @@ def execute(metadata):
             'verification_account_prepared', 'verification_account_exact_grants', 'verification_account_readonly_reentry',
             'verification_account_foreign_refused', 'verification_account_drift_not_repaired', 'verification_credential_authenticated',
             'verification_revocation_locked', 'verification_revocation_active_session_refused',
-            'verification_revocation_readonly_recovery', 'verification_revocation_no_implicit_unlock')})
+            'verification_revocation_readonly_recovery', 'verification_revocation_no_implicit_unlock',
+            'verification_revocation_pending_auth_refused', 'verification_revocation_internal_thread_classified')})
         return finish()
     return report
 

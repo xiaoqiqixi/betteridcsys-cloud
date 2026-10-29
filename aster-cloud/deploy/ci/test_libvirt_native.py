@@ -104,6 +104,7 @@ class NativeFixtureContract(unittest.TestCase):
             'target-verification-grant-drift': 'TARGET_VERIFICATION_GRANTS_REJECTED',
             'target-verification-credential-drift': 'TARGET_VERIFICATION_CREDENTIAL_REJECTED',
             'target-verification-revoke-plan': 'TARGET_VERIFICATION_REVOCATION_APPROVAL_CHANGED',
+            'target-verification-revoke-pending-auth': 'TARGET_VERIFICATION_SESSIONS_ACTIVE',
             'target-verification-revoke-active-session': 'TARGET_VERIFICATION_SESSIONS_ACTIVE',
             'target-verification-revoke-readonly-recovery': 'TARGET_VERIFICATION_REVOCATION_UNCONFIRMED',
             'target-verification-revoke-drift': 'TARGET_VERIFICATION_REVOCATION_BINDING_REJECTED',
@@ -176,7 +177,7 @@ class NativeFixtureContract(unittest.TestCase):
         phases = {
             'data': set('foreign_account_refused lost_credential_refused_without_reset maintenance_authentication_verified maintenance_drift_refused maintenance_nonroot_denied read_only_reentry_verified modified_data_refused removed_constraint_refused foreign_database_refused runtime_material_drift_refused'.split()),
             'sessions': set('sessions_revoked session_transition_exact_readback session_transition_explicit_recovery'.split()),
-            'configuration': set('sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock'.split()),
+            'configuration': set('sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock verification_revocation_pending_auth_refused verification_revocation_internal_thread_classified'.split()),
         }
         for phase, evidence in phases.items():
             metadata = {**self.metadata(), 'scenario': 'controller-restore-' + phase}
@@ -916,7 +917,7 @@ class WorkflowRestoreEvidenceContract(unittest.TestCase):
         phase_fields = {
             'data': 'foreign_account_refused lost_credential_refused_without_reset maintenance_authentication_verified maintenance_drift_refused maintenance_nonroot_denied read_only_reentry_verified modified_data_refused removed_constraint_refused foreign_database_refused runtime_material_drift_refused'.split(),
             'sessions': 'sessions_revoked session_transition_exact_readback session_transition_explicit_recovery'.split(),
-            'configuration': 'sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock'.split(),
+            'configuration': 'sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock verification_revocation_pending_auth_refused verification_revocation_internal_thread_classified'.split(),
         }
         guest = dict.fromkeys(common + phase_fields[phase], True)
         guest.update(dict.fromkeys('source_host_export_verified node_takeover_verified migration_ready kvm_ready session_browser_verified'.split(), False))
@@ -948,7 +949,7 @@ class WorkflowRestoreEvidenceContract(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_each_new_account_proof_is_required_and_must_be_boolean_true_in_both_reports(self):
-        fields = 'verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock'.split()
+        fields = 'verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock verification_revocation_pending_auth_refused verification_revocation_internal_thread_classified'.split()
         for name in ('summary.json', 'guest-report.json'):
             for field in fields:
                 for value in (None, False, 1):

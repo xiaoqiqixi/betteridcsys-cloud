@@ -190,6 +190,48 @@ def load_provision():
     return module
 
 
+def verification_inventory_query_contract(execute, provision):
+    """Execute the production SQL over literal MySQL thread rows, not a mock DB.
+
+    This CTE checks classification only. Real Ubuntu 8.0 internal threads and
+    real client drain are separately exercised by the native guest scenario.
+    """
+    user = 'aster_v_' + 'a' * 23
+    query = provision.verification_connection_inventory_sql(user)
+    columns = ('NAME', 'TYPE', 'PROCESSLIST_ID', 'PROCESSLIST_USER', 'PROCESSLIST_HOST',
+               'PROCESSLIST_DB', 'PROCESSLIST_COMMAND', 'CONNECTION_TYPE')
+    root = ('thread/sql/one_connection', 'FOREGROUND', 900001, 'root', 'localhost', None, 'Query', 'Socket')
+    daemon = ('thread/sql/compress_gtid_table', 'FOREGROUND', 1, None, None, None, 'Daemon', None)
+    cases = [('documented_gtid_daemon', daemon, 0, 1)]
+    # Even a daemon-like unknown thread remains unconfirmed; each documented
+    # property matters. NULL command must not disappear through SQL UNKNOWN.
+    for index, value in ((0, 'thread/sql/unknown'), (0, 'THREAD/SQL/COMPRESS_GTID_TABLE'),
+                         (3, 'unauthenticated user'), (4, 'localhost'), (5, 'mysql'),
+                         (6, 'Connect'), (6, None), (7, 'Socket')):
+        row = list(daemon); row[index] = value
+        cases.append(('unconfirmed_' + str(index) + '_' + str(value), tuple(row), 1, 0))
+    cases += [('unauthenticated_client', ('thread/sql/one_connection', 'FOREGROUND', 3, 'unauthenticated user', 'localhost', None, 'Connect', 'Socket'), 1, 0),
+              ('unknown_client_user', ('thread/sql/one_connection', 'FOREGROUND', 3, None, None, None, None, None), 1, 0)]
+    def literal(value):
+        return 'NULL' if value is None else str(value) if type(value) is int else "'" + value.replace("'", "''") + "'"
+    def row_sql(row, observer=False):
+        return 'SELECT ' + ','.join(('CONNECTION_ID()' if observer and key == 'PROCESSLIST_ID' else literal(value)) + ' AS ' + key
+                                    for key, value in zip(columns, row))
+    for label, row, pending, internal in cases:
+        sql = 'WITH fixture_threads AS (' + row_sql(root, True) + ' UNION ALL ' + row_sql(row) + ') '
+        sql += query.replace('performance_schema.threads', 'fixture_threads')
+        value = json.loads(execute(sql))
+        require(value['observer'] == 1 and value['active'] == 0 and value['pending'] == pending and
+                value.get('internal_gtid') == internal, 'VERIFICATION_THREAD_CLASSIFICATION_' + label)
+    # A real account name is never hidden, even if other attributes look like
+    # an internal thread. Monitoring flags are deliberately not a filter.
+    active = list(daemon); active[3] = user
+    sql = 'WITH fixture_threads AS (' + row_sql(root, True) + ' UNION ALL ' + row_sql(active) + ') '
+    value = json.loads(execute(sql + query.replace('performance_schema.threads', 'fixture_threads')))
+    require(value['active'] == 1 and value['internal_gtid'] == 0, 'VERIFICATION_ACTIVE_CLIENT_HIDDEN')
+    return len(cases) + 1
+
+
 def run_contract(fixture):
     report = {"schema": 1, "scope": "owned-native-fixture-sql-and-grants-only", "passed": False,
               "checks": [], "migrations": [], "cleanup_confirmed": False,
@@ -231,6 +273,7 @@ def run_contract(fixture):
         report["checks"].append("actual-mysql-native-inventory-query-and-bounded-json-parser")
         report["inventory_boolean_wire_types"] = {k: type(json.loads(raw)[k]).__name__ for k in ('current_root', 'tcp_disabled')}
         provision = load_provision()
+        report['verification_thread_classification_cases'] = verification_inventory_query_contract(admin.run, provision)
         original_transport = provision.mysql_sql
         phase = "collision-preflight"
         try:
