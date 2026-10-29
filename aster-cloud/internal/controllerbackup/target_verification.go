@@ -3,6 +3,8 @@ package controllerbackup
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -97,6 +99,11 @@ func CheckTargetVerificationCredential(ctx context.Context, operation string) (m
 	var result map[string]any
 	err := withTargetVerification(ctx, operation, func(report TargetVerificationPlanReport, runtime RuntimeTarget) error {
 		directory := filepath.Join(runtime.Directory, "database")
+		for _, name := range []string{"verification-revoke-started.json", "verification-revoked.json"} {
+			if _, err := os.Lstat(filepath.Join(directory, name)); !errors.Is(err, os.ErrNotExist) {
+				return ErrInvalid
+			}
+		}
 		raw, e := targetRead(filepath.Join(directory, "verification-started.json"), 8192)
 		if e != nil {
 			return e

@@ -22,7 +22,7 @@ import sys
 
 PROTOCOL = 'aster.controller-migration/1'
 RESTORE_ERRORS = set('TARGET_RESTORE_SERVER_INVENTORY_REJECTED TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED'.split())
-VERIFICATION_ERRORS = set('TARGET_VERIFICATION_IDENTITY_REJECTED TARGET_VERIFICATION_GRANTS_REJECTED TARGET_VERIFICATION_BINDING_REJECTED TARGET_VERIFICATION_CREDENTIAL_REJECTED TARGET_VERIFICATION_CREATE_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_UNCONFIRMED'.split())
+VERIFICATION_ERRORS = set('TARGET_VERIFICATION_IDENTITY_REJECTED TARGET_VERIFICATION_GRANTS_REJECTED TARGET_VERIFICATION_BINDING_REJECTED TARGET_VERIFICATION_CREDENTIAL_REJECTED TARGET_VERIFICATION_CREATE_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_UNCONFIRMED TARGET_VERIFICATION_REVOCATION_STARTED TARGET_VERIFICATION_REVOCATION_BINDING_REJECTED TARGET_VERIFICATION_REVOCATION_UNCONFIRMED TARGET_VERIFICATION_REVOCATION_NOT_STARTED TARGET_VERIFICATION_CONNECTION_INVENTORY_UNCONFIRMED TARGET_VERIFICATION_SESSIONS_ACTIVE'.split())
 SYSTEMD = Path('/etc/systemd/system')
 CONFIG = Path('/etc/aster-controller/config.json')
 INSTALL_STATE = Path('/var/lib/aster-cloud-installer/controller/state.json')
@@ -685,7 +685,7 @@ class Target(Host):
             os.close(fd)
 
     def unused_host(self, configuration=False, verification=False):
-        extra = {'verification-approval.json'} if verification else set()
+        extra = {'verification-approval.json','verification-revoke-approval.json'} if verification else set()
         require(set(p.name for p in self.root.iterdir()) <=
                 {'request.json', 'backup.age', 'recovery.key', 'plan.json', 'target.lock', 'database-plan.json', 'database',
                  'materials-started.json', 'runtime', 'sessions-started.json', 'configuration-request.json',
@@ -916,7 +916,7 @@ class Target(Host):
         # bytes are not accepted here as proof; Go must authenticate and derive
         # every file under the original target seal before claiming success.
         with self.lock('target.lock'):
-            verification = action in ('target-verification-prepare','target-verification-status')
+            verification = action in ('target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status')
             self.unused_host(configuration=True, verification=verification)
             plan = self.read(self.root / 'plan.json')
             plan_path, directory = self.root / 'database-plan.json', self.root / 'database'
@@ -934,7 +934,7 @@ class Target(Host):
                        'migration-mysql-dsn', 'mysql-client-home', 'import-approval.json', 'import-started.json',
                        'structure.json', 'maintenance-auth-intent.json', 'maintenance-auth-verified.json'}
             if verification:
-                allowed |= {'verification-started.json','verification-mysql-dsn','verification-account.json'}
+                allowed |= {'verification-started.json','verification-mysql-dsn','verification-account.json','verification-revoke-started.json','verification-revoked.json'}
             require(set(p.name for p in directory.iterdir()) <= allowed, 'TARGET_DATABASE_INVENTORY_CHANGED')
             module = self.i.provisioning_module()
             try:
@@ -979,6 +979,23 @@ class Target(Host):
                     'schema': 1, 'operation_id': self.operation, 'plan_sha256': result['plan_sha256']},
                 'TARGET_VERIFICATION_APPROVAL_CHANGED')
         args = (self.operation, result['plan_sha256'], database_plan['data']['charset'], database_plan['data']['collation'])
+        if action in ('target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status'):
+            planned = module.verification_revocation_plan(*args)
+            if action == 'target-verification-revoke-plan':
+                return {'schema':1,'operation_id':self.operation,'plan':planned['plan'],'plan_sha256':planned['plan_sha256'],
+                        'readonly':True,'service_started':False,'migration_ready':False}
+            revoke_approval = self.root/'verification-revoke-approval.json'
+            require(revoke_approval.exists() or revoke_approval.is_symlink(),'TARGET_VERIFICATION_REVOCATION_APPROVAL_REQUIRED')
+            approved = self.read(revoke_approval)
+            require(type(approved.get('schema')) is int and approved == {'schema':1,'operation_id':self.operation,
+                    'revocation_plan_sha256':planned['plan_sha256']},'TARGET_VERIFICATION_REVOCATION_APPROVAL_CHANGED')
+            value = module.revoke_verification_mysql(*args,readonly=action=='target-verification-revoke-status')
+            # Do not let the SQL account receipt stand in for unchanged business
+            # state, the original seal or a stopped/inert controller host.
+            require(self.target_command('verification-plan') == result,'TARGET_VERIFICATION_PLAN_CHANGED')
+            self.unused_host(configuration=True,verification=True)
+            return {**value,'read_only_verification':action=='target-verification-revoke-status',
+                    'sql_identity_revoked':True,'service_started':False,'migration_ready':False,'root_inventory_verified':True}
         readonly = action == 'target-verification-status'
         if readonly:
             candidate = module.verification_account_candidate(*args)
@@ -1001,7 +1018,7 @@ class Target(Host):
     def prepare(self, action):
         with self.installation_lock():
             verify_installation(self, self.i, target=True)
-            if action in ('target-configuration-publish','target-configuration-status','target-configuration-resume','target-verification-plan','target-verification-prepare','target-verification-status'):
+            if action in ('target-configuration-publish','target-configuration-status','target-configuration-resume','target-verification-plan','target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status'):
                 return self.publish_configuration(action)
             self.unused_host()
             plan = self.target_command('plan')
@@ -1070,14 +1087,14 @@ class Arguments(argparse.ArgumentParser):
 
 def main():
     parser = Arguments(description=__doc__)
-    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status'))
+    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status'))
     parser.add_argument('--operation')
     args = parser.parse_args()
     require((args.action in ('capabilities', 'plan') and args.operation is None) or
             (args.action not in ('capabilities', 'plan') and isinstance(args.operation, str) and OP.fullmatch(args.operation)),
             'EXACT_OPERATION_ID_REQUIRED')
     if args.action == 'capabilities':
-        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status'],
+        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status'],
                 'export_restore': False, 'migration_ready': False}
     if args.action.startswith('target-'):
         return Target(install_module(), args.operation).prepare(args.action)

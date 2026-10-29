@@ -1204,11 +1204,19 @@ def _verification_intent(state, fixed):
 
 
 def verification_account_candidate(operation, plan_sha256, charset, collation):
+    state,_,_ = _verification_binding(operation,plan_sha256,charset,collation)
+    _verification_not_revoking(state)
+    return _verification_account_candidate(operation,plan_sha256,charset,collation,locked='N')
+
+
+def _verification_account_candidate(operation, plan_sha256, charset, collation, *, locked):
     """Read-only exact three-account inventory, only after owned intent binding.
 
     A successful root candidate is not yet proof its credential logs in; the
     fixed Go coordinator must authenticate that private DSN before completion.
     """
+    if locked not in ('N','Y'):
+        fail('Invalid verification lock policy',code='TARGET_VERIFICATION_IDENTITY_REJECTED')
     state, policy, fixed = _verification_binding(operation, plan_sha256, charset, collation)
     intent, intent_sha = _verification_intent(state, fixed)
     _verify_restore_mysql(operation, charset, collation, restored=True, verification_user=policy['user'])
@@ -1218,7 +1226,7 @@ def verification_account_candidate(operation, plan_sha256, charset, collation):
         "FROM mysql.user WHERE BINARY User='" + policy['user'] + "';\n")
     if (set(actual) != {'host','plugin','locked','expired','attributes','auth_sha256','uuid'} or
             actual['host'] != 'localhost' or actual['plugin'] != 'caching_sha2_password' or
-            actual['locked'] != 'N' or actual['expired'] != 'N' or
+            actual['locked'] != locked or actual['expired'] != 'N' or
             actual['attributes'] != {'metadata': {'aster_cloud_verification': intent['nonce']}} or
             actual['uuid'] != fixed['server_uuid'] or not isinstance(actual['auth_sha256'], str) or
             not re.fullmatch('[a-f0-9]{64}', actual['auth_sha256'])):
@@ -1242,6 +1250,7 @@ def prepare_verification_mysql(operation, plan_sha256, charset, collation):
     state is checked read-only; no reset, adoption, re-CREATE or grant repair.
     """
     state, policy, fixed = _verification_binding(operation, plan_sha256, charset, collation)
+    _verification_not_revoking(state)
     intent_path = state / 'verification-started.json'
     if intent_path.exists() or intent_path.is_symlink():
         return verification_account_candidate(operation, plan_sha256, charset, collation)
@@ -1281,4 +1290,107 @@ def complete_verification_mysql(operation, plan_sha256, charset, collation, *, r
         fail('Verification account has no completion proof', code='TARGET_VERIFICATION_ACCOUNT_UNCONFIRMED')
     else:
         _verification_write_new(path, value)
+    return value
+
+def _verification_not_revoking(state):
+    if any((state/name).exists() or (state/name).is_symlink() for name in
+           ('verification-revoke-started.json','verification-revoked.json')):
+        fail('Verification revocation already started', code='TARGET_VERIFICATION_REVOCATION_STARTED')
+
+
+def _verification_saved_completion(state, operation, plan_sha256):
+    raw = read_private(str(state/'verification-account.json'))
+    value = _json(raw)
+    digests = {'plan_sha256','intent_sha256','auth_sha256','grants_sha256','credential_sha256'}
+    if (set(value) != {'schema','operation_id'} | digests or type(value['schema']) is not int or value['schema'] != 1 or
+            value['operation_id'] != operation or value['plan_sha256'] != plan_sha256 or
+            any(not isinstance(value[k],str) or not re.fullmatch('[a-f0-9]{64}',value[k]) for k in digests) or
+            raw != (json.dumps(value,sort_keys=True,separators=(',',':'))+'\n').encode()):
+        fail('Original account completion changed',code='TARGET_VERIFICATION_BINDING_REJECTED')
+    return value,hashlib.sha256(raw).hexdigest()
+
+
+def verification_revocation_plan(operation, plan_sha256, charset, collation):
+    state,policy,_ = _verification_binding(operation,plan_sha256,charset,collation)
+    account,account_sha = _verification_saved_completion(state,operation,plan_sha256)
+    value = {'schema':1,'protocol':'aster.controller-verification-revocation/1','operation_id':operation,
+             'verification_plan_sha256':plan_sha256,'account_receipt_sha256':account_sha,
+             'database':policy['database'],'user':policy['user']}
+    raw = (json.dumps(value,sort_keys=True,separators=(',',':'))+'\n').encode()
+    started,completed = state/'verification-revoke-started.json',state/'verification-revoked.json'
+    locked = 'N'
+    if started.exists() or started.is_symlink():
+        if read_private(str(started)) != raw:
+            fail('Revocation intent changed',code='TARGET_VERIFICATION_REVOCATION_BINDING_REJECTED')
+        actual = _query(state,"SELECT JSON_OBJECT('locked',account_locked) FROM mysql.user WHERE BINARY User='"+policy['user']+"' AND BINARY Host='localhost';\n")
+        if set(actual) != {'locked'} or actual['locked'] not in ('N','Y'):
+            fail('Revocation lock state unknown',code='TARGET_VERIFICATION_REVOCATION_UNCONFIRMED')
+        locked = actual['locked']
+        if (completed.exists() or completed.is_symlink()) and locked != 'Y':
+            fail('Completed revocation was changed',code='TARGET_VERIFICATION_REVOCATION_BINDING_REJECTED')
+    elif completed.exists() or completed.is_symlink():
+        fail('Revocation has no original intent',code='TARGET_VERIFICATION_REVOCATION_BINDING_REJECTED')
+    if _verification_account_candidate(operation,plan_sha256,charset,collation,locked=locked) != account:
+        fail('Revocation account differs from completion',code='TARGET_VERIFICATION_BINDING_REJECTED')
+    return {'plan':value,'plan_sha256':hashlib.sha256(raw).hexdigest(),'account_locked':locked=='Y'}
+
+
+def verification_connection_inventory(state, user):
+    if not isinstance(user,str) or not re.fullmatch('aster_v_[a-f0-9]{23}',user):
+        fail('Unexpected SQL identity',code='TARGET_VERIFICATION_IDENTITY_REJECTED')
+    # A root username alone does not prove PROCESS visibility. This actual
+    # performance_schema table exposes all rows to any SELECT-capable reader;
+    # require enabled collection, zero lost instances and a positive observer.
+    info = _query(state,
+        "SELECT JSON_OBJECT('enabled',@@performance_schema,"
+        "'observer',(SELECT COUNT(*) FROM performance_schema.threads WHERE PROCESSLIST_ID=CONNECTION_ID() AND BINARY PROCESSLIST_USER='root'),"
+        "'lost',(SELECT CAST(VARIABLE_VALUE AS UNSIGNED) FROM performance_schema.global_status WHERE VARIABLE_NAME='Performance_schema_thread_instances_lost'),"
+        "'active',(SELECT COUNT(*) FROM performance_schema.threads WHERE TYPE='FOREGROUND' AND BINARY PROCESSLIST_USER='"+user+"'),"
+        "'pending',(SELECT COUNT(*) FROM performance_schema.threads WHERE TYPE='FOREGROUND' AND PROCESSLIST_ID IS NOT NULL AND "
+        "(PROCESSLIST_USER IS NULL OR BINARY PROCESSLIST_USER='unauthenticated user')));\n")
+    if (set(info) != {'enabled','observer','lost','active','pending'} or info['enabled'] != 1 or
+            info['observer'] != 1 or info['lost'] != 0 or
+            any(type(info[k]) is not int or info[k]<0 for k in ('observer','lost','active','pending'))):
+        fail('Complete SQL connection visibility unavailable',code='TARGET_VERIFICATION_CONNECTION_INVENTORY_UNCONFIRMED')
+    return info
+
+
+def revoke_verification_mysql(operation, plan_sha256, charset, collation, *, readonly=False):
+    """Only an exact completed identity can be locked. Never KILL/DROP/UNLOCK.
+
+    ACCOUNT LOCK prevents new authentication but does not terminate existing
+    sessions. A live or unobservable session leaves revocation incomplete.
+    Explicit same-operation reentry can confirm an applied lock/lost receipt;
+    completed lock drift is refused instead of silently repaired.
+    """
+    state,policy,_ = _verification_binding(operation,plan_sha256,charset,collation)
+    report = verification_revocation_plan(operation,plan_sha256,charset,collation)
+    started,completed = state/'verification-revoke-started.json',state/'verification-revoked.json'
+    exists = started.exists() or started.is_symlink()
+    if not exists:
+        if readonly:
+            fail('Revocation not started',code='TARGET_VERIFICATION_REVOCATION_NOT_STARTED')
+        verification_connection_inventory(state,policy['user'])  # visibility before any effect
+        _verification_write_new(started,report['plan'])
+    if not report['account_locked']:
+        if readonly:
+            fail('Revocation not confirmed',code='TARGET_VERIFICATION_REVOCATION_UNCONFIRMED')
+        mysql_sql(state,"ALTER USER '"+policy['user']+"'@'localhost' ACCOUNT LOCK;\n")
+    after = verification_revocation_plan(operation,plan_sha256,charset,collation)
+    if after['plan_sha256'] != report['plan_sha256'] or after['account_locked'] is not True:
+        fail('Revocation lock not confirmed',code='TARGET_VERIFICATION_REVOCATION_UNCONFIRMED')
+    connections = verification_connection_inventory(state,policy['user'])
+    if connections['active'] or connections['pending']:
+        fail('Existing or authenticating sessions remain',code='TARGET_VERIFICATION_SESSIONS_ACTIVE')
+    value = {'schema':1,'operation_id':operation,'revocation_intent_sha256':report['plan_sha256'],
+             'account_receipt_sha256':report['plan']['account_receipt_sha256'],
+             'account_locked':True,'active_connections':0,'pending_authentication':0}
+    raw = (json.dumps(value,sort_keys=True,separators=(',',':'))+'\n').encode()
+    if completed.exists() or completed.is_symlink():
+        if read_private(str(completed)) != raw:
+            fail('Revocation completion changed',code='TARGET_VERIFICATION_REVOCATION_BINDING_REJECTED')
+    elif readonly:
+        fail('Revocation has no completion receipt',code='TARGET_VERIFICATION_REVOCATION_UNCONFIRMED')
+    else:
+        _verification_write_new(completed,value)
     return value

@@ -14,7 +14,9 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
+import textwrap
 import types
 import unittest
 from unittest import mock
@@ -111,7 +113,7 @@ class NativeFixtureContract(unittest.TestCase):
         phases = {
             'data': set('foreign_account_refused lost_credential_refused_without_reset maintenance_authentication_verified maintenance_drift_refused maintenance_nonroot_denied read_only_reentry_verified modified_data_refused removed_constraint_refused foreign_database_refused runtime_material_drift_refused'.split()),
             'sessions': set('sessions_revoked session_transition_exact_readback session_transition_explicit_recovery'.split()),
-            'configuration': set('sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated'.split()),
+            'configuration': set('sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock'.split()),
         }
         for phase, evidence in phases.items():
             metadata = {**self.metadata(), 'scenario': 'controller-restore-' + phase}
@@ -826,6 +828,111 @@ class NativeFixtureContract(unittest.TestCase):
         for argv in (["/usr/bin/apt-get", "update"], ["/usr/bin/apt-get", "--simulate"], ["/usr/bin/apt-get", "--assume-yes"],
                      ["/usr/bin/systemctl", "start"], ["/usr/bin/virsh", "net-list"], ["/usr/sbin/nft"], []):
             self.assertIn(g.command_code(argv), h.DIAGNOSTIC_COMMANDS)
+
+
+class WorkflowRestoreEvidenceContract(unittest.TestCase):
+    """Execute the actual independent CI gate, not the native report producer.
+
+    Explicit synthetic reports check the public artifact contract only. They
+    are never emitted as native execution evidence or acceptance artifacts.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        workflow = (HERE.parents[2] / '.github/workflows/ci.yml').read_text()
+        step = workflow.split('      - name: Independently reject migration and real-source overclaims\n')
+        if len(step) != 2:
+            raise AssertionError('independent restore evidence gate must exist exactly once')
+        body = step[1].split('      - name:', 1)[0]
+        cls.program = textwrap.dedent(body.split("          python3 -I - <<'PYTEST'\n", 1)[1].split('          PYTEST\n', 1)[0])
+
+    def fixture(self, phase='configuration', ubuntu='22.04'):
+        # Kept independent of both production validators; based on the native
+        # scenario contract, including the account preparation/revocation work.
+        common = 'passed real_apt real_systemd real_mysql actual_installer actual_controller target_sealed exact_encoding_preserved credentials_verified runtime_ddl_denied same_operation_preserved source_fixture_synthetic database_restored real_source_database_snapshot exact_rows_verified runtime_materials_staged runtime_candidate_remains_fenced'.split()
+        phase_fields = {
+            'data': 'foreign_account_refused lost_credential_refused_without_reset maintenance_authentication_verified maintenance_drift_refused maintenance_nonroot_denied read_only_reentry_verified modified_data_refused removed_constraint_refused foreign_database_refused runtime_material_drift_refused'.split(),
+            'sessions': 'sessions_revoked session_transition_exact_readback session_transition_explicit_recovery'.split(),
+            'configuration': 'sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock'.split(),
+        }
+        guest = dict.fromkeys(common + phase_fields[phase], True)
+        guest.update(dict.fromkeys('source_host_export_verified node_takeover_verified migration_ready kvm_ready session_browser_verified'.split(), False))
+        guest.update(schema=1, scenario='controller-restore-' + phase, ubuntu=ubuntu, source_sha='a' * 40, image_sha256='b' * 64)
+        summary = {**guest, **dict.fromkeys('host_network_unchanged tcg_only host_process_isolation_verified sandbox_selftests_passed relay_cleanup_verified'.split(), True),
+                   'host_network_proof': {'unchanged': True}, 'host_network_pre_vm_proof': {'unchanged': True}}
+        return {'summary.json': summary, 'guest-report.json': guest}
+
+    def run_gate(self, reports, phase='configuration', ubuntu='22.04'):
+        with tempfile.TemporaryDirectory(prefix='aster-workflow-contract-') as scratch:
+            root = Path(scratch) / 'cloud-controller-provision'
+            root.mkdir()
+            for name, report in reports.items():
+                (root / name).write_text(json.dumps(report))
+            env = {**os.environ, 'RUNNER_TEMP': scratch, 'GITHUB_SHA': 'a' * 40,
+                   'TEST_SCENARIO': 'controller-restore-' + phase, 'TEST_UBUNTU': ubuntu}
+            return subprocess.run([sys.executable, '-I', '-'], input=self.program, env=env,
+                                  text=True, capture_output=True, timeout=10)
+
+    def test_configuration_report_with_required_account_evidence_is_accepted(self):
+        result = self.run_gate(self.fixture())
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_each_scenario_accepts_only_its_own_complete_report_on_both_platforms(self):
+        for phase in ('data', 'sessions', 'configuration'):
+            for ubuntu in ('22.04', '24.04'):
+                with self.subTest(phase=phase, ubuntu=ubuntu):
+                    result = self.run_gate(self.fixture(phase, ubuntu), phase, ubuntu)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_each_new_account_proof_is_required_and_must_be_boolean_true_in_both_reports(self):
+        fields = 'verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock'.split()
+        for name in ('summary.json', 'guest-report.json'):
+            for field in fields:
+                for value in (None, False, 1):
+                    with self.subTest(report=name, field=field, value=value):
+                        reports = self.fixture()
+                        if value is None:
+                            del reports[name][field]
+                        else:
+                            reports[name][field] = value
+                        self.assertNotEqual(self.run_gate(reports).returncode, 0)
+
+    def test_wrong_identity_extra_fields_and_unexecuted_scenarios_are_refused(self):
+        for name in ('summary.json', 'guest-report.json'):
+            cases = {'source_sha': 'c' * 40, 'ubuntu': '24.04', 'scenario': 'controller-restore-data',
+                     'schema': 2, 'runtime_material_drift_refused': True}
+            cases.update(dict.fromkeys('source_host_export_verified node_takeover_verified migration_ready kvm_ready session_browser_verified'.split(), True))
+            for field, value in cases.items():
+                with self.subTest(report=name, field=field):
+                    reports = self.fixture()
+                    reports[name][field] = value
+                    self.assertNotEqual(self.run_gate(reports).returncode, 0)
+        reports = self.fixture()
+        reports['guest-report.json']['unexpected_field'] = True
+        self.assertNotEqual(self.run_gate(reports).returncode, 0)
+        for phase in ('data', 'sessions'):
+            for name in ('summary.json', 'guest-report.json'):
+                with self.subTest(phase=phase, report=name):
+                    reports = self.fixture(phase)
+                    reports[name]['verification_account_prepared'] = True
+                    self.assertNotEqual(self.run_gate(reports, phase).returncode, 0)
+
+    def test_missing_or_false_host_isolation_evidence_is_refused(self):
+        fields = 'host_network_unchanged tcg_only host_process_isolation_verified sandbox_selftests_passed relay_cleanup_verified'.split()
+        for field in fields:
+            for value in (None, False):
+                with self.subTest(field=field, value=value):
+                    reports = self.fixture()
+                    if value is None:
+                        del reports['summary.json'][field]
+                    else:
+                        reports['summary.json'][field] = value
+                    self.assertNotEqual(self.run_gate(reports).returncode, 0)
+        for field in ('host_network_proof', 'host_network_pre_vm_proof'):
+            with self.subTest(field=field):
+                reports = self.fixture()
+                reports['summary.json'][field]['unchanged'] = False
+                self.assertNotEqual(self.run_gate(reports).returncode, 0)
 
 
 if __name__ == "__main__":

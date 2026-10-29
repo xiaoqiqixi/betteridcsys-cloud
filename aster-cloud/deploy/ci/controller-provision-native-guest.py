@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import select
 import stat
 import subprocess
 import sys
@@ -27,6 +28,7 @@ PHASE = 'preflight'
 NONCE = None
 CODES = set('TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING TARGET_DEPENDENCIES_UNCONFIRMED TARGET_MYSQL_START_UNCONFIRMED TARGET_DATABASE_CREATE_UNCONFIRMED TARGET_DATABASE_INVENTORY_UNCONFIRMED TARGET_RESTORE_SERVER_INVENTORY_REJECTED TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED TARGET_MATERIALS_UNCONFIRMED'.split())
 CODES |= set('TARGET_VERIFICATION_IDENTITY_REJECTED TARGET_VERIFICATION_GRANTS_REJECTED TARGET_VERIFICATION_BINDING_REJECTED TARGET_VERIFICATION_CREDENTIAL_REJECTED TARGET_VERIFICATION_CREATE_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_UNCONFIRMED TARGET_VERIFICATION_APPROVAL_REQUIRED TARGET_VERIFICATION_APPROVAL_CHANGED TARGET_VERIFICATION_CREDENTIAL_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_CHANGED'.split())
+CODES |= set('TARGET_VERIFICATION_REVOCATION_STARTED TARGET_VERIFICATION_REVOCATION_BINDING_REJECTED TARGET_VERIFICATION_REVOCATION_UNCONFIRMED TARGET_VERIFICATION_REVOCATION_NOT_STARTED TARGET_VERIFICATION_CONNECTION_INVENTORY_UNCONFIRMED TARGET_VERIFICATION_SESSIONS_ACTIVE TARGET_VERIFICATION_REVOCATION_APPROVAL_REQUIRED TARGET_VERIFICATION_REVOCATION_APPROVAL_CHANGED'.split())
 APT_CODES = set('APT_PLAN_UNSAFE APT_DNS_FAILURE APT_TLS_FAILURE APT_SIGNATURE_FAILURE APT_METADATA_FAILURE APT_PACKAGE_UNAVAILABLE APT_DEPENDENCY_CONFLICT APT_LOCKED APT_COMMAND_REJECTED APT_COMMAND_UNAVAILABLE APT_COMMAND_TIMEOUT APT_OUTPUT_OVERSIZED'.split())
 
 
@@ -703,6 +705,84 @@ def execute(metadata):
         require({name:sha(directory/name) for name in verification_names}==prepared_hashes)
         require(all(sha(inputs/name)==value for name,value in before_verification.items()))
         require((sha(seal),sha(state))==before and {p.name:sha(p) for p in destination.iterdir()}==publication_hashes)
+        progress('target-verification-revoke-plan')
+        revoke_plan = json.loads(entry('target-verification-revoke-plan').stdout)
+        require(set(revoke_plan)=={'schema','operation_id','plan','plan_sha256','readonly','service_started','migration_ready'} and
+                revoke_plan['schema']==1 and revoke_plan['operation_id']==operation and revoke_plan['readonly'] is True and
+                revoke_plan['service_started'] is False and revoke_plan['migration_ready'] is False)
+        require(revoke_plan['plan']=={'schema':1,'protocol':'aster.controller-verification-revocation/1',
+            'operation_id':operation,'verification_plan_sha256':verification['plan_sha256'],
+            'account_receipt_sha256':prepared_hashes['verification-account.json'],'database':database,'user':vuser})
+        entry('target-verification-revoke','TARGET_VERIFICATION_REVOCATION_APPROVAL_REQUIRED')
+        require(not (directory/'verification-revoke-started.json').exists())
+        private(inputs/'verification-revoke-approval.json',json.dumps({'schema':1,'operation_id':operation,
+                'revocation_plan_sha256':revoke_plan['plan_sha256']},separators=(',',':')).encode())
+        entry('target-verification-revoke-status','TARGET_VERIFICATION_REVOCATION_NOT_STARTED')
+        # Hold a real authenticated session, explicitly without thread event
+        # instrumentation. Locking new logins must not be mistaken for drain.
+        raw=(directory/'verification-mysql-dsn').read_text()
+        prefix,suffix=vuser+':','@unix(/run/mysqld/mysqld.sock)/'+database+'\n'
+        require(raw.startswith(prefix) and raw.endswith(suffix))
+        password=raw[len(prefix):-len(suffix)].replace('\\','\\\\').replace('"','\\"')
+        client_option=ROOT/'verification-test-client.cnf'
+        private(client_option,('[client]\nuser='+vuser+'\npassword="'+password+'"\n').encode())
+        del password,raw
+        verification_client=['/usr/bin/mysql','--defaults-file='+str(client_option),'--protocol=SOCKET',
+            '--socket=/run/mysqld/mysqld.sock','--database='+database,'--batch','--raw','--skip-column-names',
+            '--skip-reconnect','--connect-timeout=5','--unbuffered']
+        held=subprocess.Popen(verification_client,env=ENV,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        def held_query(sql):
+            held.stdin.write(sql)
+            held.stdin.flush()
+            require(select.select([held.stdout],[],[],10)[0], 'TARGET_VERIFICATION_HELD_SESSION_UNCONFIRMED')
+            value=held.stdout.readline()
+            require(0<len(value)<=256,'TARGET_VERIFICATION_HELD_SESSION_UNCONFIRMED')
+            return value
+        try:
+            require(held_query(b'SELECT CURRENT_USER();\n')==(vuser+'@localhost\n').encode())
+            module.mysql_sql(directory,"UPDATE performance_schema.threads SET INSTRUMENTED='NO',HISTORY='NO' WHERE BINARY PROCESSLIST_USER='"+vuser+"';\n")
+            progress('target-verification-revoke-active-session')
+            entry('target-verification-revoke','TARGET_VERIFICATION_SESSIONS_ACTIVE')
+            require(not (directory/'verification-revoked.json').exists())
+            require(held_query(b'SELECT 17;\n')==b'17\n')  # no KILL or fake drain
+            login=subprocess.run(verification_client,input=b'SELECT 1;\n',env=ENV,capture_output=True,timeout=20)
+            require(login.returncode==1 and not login.stdout and re.match(rb'^ERROR 3118 \(HY000\)',login.stderr),
+                    'TARGET_VERIFICATION_LOCK_DENIAL_UNCONFIRMED')
+        finally:
+            if held.stdin is not None:held.stdin.close();held.stdin=None
+            try:held.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                held.terminate();held.wait(timeout=10)
+            held.stdout.close();held.stderr.close()
+            client_option.unlink()
+        require(held.returncode==0)
+        require(sha(directory/'verification-revoke-started.json')==revoke_plan['plan_sha256'])
+        entry('target-verification-prepare','TARGET_VERIFICATION_REVOCATION_STARTED')
+        progress('target-verification-revoke-readonly-recovery')
+        module.mysql_sql(directory,'SET GLOBAL super_read_only=ON;\n')
+        try:
+            # The lock is already effective. Status refuses missing completion;
+            # explicit original revoke records only the verified outcome, with
+            # SQL writes prohibited by MySQL itself.
+            entry('target-verification-revoke-status','TARGET_VERIFICATION_REVOCATION_UNCONFIRMED')
+            revoked=json.loads(entry('target-verification-revoke').stdout)
+            expected_revoked={'schema':1,'operation_id':operation,'revocation_intent_sha256':revoke_plan['plan_sha256'],
+                'account_receipt_sha256':prepared_hashes['verification-account.json'],'account_locked':True,
+                'active_connections':0,'pending_authentication':0,'read_only_verification':False,
+                'sql_identity_revoked':True,'service_started':False,'migration_ready':False,'root_inventory_verified':True}
+            require(revoked==expected_revoked)
+            revoked_sha=sha(directory/'verification-revoked.json')
+            require(json.loads(entry('target-verification-revoke-status').stdout)=={**expected_revoked,'read_only_verification':True})
+            require(json.loads(entry('target-verification-revoke').stdout)==expected_revoked and sha(directory/'verification-revoked.json')==revoked_sha)
+        finally:
+            module.mysql_sql(directory,'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
+        progress('target-verification-revoke-drift')
+        module.mysql_sql(directory,'ALTER USER '+account+' ACCOUNT UNLOCK;\n')  # fixture fault, never production
+        entry('target-verification-revoke','TARGET_VERIFICATION_REVOCATION_BINDING_REJECTED')
+        require(module._query(directory,"SELECT JSON_OBJECT('locked',account_locked) FROM mysql.user WHERE BINARY User='"+vuser+"';\n")=={'locked':'N'})
+        module.mysql_sql(directory,'ALTER USER '+account+' ACCOUNT LOCK;\n')  # undo only the injected fault
+        require({name:sha(directory/name) for name in verification_names}==prepared_hashes and module.mysql_sql(directory,account_auth_sql)==actual_auth)
+        require(all(sha(inputs/name)==value for name,value in before_verification.items()))
         denied_published = subprocess.run([str(version/'bin/aster-controller'),'check','-config',str(destination/'config.json')],env=ENV,capture_output=True,timeout=30)
         require(denied_published.returncode==78 and not denied_published.stdout and
                 json.loads(denied_published.stderr).get('code')=='CONTROLLER_MIGRATION_FENCED')
@@ -713,7 +793,9 @@ def execute(metadata):
             'configuration_published', 'configuration_publication_readonly', 'configuration_partial_resume_verified',
             'published_configuration_remains_fenced', 'verification_sql_plan_bound_readonly',
             'verification_account_prepared', 'verification_account_exact_grants', 'verification_account_readonly_reentry',
-            'verification_account_foreign_refused', 'verification_account_drift_not_repaired', 'verification_credential_authenticated')})
+            'verification_account_foreign_refused', 'verification_account_drift_not_repaired', 'verification_credential_authenticated',
+            'verification_revocation_locked', 'verification_revocation_active_session_refused',
+            'verification_revocation_readonly_recovery', 'verification_revocation_no_implicit_unlock')})
         return finish()
     return report
 
