@@ -26,6 +26,7 @@ ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': str(ROOT), 'LANG': 'C.UT
 PHASE = 'preflight'
 NONCE = None
 CODES = set('TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING TARGET_DEPENDENCIES_UNCONFIRMED TARGET_MYSQL_START_UNCONFIRMED TARGET_DATABASE_CREATE_UNCONFIRMED TARGET_DATABASE_INVENTORY_UNCONFIRMED TARGET_RESTORE_SERVER_INVENTORY_REJECTED TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED TARGET_MATERIALS_UNCONFIRMED'.split())
+CODES |= set('TARGET_VERIFICATION_IDENTITY_REJECTED TARGET_VERIFICATION_GRANTS_REJECTED TARGET_VERIFICATION_BINDING_REJECTED TARGET_VERIFICATION_CREDENTIAL_REJECTED TARGET_VERIFICATION_CREATE_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_UNCONFIRMED TARGET_VERIFICATION_APPROVAL_REQUIRED TARGET_VERIFICATION_APPROVAL_CHANGED TARGET_VERIFICATION_CREDENTIAL_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_CHANGED'.split())
 APT_CODES = set('APT_PLAN_UNSAFE APT_DNS_FAILURE APT_TLS_FAILURE APT_SIGNATURE_FAILURE APT_METADATA_FAILURE APT_PACKAGE_UNAVAILABLE APT_DEPENDENCY_CONFLICT APT_LOCKED APT_COMMAND_REJECTED APT_COMMAND_UNAVAILABLE APT_COMMAND_TIMEOUT APT_OUTPUT_OVERSIZED'.split())
 
 
@@ -589,12 +590,29 @@ def execute(metadata):
         require(set(publication_hashes)=={'config.json','console.json','server.crt','server.key','manifest.json'} and
                 all(publication_hashes[f['name']]==f['sha256'] for f in config_plan['files']))
         readonly_published = {**published,'read_only_verification':True}
+        verification_inputs = {str(p.relative_to(inputs)):sha(p) for p in inputs.rglob('*') if p.is_file()}
         module.mysql_sql(directory, 'SET GLOBAL super_read_only=ON;\n')
         try:
             require(json.loads(entry('target-configuration-status').stdout)==readonly_published)
             require(json.loads(entry('target-configuration-publish').stdout)==readonly_published)
+            verification = json.loads(entry('target-verification-plan').stdout)
+            require(set(verification) == {'schema','operation_id','plan','plan_sha256','readonly','exact_database_verified',
+                                         'configuration_published','sql_identity_prepared','service_started','migration_ready','root_inventory_verified'} and
+                    verification['schema'] == 1 and verification['operation_id'] == operation and
+                    all(verification[k] is True for k in ('readonly','exact_database_verified','configuration_published','root_inventory_verified')) and
+                    all(verification[k] is False for k in ('sql_identity_prepared','service_started','migration_ready')))
+            vp = verification['plan']
+            require(vp['controller_id'] == controller and vp['operation_id'] == operation and
+                    vp['target_plan_sha256'] == request['target_plan_sha256'] and
+                    vp['configuration_plan_sha256'] == planned['plan_sha256'] and
+                    vp['configuration_intent_sha256'] == published['intent_sha256'] and vp['session_intent_sha256'] == session_hash and
+                    vp['console_origin'] == request['console_origin'] and vp['listen'] == request['listen'] and
+                    vp['sql']['user'] == 'aster_v_' + operation[:23] and vp['sql']['database'] == 'aster_cloud_restore_' + operation and
+                    len(vp['sql']['grants']) == 4)
         finally:
             module.mysql_sql(directory, 'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
+        require({str(p.relative_to(inputs)):sha(p) for p in inputs.rglob('*') if p.is_file()} == verification_inputs)
+        require(module.mysql_sql(directory, "SELECT COUNT(*) FROM mysql.user WHERE User='aster_v_"+operation[:23]+"';\n").strip() == b'0')
         entry('target-configuration-resume', 'TARGET_COMMAND_REJECTED')
         # Model a reachable pre-rename interruption with this fixture's own
         # bytes and original durable intent; this is not a power-cut test.
@@ -610,8 +628,81 @@ def execute(metadata):
         config_bytes=(destination/'config.json').read_bytes()
         (destination/'config.json').write_bytes(config_bytes+b' ')
         entry('target-configuration-status','TARGET_COMMAND_REJECTED')
+        entry('target-verification-plan','TARGET_COMMAND_REJECTED')
         require((destination/'config.json').read_bytes()==config_bytes+b' ')
         (destination/'config.json').write_bytes(config_bytes)
+        progress('target-verification-account')
+        vuser = 'aster_v_' + operation[:23]
+        verification_names = ('verification-started.json','verification-mysql-dsn','verification-account.json')
+        before_verification = {str(p.relative_to(inputs)):sha(p) for p in inputs.rglob('*') if p.is_file()}
+        entry('target-verification-prepare','TARGET_VERIFICATION_APPROVAL_REQUIRED')
+        require(not any((directory/name).exists() for name in verification_names))
+        require(module._query(directory,"SELECT JSON_OBJECT('n',COUNT(*)) FROM mysql.user WHERE User='"+vuser+"';\n") == {'n':0})
+        private(inputs/'verification-approval.json',json.dumps({'schema':1,'operation_id':operation,'plan_sha256':verification['plan_sha256']},separators=(',',':')).encode())
+        # A collision is foreign, even if the username happens to be derived
+        # from this operation. Never reset/adopt it or create an intent for it.
+        module.mysql_sql(directory,"CREATE USER '"+vuser+"'@'localhost' IDENTIFIED BY RANDOM PASSWORD;\n")
+        account_auth_sql = "SELECT SHA2(authentication_string,256) FROM mysql.user WHERE User='"+vuser+"' AND Host='localhost';\n"
+        foreign_auth = module.mysql_sql(directory,account_auth_sql)
+        entry('target-verification-prepare','TARGET_RESTORE_SERVER_INVENTORY_REJECTED')
+        require(not any((directory/name).exists() for name in verification_names) and module.mysql_sql(directory,account_auth_sql)==foreign_auth)
+        module.mysql_sql(directory,"DROP USER '"+vuser+"'@'localhost';\n")  # fixture owns this injected account
+        progress('target-verification-create-and-authenticate')
+        prepared = json.loads(entry('target-verification-prepare').stdout)
+        expected_verification = {'schema':1,'operation_id':operation,'plan_sha256':verification['plan_sha256'],
+            'credential_verified':True,'sql_identity_verified':True,'exact_database_verified':True,
+            'service_started':False,'migration_ready':False,'read_only_verification':False,
+            'sql_identity_prepared':True,'root_inventory_verified':True}
+        require(prepared == expected_verification)
+        prepared_hashes = {name:sha(directory/name) for name in verification_names}
+        for name in verification_names:
+            st = (directory/name).lstat()
+            require(st.st_uid==0 and st.st_nlink==1 and stat.S_ISREG(st.st_mode) and stat.S_IMODE(st.st_mode)==0o600)
+        actual_auth = module.mysql_sql(directory,account_auth_sql)
+        progress('target-verification-readonly-reentry')
+        readonly_verification = {**expected_verification,'read_only_verification':True}
+        module.mysql_sql(directory,'SET GLOBAL super_read_only=ON;\n')
+        try:
+            require(json.loads(entry('target-verification-status').stdout)==readonly_verification)
+            require(json.loads(entry('target-verification-prepare').stdout)==expected_verification)
+            # Lost completion ACK is recoverable by exact readback, but status
+            # itself never creates the receipt. No SQL password/grant writes.
+            completed = directory/'verification-account.json'
+            retained = ROOT/'retained-verification-account.json'
+            completed.rename(retained)
+            entry('target-verification-status','TARGET_VERIFICATION_ACCOUNT_UNCONFIRMED')
+            require(not completed.exists())
+            require(json.loads(entry('target-verification-prepare').stdout)==expected_verification)
+            require(completed.read_bytes()==retained.read_bytes())
+            retained.unlink()
+        finally:
+            module.mysql_sql(directory,'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
+        require({name:sha(directory/name) for name in verification_names}==prepared_hashes and module.mysql_sql(directory,account_auth_sql)==actual_auth)
+        # Exact SQL policy is fail-closed; neither status nor prepare silently
+        # removes an excessive grant or restores a missing privilege.
+        progress('target-verification-grant-drift')
+        account = "'"+vuser+"'@'localhost'"
+        grant_target = '`'+database+'`.controller_console_users'
+        module.mysql_sql(directory,'GRANT UPDATE ON '+grant_target+' TO '+account+';\n')
+        extra_grants = module.mysql_sql(directory,'SHOW GRANTS FOR '+account+';\n')
+        entry('target-verification-status','TARGET_VERIFICATION_GRANTS_REJECTED')
+        entry('target-verification-prepare','TARGET_VERIFICATION_GRANTS_REJECTED')
+        require(module.mysql_sql(directory,'SHOW GRANTS FOR '+account+';\n')==extra_grants)
+        module.mysql_sql(directory,'REVOKE UPDATE ON '+grant_target+' FROM '+account+';\n')
+        progress('target-verification-credential-drift')
+        credential_path = directory/'verification-mysql-dsn'
+        credential_raw = credential_path.read_bytes()
+        credential_path.write_bytes((vuser+':'+'wrong-password-value-not-a-secret'+'@unix(/run/mysqld/mysqld.sock)/'+database+'\n').encode())
+        entry('target-verification-prepare','TARGET_COMMAND_REJECTED')
+        require(module.mysql_sql(directory,account_auth_sql)==actual_auth and sha(directory/'verification-account.json')==prepared_hashes['verification-account.json'])
+        credential_path.write_bytes(credential_raw)
+        module.mysql_sql(directory,"CREATE USER '"+vuser+"'@'127.0.0.1' IDENTIFIED BY RANDOM PASSWORD;\n")
+        entry('target-verification-status','TARGET_RESTORE_SERVER_INVENTORY_REJECTED')
+        module.mysql_sql(directory,"DROP USER '"+vuser+"'@'127.0.0.1';\n")  # fixture-owned fault only
+        require(json.loads(entry('target-verification-status').stdout)==readonly_verification)
+        require({name:sha(directory/name) for name in verification_names}==prepared_hashes)
+        require(all(sha(inputs/name)==value for name,value in before_verification.items()))
+        require((sha(seal),sha(state))==before and {p.name:sha(p) for p in destination.iterdir()}==publication_hashes)
         denied_published = subprocess.run([str(version/'bin/aster-controller'),'check','-config',str(destination/'config.json')],env=ENV,capture_output=True,timeout=30)
         require(denied_published.returncode==78 and not denied_published.stdout and
                 json.loads(denied_published.stderr).get('code')=='CONTROLLER_MIGRATION_FENCED')
@@ -620,7 +711,9 @@ def execute(metadata):
         report.update({key: True for key in ('configuration_plan_verified', 'configuration_plan_readonly',
             'configuration_plan_tls_drift_refused', 'configuration_plan_requires_exact_session_postimage',
             'configuration_published', 'configuration_publication_readonly', 'configuration_partial_resume_verified',
-            'published_configuration_remains_fenced')})
+            'published_configuration_remains_fenced', 'verification_sql_plan_bound_readonly',
+            'verification_account_prepared', 'verification_account_exact_grants', 'verification_account_readonly_reentry',
+            'verification_account_foreign_refused', 'verification_account_drift_not_repaired', 'verification_credential_authenticated')})
         return finish()
     return report
 

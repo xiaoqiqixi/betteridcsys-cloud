@@ -22,6 +22,7 @@ import sys
 
 PROTOCOL = 'aster.controller-migration/1'
 RESTORE_ERRORS = set('TARGET_RESTORE_SERVER_INVENTORY_REJECTED TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED'.split())
+VERIFICATION_ERRORS = set('TARGET_VERIFICATION_IDENTITY_REJECTED TARGET_VERIFICATION_GRANTS_REJECTED TARGET_VERIFICATION_BINDING_REJECTED TARGET_VERIFICATION_CREDENTIAL_REJECTED TARGET_VERIFICATION_CREATE_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_UNCONFIRMED'.split())
 SYSTEMD = Path('/etc/systemd/system')
 CONFIG = Path('/etc/aster-controller/config.json')
 INSTALL_STATE = Path('/var/lib/aster-cloud-installer/controller/state.json')
@@ -683,12 +684,13 @@ class Target(Host):
         finally:
             os.close(fd)
 
-    def unused_host(self, configuration=False):
+    def unused_host(self, configuration=False, verification=False):
+        extra = {'verification-approval.json'} if verification else set()
         require(set(p.name for p in self.root.iterdir()) <=
                 {'request.json', 'backup.age', 'recovery.key', 'plan.json', 'target.lock', 'database-plan.json', 'database',
                  'materials-started.json', 'runtime', 'sessions-started.json', 'configuration-request.json',
                  'configuration-tls.crt', 'configuration-tls.key', 'configuration-approval.json',
-                 'configuration-started.json'}, 'TARGET_INPUT_INVENTORY_CHANGED')
+                 'configuration-started.json'} | extra, 'TARGET_INPUT_INVENTORY_CHANGED')
         # A killed verification may leave private plaintext. Never silently
         # discard/reuse it, or turn an unreviewed partial run into success.
         if configuration and CONFIG.parent.exists():
@@ -874,29 +876,81 @@ class Target(Host):
                     isinstance(f['sha256'],str) and SHA.fullmatch(f['sha256']) for f in files),
                 'TARGET_CONFIGURATION_PLAN_UNCONFIRMED')
 
+    def verify_verification_plan(self, result, plan, database_plan):
+        fields = {'schema','operation_id','plan','plan_sha256','readonly','exact_database_verified',
+                  'configuration_published','sql_identity_prepared','service_started','migration_ready'}
+        require(set(result) == fields and type(result['schema']) is int and result['schema'] == 1 and result['operation_id'] == self.operation and
+                all(result[k] is True for k in ('readonly','exact_database_verified','configuration_published')) and
+                all(result[k] is False for k in ('sql_identity_prepared','service_started','migration_ready')),
+                'TARGET_VERIFICATION_PLAN_UNCONFIRMED')
+        value = result['plan']
+        expected = {'schema','protocol','controller_id','operation_id','target_plan_sha256',
+                    'configuration_plan_sha256','configuration_intent_sha256','session_intent_sha256',
+                    'console_origin','listen','sql'}
+        require(isinstance(value,dict) and set(value) == expected and type(value['schema']) is int and value['schema'] == 1 and
+                value['protocol'] == 'aster.controller-verification-plan/1' and
+                value['controller_id'] == plan['controller_id'] and value['operation_id'] == self.operation and
+                value['target_plan_sha256'] == database_plan['target_plan_sha256'] and
+                value['configuration_plan_sha256'] == self.read(self.root / 'configuration-approval.json')['configuration_plan_sha256'] and
+                value['configuration_intent_sha256'] == digest(self.i.protected_read(str(self.root / 'configuration-started.json'),65536)) and
+                value['session_intent_sha256'] == digest(self.i.protected_read(str(self.root / 'sessions-started.json'),65536)),
+                'TARGET_VERIFICATION_PLAN_UNCONFIRMED')
+        request = self.read(self.root / 'configuration-request.json')
+        require(request['console_enabled'] is True and all(value[k] == request[k] for k in ('console_origin','listen')),
+                'TARGET_VERIFICATION_ENDPOINT_CHANGED')
+        # Fixed identifiers/grants are reconstructed, never executed
+        # from opaque returned SQL. This action remains read-only.
+        database, user = 'aster_cloud_restore_' + self.operation, 'aster_v_' + self.operation[:23]
+        account = '`' + user + '`@`localhost`'
+        table = '`' + database + '`.'
+        grants = ['GRANT SELECT ON `' + database.replace('_', '\\_') + '`.* TO ' + account,
+                  'GRANT INSERT, DELETE ON ' + table + '`controller_console_sessions` TO ' + account,
+                  'GRANT INSERT, UPDATE, DELETE ON ' + table + '`controller_console_login_limits` TO ' + account,
+                  'GRANT INSERT (`actor`, `action`, `target`, `created_at`) ON ' + table + '`controller_identity_audit` TO ' + account]
+        require(value['sql'] == {'database':database,'user':user,'grants':grants} and
+                result['plan_sha256'] == digest(json.dumps(value,ensure_ascii=False,separators=(',',':')).encode()),
+                'TARGET_VERIFICATION_SQL_POLICY_CHANGED')
+
     def publish_configuration(self, action):
         # Called only with the existing installation lock held. Existing /etc
         # bytes are not accepted here as proof; Go must authenticate and derive
         # every file under the original target seal before claiming success.
         with self.lock('target.lock'):
-            self.unused_host(configuration=True)
+            verification = action in ('target-verification-prepare','target-verification-status')
+            self.unused_host(configuration=True, verification=verification)
             plan = self.read(self.root / 'plan.json')
-            database_plan = self.read(self.root / 'database-plan.json')
-            directory = self.root / 'database'
+            plan_path, directory = self.root / 'database-plan.json', self.root / 'database'
+            # A sealed target with neither database-stage object has simply
+            # not been prepared. Do not conflate that definite refusal with an
+            # arbitrary protected-read failure. Partial or linked state still
+            # follows the original strict reads and remains unconfirmed.
+            if (not plan_path.exists() and not plan_path.is_symlink() and
+                    not directory.exists() and not directory.is_symlink()):
+                raise Refused('TARGET_DATABASE_STAGE_REQUIRED')
+            database_plan = self.read(plan_path)
             self.i.protected_path(str(directory), directory=True, private=True)
             require(stat.S_IMODE(directory.stat().st_mode) == 0o700, 'TARGET_DATABASE_DIRECTORY_UNSAFE')
             allowed = {'dependencies.json', 'mysql-provision.json', 'restore-provision.json', 'runtime-mysql-dsn',
                        'migration-mysql-dsn', 'mysql-client-home', 'import-approval.json', 'import-started.json',
                        'structure.json', 'maintenance-auth-intent.json', 'maintenance-auth-verified.json'}
+            if verification:
+                allowed |= {'verification-started.json','verification-mysql-dsn','verification-account.json'}
             require(set(p.name for p in directory.iterdir()) <= allowed, 'TARGET_DATABASE_INVENTORY_CHANGED')
             module = self.i.provisioning_module()
             try:
+                if verification:
+                    return self.prepare_verification(action, module, plan, database_plan)
                 module.verify_restore_mysql(self.operation, database_plan['data']['charset'], database_plan['data']['collation'], restored=True)
                 result = self.target_command(action[len('target-'):])
+                if action == 'target-verification-plan':
+                    self.verify_verification_plan(result, plan, database_plan)
+                    self.unused_host(configuration=True)
+                    module.verify_restore_mysql(self.operation,database_plan['data']['charset'],database_plan['data']['collation'],restored=True)
+                    return {**result,'root_inventory_verified':True}
                 fields = {'schema', 'operation_id', 'plan', 'plan_sha256', 'intent_sha256', 'read_only_verification',
                           'configuration_published', 'target_activation_approved', 'migration_ready',
                           'sessions_revoked', 'exact_database_verified'}
-                require(set(result) == fields and result['schema'] == 1 and result['operation_id'] == self.operation and
+                require(set(result) == fields and type(result['schema']) is int and result['schema'] == 1 and result['operation_id'] == self.operation and
                         all(result[k] is True for k in ('configuration_published','sessions_revoked','exact_database_verified')) and
                         result['target_activation_approved'] is False and result['migration_ready'] is False and
                         type(result['read_only_verification']) is bool and
@@ -910,12 +964,44 @@ class Target(Host):
                 module.verify_restore_mysql(self.operation, database_plan['data']['charset'], database_plan['data']['collation'], restored=True)
                 return {**result,'root_inventory_verified':True,'database_restored':True,'target_restore_approved':False}
             except module.ProvisionError as error:
-                raise Refused(error.code if error.code in RESTORE_ERRORS and error.code != 'TARGET_RESTORE_SERVER_INVENTORY_REJECTED' else 'TARGET_RESTORE_INVENTORY_UNCONFIRMED') from None
+                raise Refused(error.code if error.code in RESTORE_ERRORS | VERIFICATION_ERRORS and (verification or error.code != 'TARGET_RESTORE_SERVER_INVENTORY_REJECTED') else 'TARGET_RESTORE_INVENTORY_UNCONFIRMED') from None
+
+    def prepare_verification(self, action, module, plan, database_plan):
+        # The caller holds the installation and target locks. The Go plan
+        # reauthenticates the archive, seal, entire SQL image and publication;
+        # no root account write is authorized by an old JSON report alone.
+        result = self.target_command('verification-plan')
+        self.verify_verification_plan(result, plan, database_plan)
+        approval_path = self.root / 'verification-approval.json'
+        require(approval_path.exists() or approval_path.is_symlink(), 'TARGET_VERIFICATION_APPROVAL_REQUIRED')
+        approval = self.read(approval_path)
+        require(type(approval.get('schema')) is int and approval == {
+                    'schema': 1, 'operation_id': self.operation, 'plan_sha256': result['plan_sha256']},
+                'TARGET_VERIFICATION_APPROVAL_CHANGED')
+        args = (self.operation, result['plan_sha256'], database_plan['data']['charset'], database_plan['data']['collation'])
+        readonly = action == 'target-verification-status'
+        if readonly:
+            candidate = module.verification_account_candidate(*args)
+        else:
+            candidate = module.prepare_verification_mysql(*args)
+        # A valid grants listing is not proof that the saved password works.
+        # Do not write the completion receipt until the fixed credential has
+        # really authenticated and reverified the original database owner.
+        proof = self.target_command('verification-credential-check')
+        require(proof == {'schema': 1, 'operation_id': self.operation, 'plan_sha256': result['plan_sha256'],
+                         'credential_verified': True, 'sql_identity_verified': True, 'exact_database_verified': True,
+                         'service_started': False, 'migration_ready': False} and type(proof['schema']) is int and
+                all(type(proof[k]) is bool for k in ('credential_verified','sql_identity_verified','exact_database_verified','service_started','migration_ready')),
+                'TARGET_VERIFICATION_CREDENTIAL_UNCONFIRMED')
+        require(module.complete_verification_mysql(*args, readonly=readonly) == candidate,
+                'TARGET_VERIFICATION_ACCOUNT_CHANGED')
+        self.unused_host(configuration=True, verification=True)
+        return {**proof, 'read_only_verification': readonly, 'sql_identity_prepared': True, 'root_inventory_verified': True}
 
     def prepare(self, action):
         with self.installation_lock():
             verify_installation(self, self.i, target=True)
-            if action in ('target-configuration-publish','target-configuration-status','target-configuration-resume'):
+            if action in ('target-configuration-publish','target-configuration-status','target-configuration-resume','target-verification-plan','target-verification-prepare','target-verification-status'):
                 return self.publish_configuration(action)
             self.unused_host()
             plan = self.target_command('plan')
@@ -943,7 +1029,7 @@ class Target(Host):
                     result = self.target_command('configuration-plan')
                     fields = {'schema', 'operation_id', 'plan', 'plan_sha256', 'readonly', 'sessions_revoked',
                               'exact_database_verified', 'configuration_published', 'migration_ready'}
-                    require(set(result) == fields and result['schema'] == 1 and result['operation_id'] == self.operation and
+                    require(set(result) == fields and type(result['schema']) is int and result['schema'] == 1 and result['operation_id'] == self.operation and
                             all(result[k] is True for k in ('readonly', 'sessions_revoked', 'exact_database_verified')) and
                             result['configuration_published'] is False and result['migration_ready'] is False and
                             isinstance(result['plan_sha256'],str) and SHA.fullmatch(result['plan_sha256']),
@@ -984,14 +1070,14 @@ class Arguments(argparse.ArgumentParser):
 
 def main():
     parser = Arguments(description=__doc__)
-    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume'))
+    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status'))
     parser.add_argument('--operation')
     args = parser.parse_args()
     require((args.action in ('capabilities', 'plan') and args.operation is None) or
             (args.action not in ('capabilities', 'plan') and isinstance(args.operation, str) and OP.fullmatch(args.operation)),
             'EXACT_OPERATION_ID_REQUIRED')
     if args.action == 'capabilities':
-        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume'],
+        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status'],
                 'export_restore': False, 'migration_ready': False}
     if args.action.startswith('target-'):
         return Target(install_module(), args.operation).prepare(args.action)

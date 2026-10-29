@@ -18,7 +18,7 @@ class HostMigrationEntry(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         value = json.loads(r.stdout)
         self.assertEqual(value['protocol'], 'aster.controller-migration/1')
-        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume'])
+        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status'])
         self.assertIs(value['export_restore'], False)
         self.assertIs(value['migration_ready'], False)
 
@@ -68,6 +68,29 @@ class HostMigrationEntry(unittest.TestCase):
                     self.assertEqual(result.stdout,b'')
                     self.assertNotIn(b'PRIVATE_SENTINEL',result.stderr)
 
+
+
+    def test_verification_account_commands_accept_no_credentials_or_grant_overrides(self):
+        for action in ('target-verification-prepare','target-verification-status'):
+            for extra in ((), ('--operation','../escape'), ('--operation','a'*32,'--password','PRIVATE_SENTINEL'),
+                          ('--operation','a'*32,'--user','root'), ('--operation','a'*32,'--grant','ALL'),
+                          ('--operation','a'*32,'--force'), ('--operation','a'*32,'--start'),
+                          ('--operation','a'*32,'--approval','PRIVATE_SENTINEL')):
+                with self.subTest(action=action,extra=extra):
+                    result=self.invoke(action,*extra)
+                    self.assertEqual(result.returncode,1)
+                    self.assertEqual(result.stdout,b'')
+                    self.assertNotIn(b'PRIVATE_SENTINEL',result.stderr)
+
+    def test_verification_plan_accepts_only_an_exact_operation(self):
+        for extra in ((), ('--operation','../escape'), ('--operation','a'*32,'--dsn','PRIVATE_SENTINEL'),
+                      ('--operation','a'*32,'--grant','ALL'), ('--operation','a'*32,'--start'),
+                      ('--operation','a'*32,'--force'), ('--operation','a'*32,'--config','PRIVATE_SENTINEL')):
+            with self.subTest(extra=extra):
+                result=self.invoke('target-verification-plan',*extra)
+                self.assertEqual(result.returncode,1)
+                self.assertEqual(result.stdout,b'')
+                self.assertNotIn(b'PRIVATE_SENTINEL',result.stderr)
 
 if __name__ == '__main__':
     unittest.main()

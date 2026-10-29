@@ -899,7 +899,15 @@ def restore_database_names(operation):
     return "aster_cloud_restore_" + operation, "aster_r_" + operation[:23], "aster_m_" + operation[:23]
 
 
-def _restore_server_baseline(state_dir, database, runtime_user, migration_user):
+def _restore_server_baseline(state_dir, database, runtime_user, migration_user, *, verification_user=None):
+    accounts = [runtime_user, migration_user]
+    if verification_user is not None:
+        operation = state_dir.parent.name
+        if (restore_database_names(operation) != (database, runtime_user, migration_user) or
+                verification_user != 'aster_v_' + operation[:23]):
+            fail("Verification account binding changed", code="TARGET_VERIFICATION_IDENTITY_REJECTED")
+        accounts.append(verification_user)
+    account_names = "','".join(accounts)
     # Root's auth_socket mapping must not authorize another OS principal. The
     # vendor account is inspected separately, not accepted merely by its name.
     info = _query(state_dir,
@@ -909,12 +917,12 @@ def _restore_server_baseline(state_dir, database, runtime_user, migration_user):
         "'roles',(SELECT COUNT(*) FROM mysql.role_edges),'default_roles',(SELECT COUNT(*) FROM mysql.default_roles),"
         "'foreign_schemas',(SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME NOT IN ('mysql','sys','information_schema','performance_schema','" + database + "')),"
         "'database_exists',(SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='" + database + "'),"
-        "'application_accounts',(SELECT COUNT(*) FROM mysql.user WHERE BINARY User IN ('" + runtime_user + "','" + migration_user + "')),"
+        "'application_accounts',(SELECT COUNT(*) FROM mysql.user WHERE BINARY User IN ('" + account_names + "')),"
         "'vendor_count',(SELECT COUNT(*) FROM mysql.user WHERE BINARY User='debian-sys-maint'),"
         "'accounts',(SELECT COUNT(*) FROM mysql.user WHERE BINARY User<>'debian-sys-maint' AND NOT (BINARY Host='localhost' AND ("
         "(BINARY User='root' AND BINARY plugin='auth_socket' AND BINARY authentication_string IN ('','root')) OR "
         "(BINARY User IN ('mysql.infoschema','mysql.session','mysql.sys') AND account_locked='Y') OR "
-        "(BINARY User IN ('" + runtime_user + "','" + migration_user + "') AND BINARY plugin='caching_sha2_password')))));\n")
+        "(BINARY User IN ('" + account_names + "') AND BINARY plugin='caching_sha2_password')))));\n")
     expected = {'root': 'root@localhost', 'tcp_disabled': 1, 'mysqlx': 0, 'roles': 0, 'default_roles': 0,
                 'accounts': 0, 'foreign_schemas': 0, 'partial_revokes': 0, 'mandatory_roles': ''}
     if (set(info) != set(expected) | {'uuid', 'database_exists', 'application_accounts', 'vendor_count'} or
@@ -951,7 +959,7 @@ def _restore_server_baseline(state_dir, database, runtime_user, migration_user):
                   'grants_sha256': hashlib.sha256(grants).hexdigest()}
 
 
-def _restore_maintenance(state_dir, operation, database, runtime_user, migration_user, *, prepare=False):
+def _restore_maintenance(state_dir, operation, database, runtime_user, migration_user, *, prepare=False, verification_user=None):
     """Harden only this operation's fresh MySQL; never reset an existing host.
 
     Immutable intent precedes the single fixed ALTER. On lost acknowledgement,
@@ -959,6 +967,8 @@ def _restore_maintenance(state_dir, operation, database, runtime_user, migration
     A completed receipt makes any later credential/grant drift a refusal.
     """
     codename = root_target()
+    if verification_user is not None and prepare:
+        fail("Verification cannot alter maintenance identity", code="TARGET_VERIFICATION_IDENTITY_REJECTED")
     dependency_raw = read_private(str(state_dir / 'dependencies.json'))
     dependency = _json(dependency_raw)
     if (dependency.get('schema') != 1 or dependency.get('status') != 'dependencies-installed' or
@@ -966,7 +976,7 @@ def _restore_maintenance(state_dir, operation, database, runtime_user, migration
             dependency.get('codename') != codename or dependency.get('mysql_transport') != 'unix-socket-only-verified' or
             'packages-installed' not in dependency.get('steps', [])):
         fail("Maintenance policy requires the owned fresh package transaction", code="TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED")
-    info, profile = _restore_server_baseline(state_dir, database, runtime_user, migration_user)
+    info, profile = _restore_server_baseline(state_dir, database, runtime_user, migration_user, verification_user=verification_user)
     fixed = {'schema': 1, 'operation_id': operation, 'server_uuid': info['uuid'],
              'dependencies_sha256': hashlib.sha256(dependency_raw).hexdigest()}
     intent_path, verified_path = (state_dir / ('maintenance-auth-' + name + '.json') for name in ('intent', 'verified'))
@@ -1013,7 +1023,7 @@ def _restore_maintenance(state_dir, operation, database, runtime_user, migration
             fail("Maintenance outcome is ambiguous; never reset", code="TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED")
         # No password, grant, account name, path or SQL comes from caller input.
         mysql_sql(state_dir, "ALTER USER 'debian-sys-maint'@'localhost' IDENTIFIED WITH auth_socket AS 'root';\n")
-        after_info, profile = _restore_server_baseline(state_dir, database, runtime_user, migration_user)
+        after_info, profile = _restore_server_baseline(state_dir, database, runtime_user, migration_user, verification_user=verification_user)
         if after_info != info or profile != wanted:
             fail("Maintenance conversion outcome unconfirmed", code="TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED")
     publish(verified_path, verified)
@@ -1070,11 +1080,19 @@ def provision_restore_mysql(operation, charset, collation, *, resume=False):
 
 
 def verify_restore_mysql(operation, charset, collation, *, restored=False):
-    """Root-visible target inventory; never permission to activate a service."""
+    """Original two-account inventory. No caller can opt extra identities in."""
+    return _verify_restore_mysql(operation, charset, collation, restored=restored)
+
+
+def _verify_restore_mysql(operation, charset, collation, *, restored=False, verification_user=None):
+    """The extra identity is used only after its immutable verification binding."""
     database, runtime_user, migration_user = restore_database_names(operation)
     state_dir = Path('/var/lib/aster-controller-restore') / operation / 'database'
     protected_path(str(state_dir), directory=True, private=True)
-    _restore_server_inventory(state_dir, database, runtime_user, migration_user)
+    if verification_user is None:
+        _restore_server_inventory(state_dir, database, runtime_user, migration_user)
+    else:
+        _restore_maintenance(state_dir, operation, database, runtime_user, migration_user, verification_user=verification_user)
     verify_grants(state_dir, runtime_user, database, RUNTIME_PRIVILEGES)
     verify_grants(state_dir, migration_user, database, MIGRATION_PRIVILEGES)
     info = _query(state_dir,
@@ -1095,3 +1113,172 @@ def verify_restore_mysql(operation, charset, collation, *, restored=False):
     if actual != {'rows': 1, 'owned': 1}:
         fail("Target ownership marker changed; never adopted or repaired")
     return {'database_provisioned': True, 'database_restored': False, 'target_restore_approved': False, 'migration_ready': False}
+
+
+def verification_sql_policy(operation):
+    database, _, _ = restore_database_names(operation)
+    user = 'aster_v_' + operation[:23]
+    account, table = '`' + user + '`@`localhost`', '`' + database + '`.'
+    return {'database': database, 'user': user, 'grants': [
+        'GRANT SELECT ON `' + database.replace('_', '\\_') + '`.* TO ' + account,
+        'GRANT INSERT, DELETE ON ' + table + '`controller_console_sessions` TO ' + account,
+        'GRANT INSERT, UPDATE, DELETE ON ' + table + '`controller_console_login_limits` TO ' + account,
+        'GRANT INSERT (`actor`, `action`, `target`, `created_at`) ON ' + table + '`controller_identity_audit` TO ' + account]}
+
+
+def _verification_write_new(path, value):
+    raw = (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode()
+    write_new(path, raw)
+    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return raw
+
+
+def _verification_grants(state_dir, policy):
+    """Root reads all grants; no broad privileges are revoked to hide drift."""
+    user, database = policy['user'], policy['database']
+    raw = mysql_sql(state_dir, "SHOW GRANTS FOR '" + user + "'@'localhost';\n")
+    if len(raw) > 65536:
+        fail('Verification grant output exceeds bound', code='TARGET_VERIFICATION_GRANTS_REJECTED')
+    def normalize(line):
+        suffix = ' TO `' + user + '`@`localhost`'
+        if not line.startswith('GRANT ') or not line.endswith(suffix):
+            fail('Unexpected verification privilege source', code='TARGET_VERIFICATION_GRANTS_REJECTED')
+        parts = line[6:-len(suffix)].split(' ON ')
+        if len(parts) != 2:
+            fail('Malformed verification grants', code='TARGET_VERIFICATION_GRANTS_REJECTED')
+        privileges, obj = parts
+        if privileges.startswith('INSERT (') and privileges.endswith(')'):
+            privileges = 'INSERT (' + ', '.join(sorted(privileges[8:-1].split(', '))) + ')'
+        else:
+            privileges = ', '.join(sorted(privileges.split(', ')))
+        return obj, privileges
+    wanted = dict(normalize(line) for line in policy['grants'])
+    wanted['*.*'] = 'USAGE'
+    actual = {}
+    try:
+        lines = raw.decode('utf-8').splitlines()
+    except UnicodeError:
+        fail('Verification grants not decoded', code='TARGET_VERIFICATION_GRANTS_REJECTED')
+    for line in lines:
+        obj, privileges = normalize(line)
+        if obj in actual:
+            fail('Duplicate verification grant object', code='TARGET_VERIFICATION_GRANTS_REJECTED')
+        actual[obj] = privileges
+    if actual != wanted:
+        fail('Verification privileges differ from exact policy', code='TARGET_VERIFICATION_GRANTS_REJECTED')
+    return hashlib.sha256(json.dumps(actual, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def _verification_binding(operation, plan_sha256, charset, collation):
+    root_target()
+    policy = verification_sql_policy(operation)
+    if not isinstance(plan_sha256, str) or not re.fullmatch('[a-f0-9]{64}', plan_sha256):
+        fail('Exact verification plan digest required', code='TARGET_VERIFICATION_BINDING_REJECTED')
+    if any(not isinstance(v, str) or not re.fullmatch('[a-z][a-z0-9_]{0,63}', v) for v in (charset, collation)):
+        fail('Unsafe verification encoding', code='TARGET_VERIFICATION_BINDING_REJECTED')
+    state = Path('/var/lib/aster-controller-restore') / operation / 'database'
+    protected_path(str(state), directory=True, private=True)
+    owner_raw = read_private(str(state / 'mysql-provision.json'))
+    owner = _json(owner_raw)
+    if (owner.get('database') != policy['database'] or not isinstance(owner.get('server_uuid'), str) or
+            not re.fullmatch('[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}', owner['server_uuid'])):
+        fail('Verification owner binding invalid', code='TARGET_VERIFICATION_BINDING_REJECTED')
+    fixed = {'schema': 1, 'operation_id': operation, 'plan_sha256': plan_sha256,
+             'database': policy['database'], 'user': policy['user'], 'server_uuid': owner['server_uuid'],
+             'owner_sha256': hashlib.sha256(owner_raw).hexdigest(), 'charset': charset, 'collation': collation}
+    return state, policy, fixed
+
+
+def _verification_intent(state, fixed):
+    raw = read_private(str(state / 'verification-started.json'))
+    intent = _json(raw)
+    if (set(intent) != set(fixed) | {'nonce'} or type(intent['schema']) is not int or
+            any(intent[k] != v for k, v in fixed.items()) or not isinstance(intent['nonce'], str) or
+            not re.fullmatch('[a-f0-9]{64}', intent['nonce'])):
+        fail('Verification intent differs from original operation', code='TARGET_VERIFICATION_BINDING_REJECTED')
+    return intent, hashlib.sha256(raw).hexdigest()
+
+
+def verification_account_candidate(operation, plan_sha256, charset, collation):
+    """Read-only exact three-account inventory, only after owned intent binding.
+
+    A successful root candidate is not yet proof its credential logs in; the
+    fixed Go coordinator must authenticate that private DSN before completion.
+    """
+    state, policy, fixed = _verification_binding(operation, plan_sha256, charset, collation)
+    intent, intent_sha = _verification_intent(state, fixed)
+    _verify_restore_mysql(operation, charset, collation, restored=True, verification_user=policy['user'])
+    actual = _query(state,
+        "SELECT JSON_OBJECT('host',Host,'plugin',plugin,'locked',account_locked,'expired',password_expired,"
+        "'attributes',User_attributes,'auth_sha256',SHA2(authentication_string,256),'uuid',@@server_uuid) "
+        "FROM mysql.user WHERE BINARY User='" + policy['user'] + "';\n")
+    if (set(actual) != {'host','plugin','locked','expired','attributes','auth_sha256','uuid'} or
+            actual['host'] != 'localhost' or actual['plugin'] != 'caching_sha2_password' or
+            actual['locked'] != 'N' or actual['expired'] != 'N' or
+            actual['attributes'] != {'metadata': {'aster_cloud_verification': intent['nonce']}} or
+            actual['uuid'] != fixed['server_uuid'] or not isinstance(actual['auth_sha256'], str) or
+            not re.fullmatch('[a-f0-9]{64}', actual['auth_sha256'])):
+        fail('Verification account identity changed', code='TARGET_VERIFICATION_IDENTITY_REJECTED')
+    raw = read_private(str(state / 'verification-mysql-dsn'))
+    # The Go credential check independently parses and authenticates it. Root
+    # binds exact bytes, never logs the DSN or treats a path as successful login.
+    prefix = (policy['user'] + ':').encode()
+    suffix = ('@unix(' + MYSQL_SOCKET + ')/' + policy['database'] + '\n').encode()
+    if not raw.startswith(prefix) or not raw.endswith(suffix) or not 16 <= len(raw)-len(prefix)-len(suffix) <= 1024:
+        fail('Verification private credential binding changed', code='TARGET_VERIFICATION_CREDENTIAL_REJECTED')
+    return {'schema': 1, 'operation_id': operation, 'plan_sha256': plan_sha256,
+            'intent_sha256': intent_sha, 'auth_sha256': actual['auth_sha256'],
+            'grants_sha256': _verification_grants(state, policy), 'credential_sha256': hashlib.sha256(raw).hexdigest()}
+
+
+def prepare_verification_mysql(operation, plan_sha256, charset, collation):
+    """Caller holds installation+target locks and has verified approved plan.
+
+    Only the first clean invocation performs CREATE/GRANT. Existing or partial
+    state is checked read-only; no reset, adoption, re-CREATE or grant repair.
+    """
+    state, policy, fixed = _verification_binding(operation, plan_sha256, charset, collation)
+    intent_path = state / 'verification-started.json'
+    if intent_path.exists() or intent_path.is_symlink():
+        return verification_account_candidate(operation, plan_sha256, charset, collation)
+    if any((state / name).exists() or (state / name).is_symlink() for name in ('verification-mysql-dsn','verification-account.json')):
+        fail('Unbound verification state cannot be adopted', code='TARGET_VERIFICATION_BINDING_REJECTED')
+    # The original strict two-account check refuses any pre-existing same-name
+    # account (including a remote host variant) before intent/password creation.
+    verify_restore_mysql(operation, charset, collation, restored=True)
+    nonce = secrets.token_hex(32)
+    _verification_write_new(intent_path, {**fixed, 'nonce': nonce})
+    user = policy['user']
+    raw = mysql_sql(state, "CREATE USER '" + user + "'@'localhost' IDENTIFIED WITH caching_sha2_password BY RANDOM PASSWORD ATTRIBUTE '{\"aster_cloud_verification\":\"" + nonce + "\"}';\n")
+    try:
+        values = raw.decode('utf-8').rstrip('\n').split('\t')
+    except UnicodeError:
+        fail('Verification CREATE outcome unconfirmed', code='TARGET_VERIFICATION_CREATE_UNCONFIRMED')
+    if (len(values) not in (3,4) or len(values) == 4 and values[3] != '1' or
+            values[:2] != [user,'localhost'] or not 16 <= len(values[2]) <= 1024 or
+            any(c in values[2] for c in '\r\n\t\x00')):
+        fail('Verification CREATE outcome unconfirmed', code='TARGET_VERIFICATION_CREATE_UNCONFIRMED')
+    write_new(state / 'verification-mysql-dsn', (user + ':' + values[2] + '@unix(' + MYSQL_SOCKET + ')/' + policy['database'] + '\n').encode())
+    del raw, values
+    for statement in policy['grants']:
+        mysql_sql(state, statement + ';\n')
+    return verification_account_candidate(operation, plan_sha256, charset, collation)
+
+
+def complete_verification_mysql(operation, plan_sha256, charset, collation, *, readonly=False):
+    """Called after Go authenticated the private credential and exact SQL image."""
+    value = verification_account_candidate(operation, plan_sha256, charset, collation)
+    path = Path('/var/lib/aster-controller-restore') / operation / 'database/verification-account.json'
+    if path.exists() or path.is_symlink():
+        expected = (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode()
+        if read_private(str(path)) != expected:
+            fail('Verification account receipt drifted', code='TARGET_VERIFICATION_BINDING_REJECTED')
+    elif readonly:
+        fail('Verification account has no completion proof', code='TARGET_VERIFICATION_ACCOUNT_UNCONFIRMED')
+    else:
+        _verification_write_new(path, value)
+    return value

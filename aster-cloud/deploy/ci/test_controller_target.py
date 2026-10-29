@@ -146,10 +146,14 @@ def main():
                                  and isinstance(node.value, str) and node.value.isupper()
                                  and all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789' for c in node.value))
                 diagnostic = code if isinstance(code, str) and code in known else 'UNRECOGNIZED_ERROR'
-                require(r.returncode == 1 and code in {
-                    'TARGET_COMMAND_REJECTED', 'TARGET_IMMUTABLE_PLAN_CHANGED',
-                    'TARGET_CONTROLLER_UNIT_ALREADY_EXISTS', 'TARGET_CONFIGURATION_ALREADY_EXISTS',
-                    'TARGET_INPUT_INVENTORY_CHANGED'},
+                expected = {'TARGET_COMMAND_REJECTED', 'TARGET_IMMUTABLE_PLAN_CHANGED',
+                            'TARGET_CONTROLLER_UNIT_ALREADY_EXISTS', 'TARGET_CONFIGURATION_ALREADY_EXISTS',
+                            'TARGET_INPUT_INVENTORY_CHANGED'}
+                if PHASE == 'malformed-data-before-provision' and action in (
+                        'target-configuration-publish','target-configuration-status',
+                        'target-configuration-resume','target-verification-plan','target-verification-prepare','target-verification-status'):
+                    expected = {'TARGET_DATABASE_STAGE_REQUIRED'}
+                require(r.returncode == 1 and code in expected,
                     'TARGET_DENIAL_NOT_CONFIRMED_' + PHASE + '_' + action + '_' + diagnostic)
             return r
         def fixture(directory, machine=None):
@@ -270,6 +274,36 @@ def main():
         entry('target-configuration-publish', True)
         entry('target-configuration-status', True)
         entry('target-configuration-resume', True)
+        entry('target-verification-plan', True)
+        entry('target-verification-prepare', True)
+        entry('target-verification-status', True)
+        # A partial stage is NOT the same confirmed 'not prepared' state. These
+        # faults must remain unconfirmed and must not be repaired or adopted.
+        PHASE = 'partial-database-stage-unconfirmed'
+        for fault in ('only-plan','only-directory','linked-plan','linked-directory'):
+            plan_path, directory = inputs/'database-plan.json', inputs/'database'
+            if fault == 'only-plan':
+                private(plan_path,b'{}')
+            elif fault == 'only-directory':
+                directory.mkdir(mode=0o700)
+            elif fault == 'linked-plan':
+                plan_path.symlink_to(inputs/'missing-owned-fixture')
+            else:
+                directory.symlink_to(inputs/'missing-owned-fixture')
+            rejected = run(['/usr/bin/python3','-I',helper,'target-configuration-publish','--operation',operation],denied=True)
+            require(rejected.returncode == 1 and json.loads(rejected.stderr) == {'error':'HOST_MIGRATION_UNCONFIRMED'},
+                    'TARGET_PARTIAL_STAGE_MISCLASSIFIED')
+            if fault == 'only-directory':
+                require(not list(directory.iterdir()), 'TARGET_PARTIAL_STAGE_WROTE_FILES')
+                directory.rmdir()
+            elif fault == 'only-plan':
+                require(plan_path.read_bytes() == b'{}','TARGET_PARTIAL_STAGE_REWROTE_PLAN')
+                plan_path.unlink()
+            else:
+                path = plan_path if fault == 'linked-plan' else directory
+                require(path.is_symlink(),'TARGET_PARTIAL_STAGE_REPLACED_LINK')
+                path.unlink()
+        PHASE = 'malformed-data-before-provision'
         require(not (inputs / 'database').exists() and not (inputs / 'database-plan.json').exists() and
                 not (inputs / 'runtime').exists() and not (inputs / 'materials-started.json').exists() and
                 install_state.read_bytes() == original_installation and seal.read_bytes() == seal_raw,
