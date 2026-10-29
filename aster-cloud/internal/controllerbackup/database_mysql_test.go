@@ -84,6 +84,9 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 	if _, e = store.DB.ExecContext(ctx, "INSERT INTO controller_console_users(id,email,name,password_hash,role,enabled,permissions,created_at,updated_at,revision) VALUES(?,?,?,'unusable-fixture-hash','admin',1,JSON_ARRAY(),?,?,18446744073709551614)", userID, "restore-fixture@example.invalid", "账户", stamp, stamp); e != nil {
 		t.Fatal(e)
 	}
+	if _, e = store.DB.ExecContext(ctx, "INSERT INTO controller_console_users(id,email,name,password_hash,role,enabled,permissions,created_at,updated_at,revision) VALUES(?,?,?,'unusable-fixture-hash','admin',0,JSON_ARRAY(),?,?,1)", strings.Repeat("b", 32), "disabled-restore-fixture@example.invalid", "已停用账户", stamp, stamp); e != nil {
+		t.Fatal(e)
+	}
 	session := make([]byte, 32)
 	for i := range session {
 		session[i] = byte(i)
@@ -95,12 +98,24 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 		t.Fatal(e)
 	}
 	for _, query := range []string{
-		"INSERT INTO controller_identity_audit(id,actor,action,target,created_at) VALUES(7,'historical','historical','retained','2026-10-27 01:00:00.000001')",
+		"INSERT INTO controller_identity_audit(id,actor,action,target,created_at) VALUES(-9223372036854775808,'historical','historical','retained','2026-10-27 01:00:00.000001')",
 		"INSERT INTO controller_identity_audit(id,actor,action,target,created_at) VALUES(41,'historical','deleted','retained','2026-10-27 01:00:00.000002')",
 		"DELETE FROM controller_identity_audit WHERE id=41",
 	} {
 		if _, e = store.DB.ExecContext(ctx, query); e != nil {
 			t.Fatal(e)
+		}
+	}
+	// Preserve existing limiter windows across verification: one is still live,
+	// one expired for rate limiting but is not old enough for cleanup, and one
+	// may legitimately be pruned by the existing authentication service.
+	for _, bucket := range []struct {
+		key byte
+		at  string
+		n   int
+	}{{88, "2026-10-28 09:07:07.123456", 1}, {89, "2026-10-28 08:00:00.000000", 5}, {90, "2026-10-27 08:00:00.000000", 5}} {
+		if _, e := store.DB.ExecContext(ctx, "INSERT INTO controller_console_login_limits VALUES(?,?,?)", bytes.Repeat([]byte{bucket.key}, 32), bucket.at, bucket.n); e != nil {
+			t.Fatal("source login bucket fixture failed", e)
 		}
 	}
 	capture := func() (map[string][]byte, int64, error) {
@@ -288,7 +303,7 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 		}
 		name := "database/controller_console_sessions.jsonl"
 		badFiles[name] = bytes.Replace(files[name], []byte(base64.StdEncoding.EncodeToString([]byte(userID))),
-			[]byte(base64.StdEncoding.EncodeToString([]byte(strings.Repeat("b", 32)))), 1)
+			[]byte(base64.StdEncoding.EncodeToString([]byte(strings.Repeat("c", 32)))), 1)
 		if bytes.Equal(files[name], badFiles[name]) {
 			t.Fatal("orphan session fixture did not change")
 		}

@@ -156,7 +156,7 @@ func exerciseSessionTransition(t *testing.T, ctx context.Context, a *controllerb
 	}{
 		{"INSERT INTO controller_console_sessions VALUES(?,NULL,'2026-10-28','2027-01-01')", "DELETE FROM controller_console_sessions WHERE token_hash=?", []any{bytes.Repeat([]byte{66}, 32)}},
 		{"UPDATE controller_identity_audit SET actor='changed' WHERE id=42", "UPDATE controller_identity_audit SET actor='controller-migration' WHERE id=42", nil},
-		{"UPDATE controller_identity_audit SET target='changed' WHERE id=7", "UPDATE controller_identity_audit SET target='retained' WHERE id=7", nil},
+		{"UPDATE controller_identity_audit SET target='changed' WHERE id=-9223372036854775808", "UPDATE controller_identity_audit SET target='retained' WHERE id=-9223372036854775808", nil},
 		{"UPDATE controller_nodes SET datacenter_id='changed' WHERE id='node-a'", "UPDATE controller_nodes SET datacenter_id='香港' WHERE id='node-a'", nil},
 		{"INSERT INTO controller_identity_audit(id,actor,action,target,created_at) VALUES(40,'controller-migration','migration.sessions_revoked','extra','2026-10-28')", "DELETE FROM controller_identity_audit WHERE id=40", nil},
 		{"UPDATE controller_console_users SET password_hash='changed'", "UPDATE controller_console_users SET password_hash='unusable-fixture-hash'", nil},
@@ -175,6 +175,7 @@ func exerciseSessionTransition(t *testing.T, ctx context.Context, a *controllerb
 			t.Fatal("fixture-only repair did not restore exact postimage", e)
 		}
 	}
+	exerciseVerificationDataPhase(t, ctx, a, db, owner, dsn, proof, binding, intent)
 }
 
 // A schema migration elsewhere on the same MySQL server uses the same named

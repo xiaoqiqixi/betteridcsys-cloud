@@ -150,7 +150,8 @@ func (a *Archive) sessionExpectation(ctx context.Context, plan DatabasePlan, p d
 	if e != nil || sessions.NextID != nil {
 		return fail()
 	}
-	var lastID int64 = math.MinInt64
+	var lastID int64
+	seenAudit := false
 	_, e = a.tableRecords(ctx, identityAuditTable, func(t Table) error {
 		audit = t
 		if len(t.Columns) != 5 || t.NextID == nil {
@@ -167,10 +168,11 @@ func (a *Archive) sessionExpectation(ctx context.Context, plan DatabasePlan, p d
 		return nil
 	}, func(row [][]byte) error {
 		id, e := strconv.ParseInt(string(row[0]), 10, 64)
-		if e != nil || strconv.FormatInt(id, 10) != string(row[0]) || id <= lastID {
+		if e != nil || strconv.FormatInt(id, 10) != string(row[0]) || (seenAudit && id <= lastID) {
 			return ErrInvalid
 		}
 		lastID = id
+		seenAudit = true
 		return nil
 	})
 	if e != nil {
