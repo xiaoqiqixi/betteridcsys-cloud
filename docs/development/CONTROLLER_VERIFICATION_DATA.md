@@ -36,7 +36,7 @@ SELECT-only 账号的实际写入探针须收到 MySQL 1142，随后数据核验
 
 ## 固定宿主入口
 
-以下入口已接入代码，新增 Ubuntu22/24 原生验收尚待执行；不能以原账号阶段的成功报告替代。
+以下入口已在 `cdfb8210c205c1c768a963b854cf4691721203ee` 的 [完整 18 项 CI](https://github.com/xiaoqiqixi/betteridcsys-cloud/actions/runs/40836912649) 中通过 Ubuntu22/24 原生验收；六份产物已独立校验大小、SHA256、源码/平台/场景及新增证明字段。这是静止宿主的数据阶段，不是 HTTP 服务或迁移浏览器验收。
 
 - `target-verification-data-begin --operation <原操作ID>`：要求目标未运行服务、原目标 seal 与完整配置仍匹配、原账号完成回执和真实凭据仍有效。管理员在原操作目录放置 root 所有、0600、单链接的 `verification-data-approval.json`，精确字段为 `schema: 1`、`operation_id`、`verification_plan_sha256`、`account_receipt_sha256`、`started_at` 和 `expires_at`。起止时间使用 UTC RFC3339，微秒精度，执行时须在区间内。
 - 首次 begin 对原精确零会话后像核验后，以排他创建及同步方式保存 `verification-data-started.json`。已有意图不覆盖、不续期、不重建基线；未知结果只能用 status 确认。入口不接收 DSN、路径、时间、force 或账号覆盖参数。

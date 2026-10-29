@@ -8,9 +8,9 @@
 `control.NewVerificationConsole` 已提供独立HTTP处理器：真实身份认证、精确本地只读路由、受限状态接口、
 拒绝业务写和远端观测。未接入 `serve` 或安装启动命令，不注册billing API、不创建runner/worker。
 它要求调用者持有独立宿主授权，不能靠一个合法operation ID启动目标服务。普通主控启动仍受原封存限制。
-HTTP入口现在还核验实际专用SQL身份，并把认证与资源查询绑定到同一个连接池。root账号准备、状态和准备阶段撤销已通过 Ubuntu22/24 同源码原生验收；宿主许可、验证运行阶段持久化和停止/接管仍未接入，不是已可启动的迁移功能。
+HTTP入口现在还核验实际专用SQL身份，并把认证与资源查询绑定到同一个连接池。root账号准备/撤销、数据批准与不可变意图、认证增量及阶段化撤销已通过 Ubuntu22/24 同源码原生验收。非特权宿主许可、systemd 服务和接管仍未接入，不是已可启动的迁移功能。
 
-现有账号阶段的来源证据是 `ebe7e1921087441f37aaf7386df31661a3f5d54c` 的 [18 项 CI](https://github.com/xiaoqiqixi/betteridcsys-cloud/actions/runs/40821157870)，不是下述后续功能的通过证明。新增[验证数据协议](CONTROLLER_VERIFICATION_DATA.md)独立处理认证变化与业务后像，不向普通 serve 放行，不删除原身份或封存检查。本文后半部分的逐轮记录保留当时的失败与未验项，不作为当前状态覆盖。
+现有宿主数据阶段的来源证据是 `cdfb8210c205c1c768a963b854cf4691721203ee` 的 [18 项 CI](https://github.com/xiaoqiqixi/betteridcsys-cloud/actions/runs/40836912649)，六份原生恢复产物已核验源码、大小与 SHA256。[验证数据协议](CONTROLLER_VERIFICATION_DATA.md)独立处理认证变化与业务后像，不向普通 serve 放行，不删除原身份或封存检查。新增的[HTTPS 生命周期组件](CONTROLLER_VERIFICATION_SERVICE.md)处理期限和实际请求取消；组件测试不能继承上述 CI，也不代替宿主进程授权。本文后半部分的逐轮记录保留当时的失败与未验项，不作为当前状态覆盖。
 
 ## 状态与权限
 
