@@ -95,6 +95,34 @@ class NativeFixtureContract(unittest.TestCase):
             self.assertFalse(public['passed'])
             self.assertNotIn('private', public)
 
+    def test_verification_failure_reports_preserve_fixed_diagnostics_not_private_text(self):
+        metadata = {**self.metadata(), 'scenario': 'controller-restore-configuration'}
+        cases = {
+            'target-verification-account': 'TARGET_VERIFICATION_APPROVAL_REQUIRED',
+            'target-verification-create-and-authenticate': 'TARGET_VERIFICATION_CREDENTIAL_UNCONFIRMED',
+            'target-verification-readonly-reentry': 'TARGET_VERIFICATION_ACCOUNT_CHANGED',
+            'target-verification-grant-drift': 'TARGET_VERIFICATION_GRANTS_REJECTED',
+            'target-verification-credential-drift': 'TARGET_VERIFICATION_CREDENTIAL_REJECTED',
+            'target-verification-revoke-plan': 'TARGET_VERIFICATION_REVOCATION_APPROVAL_CHANGED',
+            'target-verification-revoke-active-session': 'TARGET_VERIFICATION_SESSIONS_ACTIVE',
+            'target-verification-revoke-readonly-recovery': 'TARGET_VERIFICATION_REVOCATION_UNCONFIRMED',
+            'target-verification-revoke-drift': 'TARGET_VERIFICATION_REVOCATION_BINDING_REJECTED',
+        }
+        for phase, code in cases.items():
+            result = {**self.metadata(), 'schema': 1, 'passed': False, 'kvm_ready': False,
+                      'phase': phase, 'code': code, 'private': 'PRIVATE_CREDENTIAL'}
+            with self.subTest(phase=phase):
+                public = h.public_result(result, metadata)
+                self.assertEqual(public['phase'], phase)
+                self.assertEqual(public['code'], code)
+                self.assertFalse(public['passed'])
+                self.assertNotIn('PRIVATE', json.dumps(public))
+        result.update(code='PRIVATE_CREDENTIAL',phase='PRIVATE_PATH')
+        public=h.public_result(result,metadata)
+        self.assertEqual(public['code'],'GUEST_REPORTED_FAILURE')
+        self.assertEqual(public['phase'],'unrecognized')
+        self.assertNotIn('PRIVATE',json.dumps(public))
+
     def test_only_fixed_signed_dated_official_images(self):
         self.assertEqual(set(h.IMAGES), {"22.04", "24.04"})
         for ubuntu, (suite, date, sha) in h.IMAGES.items():
