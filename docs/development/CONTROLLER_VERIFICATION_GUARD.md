@@ -31,4 +31,10 @@
 
 夹具特意不设置父死亡信号，以独立证明“子进程暂时存活仍受锁保护”，不能把它当作生产启动器。其固定测试 UID/GID 65534 也不是生产专用服务账号设计。
 
-目前新增实现及 Linux amd64 交叉编译已具备；Ubuntu22/24 实际执行结果须从本次源码 CI 获取。完整非 root 服务启动命令、父死亡保护、期限、systemd、原账号重新登录页面和接管/回退仍待接入，不以这项锁测试代替验收。
+源码 `007530bb2946e5269b4a51f9e117a9a46df56f6a` 的 Ubuntu22/24 实际进程步骤均通过，两份原生报告 ZIP 的大小、SHA256 与源码/断言已经复核。[对应 CI](https://github.com/xiaoqiqixi/betteridcsys-cloud/actions/runs/40967192714) 的工作流检查随后因 SC2024 失败，故不是整轮通过；修复后的源码仍须自己的完整 CI。完整非 root 服务启动命令、父死亡保护、期限、systemd、原账号重新登录页面和接管/回退仍待接入，不以这项锁测试代替验收。
+
+## 工作流检查工具
+
+从仓库根目录运行 `bash aster-cloud/deploy/ci/lint-workflows.sh`，需要 Go 和 ShellCheck。该入口与 CI 共用，固定 actionlint v1.7.7，并在缺少 ShellCheck 时直接失败；不能把没有执行 shell 检查的 actionlint 结果当作完整工作流检查。
+
+原生 root 夹具通过 `tee` 将无秘密的结果写入 runner 所有的报告，`pipefail` 保证夹具失败仍使步骤失败。此处不需要 root 拥有产物，也不通过关闭 SC2024 来消除诊断。

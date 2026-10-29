@@ -25,6 +25,8 @@ jobs:
         with:
           go-version: '1.27.3'
           cache: false
+      - name: Workflow syntax
+        run: bash aster-cloud/deploy/ci/lint-workflows.sh
       - name: Verify minimal billing protocol SDK
         run: |
           python3 scripts/verify-billing-contract.py
@@ -59,7 +61,9 @@ jobs:
           cp deploy/ci/verification-guard-fixture.gotxt "$fixture"
           trap 'rm -f "$fixture"' EXIT
           go test -mod=readonly -c -o "$RUNNER_TEMP/aster-verification-guard.test" ./internal/controllerhost
-          sudo /usr/bin/python3 -I deploy/ci/test_controller_verification_guard.py --fixture-binary "$RUNNER_TEMP/aster-verification-guard.test" --source "$GITHUB_SHA" > "$RUNNER_TEMP/verification-guard.json"
+          # The runner, not root, owns the public evidence file. pipefail keeps
+          # a failed privileged test fatal even when tee succeeds.
+          sudo /usr/bin/python3 -I deploy/ci/test_controller_verification_guard.py --fixture-binary "$RUNNER_TEMP/aster-verification-guard.test" --source "$GITHUB_SHA" | tee "$RUNNER_TEMP/verification-guard.json"
           python3 -I - <<'PYTEST'
           import json, os, pathlib
           value = json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'verification-guard.json').read_text())
@@ -97,8 +101,6 @@ jobs:
           python3 -B aster-cloud/deploy/ci/test_prepare_cloud_runner.py
           python3 -B aster-cloud/deploy/ci/native-mysql/test_mysql_distribution.py
           python3 -B aster-cloud/deploy/ci/native-mysql/test_mysql_native.py
-      - name: Workflow syntax
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/ci.yml .github/workflows/install-download-check.yml
   frontend:
     name: Vue management console checks
     runs-on: ubuntu-24.04

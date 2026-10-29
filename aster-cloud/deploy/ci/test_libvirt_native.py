@@ -1004,6 +1004,20 @@ class WorkflowRestoreEvidenceContract(unittest.TestCase):
 class VerificationGuardWorkflowContract(unittest.TestCase):
     """Synthetic report validation ONLY; not native guard execution evidence."""
 
+    def test_workflow_lint_cannot_silently_skip_missing_shellcheck(self):
+        entry = HERE/'lint-workflows.sh'
+        result = subprocess.run(['/bin/bash', str(entry)], env={'PATH': ''},
+                                capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, 'WORKFLOW_LINT_REQUIRES_SHELLCHECK\n')
+        self.assertEqual(result.stdout, '')
+        result = subprocess.run(['/bin/bash', str(entry), '--skip-shellcheck'], env={'PATH': ''},
+                                capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, 'WORKFLOW_LINT_ARGUMENTS_REFUSED\n')
+        workflow = (HERE.parents[2]/'.github/workflows/ci.yml').read_text()
+        self.assertLess(workflow.index('      - name: Workflow syntax'), workflow.index('      - name: Verify minimal billing protocol SDK'))
+
     def test_actual_guard_gate_requires_exact_source_complete_boolean_proofs(self):
         workflow = (HERE.parents[2] / '.github/workflows/ci.yml').read_text()
         step = workflow.split('      - name: Independent root and non-root verification process guards (not service activation)\n')
