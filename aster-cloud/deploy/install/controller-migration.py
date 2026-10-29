@@ -685,7 +685,8 @@ class Target(Host):
             os.close(fd)
 
     def unused_host(self, configuration=False, verification=False):
-        extra = {'verification-approval.json','verification-revoke-approval.json'} if verification else set()
+        extra = {'verification-approval.json','verification-revoke-approval.json',
+                 'verification-data-approval.json','verification-data-started.json'} if verification else set()
         require(set(p.name for p in self.root.iterdir()) <=
                 {'request.json', 'backup.age', 'recovery.key', 'plan.json', 'target.lock', 'database-plan.json', 'database',
                  'materials-started.json', 'runtime', 'sessions-started.json', 'configuration-request.json',
@@ -883,7 +884,9 @@ class Target(Host):
                 all(result[k] is True for k in ('readonly','exact_database_verified','configuration_published')) and
                 all(result[k] is False for k in ('sql_identity_prepared','service_started','migration_ready')),
                 'TARGET_VERIFICATION_PLAN_UNCONFIRMED')
-        value = result['plan']
+        self.verify_verification_binding(result['plan'], result['plan_sha256'], plan, database_plan)
+
+    def verify_verification_binding(self, value, plan_sha, plan, database_plan):
         expected = {'schema','protocol','controller_id','operation_id','target_plan_sha256',
                     'configuration_plan_sha256','configuration_intent_sha256','session_intent_sha256',
                     'console_origin','listen','sql'}
@@ -908,15 +911,40 @@ class Target(Host):
                   'GRANT INSERT, UPDATE, DELETE ON ' + table + '`controller_console_login_limits` TO ' + account,
                   'GRANT INSERT (`actor`, `action`, `target`, `created_at`) ON ' + table + '`controller_identity_audit` TO ' + account]
         require(value['sql'] == {'database':database,'user':user,'grants':grants} and
-                result['plan_sha256'] == digest(json.dumps(value,ensure_ascii=False,separators=(',',':')).encode()),
+                plan_sha == digest(json.dumps(value,ensure_ascii=False,separators=(',',':')).encode()),
                 'TARGET_VERIFICATION_SQL_POLICY_CHANGED')
+
+    def verify_verification_data(self, result, plan, database_plan, *, readonly):
+        fields = {'schema','operation_id','plan','plan_sha256','account_receipt_sha256',
+                  'started_at','expires_at','data','read_only_verification','service_started','migration_ready'}
+        require(isinstance(result,dict) and set(result)==fields and type(result['schema']) is int and
+                result['schema']==1 and result['operation_id']==self.operation and
+                result['read_only_verification'] is readonly and result['service_started'] is False and
+                result['migration_ready'] is False,'TARGET_VERIFICATION_DATA_UNCONFIRMED')
+        self.verify_verification_binding(result['plan'],result['plan_sha256'],plan,database_plan)
+        account_sha = digest(self.i.protected_read(str(self.root/'database/verification-account.json'),8192))
+        approval = self.read(self.root/'verification-data-approval.json')
+        require(type(approval.get('schema')) is int and approval=={
+                    'schema':1,'operation_id':self.operation,'verification_plan_sha256':result['plan_sha256'],
+                    'account_receipt_sha256':account_sha,'started_at':result['started_at'],'expires_at':result['expires_at']} and
+                result['account_receipt_sha256']==account_sha,'TARGET_VERIFICATION_DATA_APPROVAL_CHANGED')
+        data = result['data']
+        flags = {'business_data_unchanged','historical_audit_preserved','authentication_data_validated','read_only_verification'}
+        counters = {'current_sessions','current_login_buckets','appended_audit_rows'}
+        require(isinstance(data,dict) and set(data)=={'schema','operation_id','phase_intent_sha256','migration_ready',
+                    'target_activation_approved'} | flags | counters and type(data['schema']) is int and data['schema']==1 and
+                data['operation_id']==self.operation and all(data[k] is True for k in flags) and
+                all(type(data[k]) is int and data[k]>=0 for k in counters) and
+                data['migration_ready'] is False and data['target_activation_approved'] is False and
+                data['phase_intent_sha256']==digest(self.i.protected_read(str(self.root/'verification-data-started.json'),8192)),
+                'TARGET_VERIFICATION_DATA_UNCONFIRMED')
 
     def publish_configuration(self, action):
         # Called only with the existing installation lock held. Existing /etc
         # bytes are not accepted here as proof; Go must authenticate and derive
         # every file under the original target seal before claiming success.
         with self.lock('target.lock'):
-            verification = action in ('target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status')
+            verification = action in ('target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status')
             self.unused_host(configuration=True, verification=verification)
             plan = self.read(self.root / 'plan.json')
             plan_path, directory = self.root / 'database-plan.json', self.root / 'database'
@@ -970,8 +998,25 @@ class Target(Host):
         # The caller holds the installation and target locks. The Go plan
         # reauthenticates the archive, seal, entire SQL image and publication;
         # no root account write is authorized by an old JSON report alone.
-        result = self.target_command('verification-plan')
-        self.verify_verification_plan(result, plan, database_plan)
+        started = self.root/'verification-data-started.json'
+        has_data_phase = started.exists() or started.is_symlink()
+        if has_data_phase and action in ('target-verification-prepare','target-verification-status','target-verification-data-begin'):
+            if any((self.root/'database'/name).exists() or (self.root/'database'/name).is_symlink()
+                   for name in ('verification-revoke-started.json','verification-revoked.json')):
+                raise Refused('TARGET_VERIFICATION_REVOCATION_STARTED')
+            raise Refused('TARGET_VERIFICATION_DATA_ALREADY_STARTED')
+        if action == 'target-verification-data-begin':
+            approval_path = self.root/'verification-data-approval.json'
+            require(approval_path.exists() or approval_path.is_symlink(),'TARGET_VERIFICATION_DATA_APPROVAL_REQUIRED')
+        phase_status = has_data_phase and action in ('target-verification-data-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status')
+        if phase_status:
+            result = self.target_command('verification-data-status')
+            self.verify_verification_data(result,plan,database_plan,readonly=True)
+        elif action == 'target-verification-data-status':
+            raise Refused('TARGET_VERIFICATION_DATA_NOT_STARTED')
+        else:
+            result = self.target_command('verification-plan')
+            self.verify_verification_plan(result, plan, database_plan)
         approval_path = self.root / 'verification-approval.json'
         require(approval_path.exists() or approval_path.is_symlink(), 'TARGET_VERIFICATION_APPROVAL_REQUIRED')
         approval = self.read(approval_path)
@@ -979,6 +1024,29 @@ class Target(Host):
                     'schema': 1, 'operation_id': self.operation, 'plan_sha256': result['plan_sha256']},
                 'TARGET_VERIFICATION_APPROVAL_CHANGED')
         args = (self.operation, result['plan_sha256'], database_plan['data']['charset'], database_plan['data']['collation'])
+        if action == 'target-verification-data-status':
+            # This read-only account check works before and after locking; no
+            # credential login after revocation and no implicit account unlock.
+            module.verification_revocation_plan(*args)
+            self.unused_host(configuration=True,verification=True)
+            return {**result,'root_inventory_verified':True}
+        if action == 'target-verification-data-begin':
+            data_approval = self.root/'verification-data-approval.json'
+            require(data_approval.exists() or data_approval.is_symlink(),'TARGET_VERIFICATION_DATA_APPROVAL_REQUIRED')
+            module.complete_verification_mysql(*args,readonly=True)
+            proof = self.target_command('verification-credential-check')
+            expected = {'schema':1,'operation_id':self.operation,'plan_sha256':result['plan_sha256'],
+                        'credential_verified':True,'sql_identity_verified':True,'exact_database_verified':True,
+                        'service_started':False,'migration_ready':False}
+            require(proof==expected and type(proof['schema']) is int and
+                    all(type(proof[k]) is bool for k in ('credential_verified','sql_identity_verified',
+                        'exact_database_verified','service_started','migration_ready')),
+                    'TARGET_VERIFICATION_CREDENTIAL_UNCONFIRMED')
+            data = self.target_command('verification-data-begin')
+            self.verify_verification_data(data,plan,database_plan,readonly=False)
+            module.complete_verification_mysql(*args,readonly=True)
+            self.unused_host(configuration=True,verification=True)
+            return {**data,'root_inventory_verified':True}
         if action in ('target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status'):
             planned = module.verification_revocation_plan(*args)
             if action == 'target-verification-revoke-plan':
@@ -992,7 +1060,8 @@ class Target(Host):
             value = module.revoke_verification_mysql(*args,readonly=action=='target-verification-revoke-status')
             # Do not let the SQL account receipt stand in for unchanged business
             # state, the original seal or a stopped/inert controller host.
-            require(self.target_command('verification-plan') == result,'TARGET_VERIFICATION_PLAN_CHANGED')
+            require(self.target_command('verification-data-status' if phase_status else 'verification-plan') == result,
+                    'TARGET_VERIFICATION_PLAN_CHANGED')
             self.unused_host(configuration=True,verification=True)
             return {**value,'read_only_verification':action=='target-verification-revoke-status',
                     'sql_identity_revoked':True,'service_started':False,'migration_ready':False,'root_inventory_verified':True}
@@ -1018,7 +1087,7 @@ class Target(Host):
     def prepare(self, action):
         with self.installation_lock():
             verify_installation(self, self.i, target=True)
-            if action in ('target-configuration-publish','target-configuration-status','target-configuration-resume','target-verification-plan','target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status'):
+            if action in ('target-configuration-publish','target-configuration-status','target-configuration-resume','target-verification-plan','target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status'):
                 return self.publish_configuration(action)
             self.unused_host()
             plan = self.target_command('plan')
@@ -1087,14 +1156,14 @@ class Arguments(argparse.ArgumentParser):
 
 def main():
     parser = Arguments(description=__doc__)
-    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status'))
+    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status'))
     parser.add_argument('--operation')
     args = parser.parse_args()
     require((args.action in ('capabilities', 'plan') and args.operation is None) or
             (args.action not in ('capabilities', 'plan') and isinstance(args.operation, str) and OP.fullmatch(args.operation)),
             'EXACT_OPERATION_ID_REQUIRED')
     if args.action == 'capabilities':
-        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status'],
+        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status'],
                 'export_restore': False, 'migration_ready': False}
     if args.action.startswith('target-'):
         return Target(install_module(), args.operation).prepare(args.action)

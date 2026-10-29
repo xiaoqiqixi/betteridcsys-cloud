@@ -66,30 +66,37 @@ func withTargetVerification(ctx context.Context, operation string, action func(T
 		if e != nil {
 			return e
 		}
-		approval, e := targetRead(filepath.Join(runtime.Directory, "configuration-approval.json"), 8192)
-		if e != nil {
-			return e
-		}
-		publication, e := a.VerifyPublishedConfiguration(ConfigurationPublicationTarget{Runtime: runtime, ParentDirectory: "/etc"}, request, approval, sessionSHA)
-		if e != nil {
-			return e
-		}
-		// API-only/unknown console state cannot become a verification login endpoint.
-		if !publication.Plan.ConsoleEnabled || publication.Plan.ConsoleOrigin == "" {
-			return ErrInvalid
-		}
-		policy, e := identity.VerificationDatabasePolicy("aster_cloud_restore_"+operation, operation)
+		bound, planSHA, e := publishedVerificationPlan(a, plan, sha, runtime, request, sessionSHA)
 		if e != nil {
 			return ErrInvalid
 		}
-		bound := TargetVerificationPlan{1, "aster.controller-verification-plan/1", plan.ControllerID, operation, sha, publication.PlanSHA256, publication.IntentSHA256, sessionSHA, publication.Plan.ConsoleOrigin, publication.Plan.Listen, policy}
-		raw, e := json.Marshal(bound)
-		if e != nil {
-			return ErrInvalid
-		}
-		report := TargetVerificationPlanReport{Schema: 1, OperationID: operation, Plan: bound, PlanSHA256: digestBytes(raw), ReadOnly: true, ExactDatabaseVerified: true, ConfigurationPublished: true}
+		report := TargetVerificationPlanReport{Schema: 1, OperationID: operation, Plan: bound, PlanSHA256: planSHA, ReadOnly: true, ExactDatabaseVerified: true, ConfigurationPublished: true}
 		return action(report, runtime)
 	})
+}
+
+// The publication/endpoint binding is shared; callers must independently prove
+// their exact SQL phase. This helper never claims an unchanged database.
+func publishedVerificationPlan(a *Archive, plan TargetPlan, sha string, runtime RuntimeTarget, request []byte, sessionSHA string) (TargetVerificationPlan, string, error) {
+	fail := func() (TargetVerificationPlan, string, error) { return TargetVerificationPlan{}, "", ErrInvalid }
+	approval, e := targetRead(filepath.Join(runtime.Directory, "configuration-approval.json"), 8192)
+	if e != nil {
+		return fail()
+	}
+	publication, e := a.VerifyPublishedConfiguration(ConfigurationPublicationTarget{Runtime: runtime, ParentDirectory: "/etc"}, request, approval, sessionSHA)
+	if e != nil || !publication.Plan.ConsoleEnabled || publication.Plan.ConsoleOrigin == "" {
+		return fail()
+	}
+	policy, e := identity.VerificationDatabasePolicy("aster_cloud_restore_"+plan.OperationID, plan.OperationID)
+	if e != nil {
+		return fail()
+	}
+	bound := TargetVerificationPlan{1, "aster.controller-verification-plan/1", plan.ControllerID, plan.OperationID, sha, publication.PlanSHA256, publication.IntentSHA256, sessionSHA, publication.Plan.ConsoleOrigin, publication.Plan.Listen, policy}
+	raw, e := json.Marshal(bound)
+	if e != nil {
+		return fail()
+	}
+	return bound, digestBytes(raw), nil
 }
 
 // The root account writer cannot mark a credential ready merely because a file

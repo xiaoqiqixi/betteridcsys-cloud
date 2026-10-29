@@ -18,7 +18,7 @@ class HostMigrationEntry(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         value = json.loads(r.stdout)
         self.assertEqual(value['protocol'], 'aster.controller-migration/1')
-        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status'])
+        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status'])
         self.assertIs(value['export_restore'], False)
         self.assertIs(value['migration_ready'], False)
 
@@ -78,6 +78,18 @@ class HostMigrationEntry(unittest.TestCase):
                           ('--operation','a'*32,'--approval','PRIVATE_SENTINEL')):
                 with self.subTest(action=action,extra=extra):
                     result=self.invoke(action,*extra)
+                    self.assertEqual(result.returncode,1)
+                    self.assertEqual(result.stdout,b'')
+                    self.assertNotIn(b'PRIVATE_SENTINEL',result.stderr)
+
+    def test_verification_data_phase_accepts_no_time_path_or_identity_overrides(self):
+        for action in ('target-verification-data-begin','target-verification-data-status'):
+            for args in ((), ('--operation','../escape'), ('--operation','a'*32,'--force'),
+                         ('--operation','a'*32,'--expires','2099-01-01'),
+                         ('--operation','a'*32,'--approval','PRIVATE_SENTINEL'),
+                         ('--operation','a'*32,'--dsn','PRIVATE_SENTINEL')):
+                with self.subTest(action=action,args=args):
+                    result=self.invoke(action,*args)
                     self.assertEqual(result.returncode,1)
                     self.assertEqual(result.stdout,b'')
                     self.assertNotIn(b'PRIVATE_SENTINEL',result.stderr)

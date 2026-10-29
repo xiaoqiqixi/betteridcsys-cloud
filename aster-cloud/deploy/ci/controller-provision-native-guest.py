@@ -7,6 +7,7 @@ This is NOT boot recovery, controller activation or node takeover.
 The installer, root APT/systemd/MySQL and target coordinator are actual code.
 """
 import base64
+from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib.util
 import io
@@ -28,7 +29,7 @@ ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': str(ROOT), 'LANG': 'C.UT
 PHASE = 'preflight'
 NONCE = None
 CODES = set('TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING TARGET_DEPENDENCIES_UNCONFIRMED TARGET_MYSQL_START_UNCONFIRMED TARGET_DATABASE_CREATE_UNCONFIRMED TARGET_DATABASE_INVENTORY_UNCONFIRMED TARGET_RESTORE_SERVER_INVENTORY_REJECTED TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED TARGET_MATERIALS_UNCONFIRMED'.split())
-CODES |= set('TARGET_VERIFICATION_IDENTITY_REJECTED TARGET_VERIFICATION_GRANTS_REJECTED TARGET_VERIFICATION_BINDING_REJECTED TARGET_VERIFICATION_CREDENTIAL_REJECTED TARGET_VERIFICATION_CREATE_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_UNCONFIRMED TARGET_VERIFICATION_APPROVAL_REQUIRED TARGET_VERIFICATION_APPROVAL_CHANGED TARGET_VERIFICATION_CREDENTIAL_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_CHANGED'.split())
+CODES |= set('TARGET_VERIFICATION_DATA_ALREADY_STARTED TARGET_VERIFICATION_DATA_NOT_STARTED TARGET_VERIFICATION_DATA_APPROVAL_REQUIRED TARGET_VERIFICATION_DATA_APPROVAL_CHANGED TARGET_VERIFICATION_DATA_UNCONFIRMED TARGET_VERIFICATION_IDENTITY_REJECTED TARGET_VERIFICATION_GRANTS_REJECTED TARGET_VERIFICATION_BINDING_REJECTED TARGET_VERIFICATION_CREDENTIAL_REJECTED TARGET_VERIFICATION_CREATE_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_UNCONFIRMED TARGET_VERIFICATION_APPROVAL_REQUIRED TARGET_VERIFICATION_APPROVAL_CHANGED TARGET_VERIFICATION_CREDENTIAL_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_CHANGED'.split())
 CODES |= set('TARGET_VERIFICATION_REVOCATION_STARTED TARGET_VERIFICATION_REVOCATION_BINDING_REJECTED TARGET_VERIFICATION_REVOCATION_UNCONFIRMED TARGET_VERIFICATION_REVOCATION_NOT_STARTED TARGET_VERIFICATION_CONNECTION_INVENTORY_UNCONFIRMED TARGET_VERIFICATION_SESSIONS_ACTIVE TARGET_VERIFICATION_REVOCATION_APPROVAL_REQUIRED TARGET_VERIFICATION_REVOCATION_APPROVAL_CHANGED'.split())
 APT_CODES = set('APT_PLAN_UNSAFE APT_DNS_FAILURE APT_TLS_FAILURE APT_SIGNATURE_FAILURE APT_METADATA_FAILURE APT_PACKAGE_UNAVAILABLE APT_DEPENDENCY_CONFLICT APT_LOCKED APT_COMMAND_REJECTED APT_COMMAND_UNAVAILABLE APT_COMMAND_TIMEOUT APT_OUTPUT_OVERSIZED'.split())
 
@@ -718,6 +719,69 @@ def execute(metadata):
         require({name:sha(directory/name) for name in verification_names}==prepared_hashes)
         require(all(sha(inputs/name)==value for name,value in before_verification.items()))
         require((sha(seal),sha(state))==before and {p.name:sha(p) for p in destination.iterdir()}==publication_hashes)
+        progress('target-verification-data-phase')
+        entry('target-verification-data-status','TARGET_VERIFICATION_DATA_NOT_STARTED')
+        entry('target-verification-data-begin','TARGET_VERIFICATION_DATA_APPROVAL_REQUIRED')
+        require(not (inputs/'verification-data-started.json').exists())
+        phase_start=datetime.now(timezone.utc)-timedelta(seconds=1)
+        phase_approval={'schema':1,'operation_id':operation,
+            'verification_plan_sha256':verification['plan_sha256'],
+            'account_receipt_sha256':prepared_hashes['verification-account.json'],
+            'started_at':phase_start.isoformat().replace('+00:00','Z'),
+            'expires_at':(phase_start+timedelta(minutes=45)).isoformat().replace('+00:00','Z')}
+        phase_approval_raw=json.dumps(phase_approval,separators=(',',':')).encode()
+        private(inputs/'verification-data-approval.json',phase_approval_raw)
+        phase=json.loads(entry('target-verification-data-begin').stdout)
+        require(set(phase)=={'schema','operation_id','plan','plan_sha256','account_receipt_sha256','started_at','expires_at',
+                'data','read_only_verification','service_started','migration_ready','root_inventory_verified'} and
+                type(phase['schema']) is int and phase['schema']==1 and phase['operation_id']==operation and
+                phase['plan']==verification['plan'] and phase['plan_sha256']==verification['plan_sha256'] and
+                phase['account_receipt_sha256']==prepared_hashes['verification-account.json'] and
+                phase['started_at']==phase_approval['started_at'] and phase['expires_at']==phase_approval['expires_at'] and
+                phase['read_only_verification'] is False and phase['service_started'] is False and
+                phase['migration_ready'] is False and phase['root_inventory_verified'] is True)
+        phase_intent=inputs/'verification-data-started.json'
+        phase_hash=sha(phase_intent)
+        require(phase['data']=={'schema':1,'operation_id':operation,'phase_intent_sha256':phase_hash,
+                'business_data_unchanged':True,'historical_audit_preserved':True,'authentication_data_validated':True,
+                'read_only_verification':True,'current_sessions':0,'current_login_buckets':0,'appended_audit_rows':0,
+                'target_activation_approved':False,'migration_ready':False})
+        st=phase_intent.lstat()
+        require(st.st_uid==0 and st.st_nlink==1 and stat.S_ISREG(st.st_mode) and stat.S_IMODE(st.st_mode)==0o600)
+        entry('target-verification-data-begin','TARGET_VERIFICATION_DATA_ALREADY_STARTED')
+        require(sha(phase_intent)==phase_hash)
+        raw=(directory/'verification-mysql-dsn').read_text()
+        prefix,suffix=vuser+':','@unix(/run/mysqld/mysqld.sock)/'+database+'\n'
+        require(raw.startswith(prefix) and raw.endswith(suffix))
+        password=raw[len(prefix):-len(suffix)].replace('\\','\\\\').replace('"','\\"')
+        client_option=ROOT/'verification-test-client.cnf'
+        private(client_option,('[client]\nuser='+vuser+'\npassword="'+password+'"\n').encode())
+        del password,raw
+        verification_client=['/usr/bin/mysql','--defaults-file='+str(client_option),'--protocol=SOCKET',
+            '--socket=/run/mysqld/mysqld.sock','--database='+database,'--batch','--raw','--skip-column-names',
+            '--skip-reconnect','--connect-timeout=5','--unbuffered']
+        # Actual least-privilege SQL writes exercise the data transition, not
+        # a browser login or permission to start a controller process.
+        run(verification_client,data=b"INSERT INTO controller_console_sessions VALUES(UNHEX(REPEAT('44',32)),NULL,UTC_TIMESTAMP(6),DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 10 MINUTE)); INSERT INTO controller_console_login_limits VALUES(UNHEX(REPEAT('45',32)),UTC_TIMESTAMP(6),1); INSERT INTO controller_identity_audit(actor,action,target,created_at) VALUES('anonymous','identity.login_failed',REPEAT('f',64),UTC_TIMESTAMP(6));\n")
+        phase_readonly={**phase,'read_only_verification':True,
+            'data':{**phase['data'],'current_sessions':1,'current_login_buckets':1,'appended_audit_rows':1}}
+        require(json.loads(entry('target-verification-data-status').stdout)==phase_readonly)
+        entry('target-verification-prepare','TARGET_VERIFICATION_DATA_ALREADY_STARTED')
+        entry('target-verification-status','TARGET_VERIFICATION_DATA_ALREADY_STARTED')
+        progress('target-verification-data-drift')
+        module.mysql_sql(directory,"UPDATE `"+database+"`.controller_nodes SET datacenter_id='changed' WHERE id='node-a';\n")
+        entry('target-verification-data-status','TARGET_COMMAND_REJECTED')
+        module.mysql_sql(directory,"UPDATE `"+database+"`.controller_nodes SET datacenter_id=CONVERT(0xE9A699E6B8AF USING utf8mb4) WHERE id='node-a';\n")
+        require(json.loads(entry('target-verification-data-status').stdout)==phase_readonly)
+        (inputs/'verification-data-approval.json').write_bytes(json.dumps({**phase_approval,'account_receipt_sha256':'0'*64},separators=(',',':')).encode())
+        entry('target-verification-data-status','TARGET_COMMAND_REJECTED')
+        require(sha(phase_intent)==phase_hash)
+        (inputs/'verification-data-approval.json').write_bytes(phase_approval_raw)
+        module.mysql_sql(directory,'SET GLOBAL super_read_only=ON;\n')
+        try:
+            require(json.loads(entry('target-verification-data-status').stdout)==phase_readonly)
+        finally:
+            module.mysql_sql(directory,'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
         progress('target-verification-revoke-plan')
         revoke_plan = json.loads(entry('target-verification-revoke-plan').stdout)
         require(set(revoke_plan)=={'schema','operation_id','plan','plan_sha256','readonly','service_started','migration_ready'} and
@@ -733,16 +797,6 @@ def execute(metadata):
         entry('target-verification-revoke-status','TARGET_VERIFICATION_REVOCATION_NOT_STARTED')
         # Hold a real authenticated session, explicitly without thread event
         # instrumentation. Locking new logins must not be mistaken for drain.
-        raw=(directory/'verification-mysql-dsn').read_text()
-        prefix,suffix=vuser+':','@unix(/run/mysqld/mysqld.sock)/'+database+'\n'
-        require(raw.startswith(prefix) and raw.endswith(suffix))
-        password=raw[len(prefix):-len(suffix)].replace('\\','\\\\').replace('"','\\"')
-        client_option=ROOT/'verification-test-client.cnf'
-        private(client_option,('[client]\nuser='+vuser+'\npassword="'+password+'"\n').encode())
-        del password,raw
-        verification_client=['/usr/bin/mysql','--defaults-file='+str(client_option),'--protocol=SOCKET',
-            '--socket=/run/mysqld/mysqld.sock','--database='+database,'--batch','--raw','--skip-column-names',
-            '--skip-reconnect','--connect-timeout=5','--unbuffered']
         held=subprocess.Popen(verification_client,env=ENV,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         def held_query(sql):
             held.stdin.write(sql)
@@ -813,6 +867,7 @@ def execute(metadata):
             revoked_sha=sha(directory/'verification-revoked.json')
             require(json.loads(entry('target-verification-revoke-status').stdout)=={**expected_revoked,'read_only_verification':True})
             require(json.loads(entry('target-verification-revoke').stdout)==expected_revoked and sha(directory/'verification-revoked.json')==revoked_sha)
+            require(json.loads(entry('target-verification-data-status').stdout)==phase_readonly and sha(phase_intent)==phase_hash)
         finally:
             module.mysql_sql(directory,'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
         progress('target-verification-revoke-drift')
@@ -835,7 +890,9 @@ def execute(metadata):
             'verification_account_foreign_refused', 'verification_account_drift_not_repaired', 'verification_credential_authenticated',
             'verification_revocation_locked', 'verification_revocation_active_session_refused',
             'verification_revocation_readonly_recovery', 'verification_revocation_no_implicit_unlock',
-            'verification_revocation_pending_auth_refused', 'verification_revocation_internal_thread_classified')})
+            'verification_revocation_pending_auth_refused', 'verification_revocation_internal_thread_classified',
+            'verification_data_phase_bound', 'verification_data_auth_delta_validated', 'verification_data_drift_refused',
+            'verification_data_immutable_intent', 'verification_data_revocation_compatible')})
         return finish()
     return report
 
