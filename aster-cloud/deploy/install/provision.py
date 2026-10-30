@@ -1279,7 +1279,7 @@ def prepare_verification_mysql(operation, plan_sha256, charset, collation):
 
 
 def complete_verification_mysql(operation, plan_sha256, charset, collation, *, readonly=False):
-    """Called after Go authenticated the private credential and exact SQL image."""
+    """Called after Go authenticated the credential and applicable full data phase."""
     value = verification_account_candidate(operation, plan_sha256, charset, collation)
     path = Path('/var/lib/aster-controller-restore') / operation / 'database/verification-account.json'
     if path.exists() or path.is_symlink():

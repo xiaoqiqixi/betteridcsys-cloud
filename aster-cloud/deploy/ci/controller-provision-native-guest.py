@@ -721,6 +721,7 @@ def execute(metadata):
         require((sha(seal),sha(state))==before and {p.name:sha(p) for p in destination.iterdir()}==publication_hashes)
         progress('target-verification-data-phase')
         entry('target-verification-data-status','TARGET_VERIFICATION_DATA_NOT_STARTED')
+        entry('target-verification-runtime-check','TARGET_VERIFICATION_DATA_NOT_STARTED')
         entry('target-verification-data-begin','TARGET_VERIFICATION_DATA_APPROVAL_REQUIRED')
         require(not (inputs/'verification-data-started.json').exists())
         phase_start=datetime.now(timezone.utc)-timedelta(seconds=1)
@@ -750,6 +751,17 @@ def execute(metadata):
         require(st.st_uid==0 and st.st_nlink==1 and stat.S_ISREG(st.st_mode) and stat.S_IMODE(st.st_mode)==0o600)
         entry('target-verification-data-begin','TARGET_VERIFICATION_DATA_ALREADY_STARTED')
         require(sha(phase_intent)==phase_hash)
+        def runtime_check(expected_phase):
+            proof=json.loads(entry('target-verification-runtime-check').stdout)
+            expected={'schema':1,'operation_id':operation,
+                'phase':{k:v for k,v in expected_phase.items() if k!='root_inventory_verified'},
+                'credential_verified':True,'sql_identity_verified':True,'readonly':True,
+                'service_started':False,'migration_ready':False,'root_inventory_verified':True}
+            require(proof==expected and type(proof['schema']) is int and
+                all(type(proof[k]) is bool for k in ('credential_verified','sql_identity_verified','readonly',
+                    'service_started','migration_ready','root_inventory_verified')) and sha(phase_intent)==phase_hash)
+            require({name:sha(directory/name) for name in verification_names}==prepared_hashes)
+        runtime_check({**phase,'read_only_verification':True})
         raw=(directory/'verification-mysql-dsn').read_text()
         prefix,suffix=vuser+':','@unix(/run/mysqld/mysqld.sock)/'+database+'\n'
         require(raw.startswith(prefix) and raw.endswith(suffix))
@@ -766,20 +778,32 @@ def execute(metadata):
         phase_readonly={**phase,'read_only_verification':True,
             'data':{**phase['data'],'current_sessions':1,'current_login_buckets':1,'appended_audit_rows':1}}
         require(json.loads(entry('target-verification-data-status').stdout)==phase_readonly)
+        # The old entry must remain exact-image strict. Only the new preflight
+        # combines full original-phase validation with real credential login.
+        old_check=subprocess.run([str(version/'bin/aster-controller'),
+            'migration-target-verification-credential-check','-operation',operation],
+            env=ENV,capture_output=True,timeout=1860)
+        require(old_check.returncode==1 and not old_check.stdout and
+            json.loads(old_check.stderr).get('code')=='COMMAND_FAILED')
+        runtime_check(phase_readonly)
+        runtime_check(phase_readonly)  # no intent rewrite or deadline extension
         entry('target-verification-prepare','TARGET_VERIFICATION_DATA_ALREADY_STARTED')
         entry('target-verification-status','TARGET_VERIFICATION_DATA_ALREADY_STARTED')
         progress('target-verification-data-drift')
         module.mysql_sql(directory,"UPDATE `"+database+"`.controller_nodes SET datacenter_id='changed' WHERE id='node-a';\n")
         entry('target-verification-data-status','TARGET_COMMAND_REJECTED')
+        entry('target-verification-runtime-check','TARGET_COMMAND_REJECTED')
         module.mysql_sql(directory,"UPDATE `"+database+"`.controller_nodes SET datacenter_id=CONVERT(0xE9A699E6B8AF USING utf8mb4) WHERE id='node-a';\n")
         require(json.loads(entry('target-verification-data-status').stdout)==phase_readonly)
         (inputs/'verification-data-approval.json').write_bytes(json.dumps({**phase_approval,'account_receipt_sha256':'0'*64},separators=(',',':')).encode())
         entry('target-verification-data-status','TARGET_COMMAND_REJECTED')
+        entry('target-verification-runtime-check','TARGET_COMMAND_REJECTED')
         require(sha(phase_intent)==phase_hash)
         (inputs/'verification-data-approval.json').write_bytes(phase_approval_raw)
         module.mysql_sql(directory,'SET GLOBAL super_read_only=ON;\n')
         try:
             require(json.loads(entry('target-verification-data-status').stdout)==phase_readonly)
+            runtime_check(phase_readonly)
         finally:
             module.mysql_sql(directory,'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
         progress('target-verification-revoke-plan')
@@ -868,6 +892,7 @@ def execute(metadata):
             require(json.loads(entry('target-verification-revoke-status').stdout)=={**expected_revoked,'read_only_verification':True})
             require(json.loads(entry('target-verification-revoke').stdout)==expected_revoked and sha(directory/'verification-revoked.json')==revoked_sha)
             require(json.loads(entry('target-verification-data-status').stdout)==phase_readonly and sha(phase_intent)==phase_hash)
+            entry('target-verification-runtime-check','TARGET_VERIFICATION_REVOCATION_STARTED')
         finally:
             module.mysql_sql(directory,'SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;\n')
         progress('target-verification-revoke-drift')
@@ -892,7 +917,9 @@ def execute(metadata):
             'verification_revocation_readonly_recovery', 'verification_revocation_no_implicit_unlock',
             'verification_revocation_pending_auth_refused', 'verification_revocation_internal_thread_classified',
             'verification_data_phase_bound', 'verification_data_auth_delta_validated', 'verification_data_drift_refused',
-            'verification_data_immutable_intent', 'verification_data_revocation_compatible')})
+            'verification_data_immutable_intent', 'verification_data_revocation_compatible',
+            'verification_runtime_credential_revalidated', 'verification_runtime_preserves_original_phase',
+            'verification_runtime_drift_and_revocation_refused')})
         return finish()
     return report
 

@@ -68,6 +68,10 @@ func targetArchive(command string, args []string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		report, err = controllerbackup.TargetVerificationData(ctx, *operation, command[len("migration-target-"):])
+	} else if command == "migration-target-verification-runtime-check" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		report, err = controllerbackup.CheckTargetVerificationRuntime(ctx, *operation)
 	} else if command == "migration-target-verification-credential-check" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()

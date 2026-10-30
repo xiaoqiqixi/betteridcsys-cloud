@@ -944,7 +944,7 @@ class Target(Host):
         # bytes are not accepted here as proof; Go must authenticate and derive
         # every file under the original target seal before claiming success.
         with self.lock('target.lock'):
-            verification = action in ('target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status')
+            verification = action in ('target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status','target-verification-runtime-check')
             self.unused_host(configuration=True, verification=verification)
             plan = self.read(self.root / 'plan.json')
             plan_path, directory = self.root / 'database-plan.json', self.root / 'database'
@@ -1008,11 +1008,11 @@ class Target(Host):
         if action == 'target-verification-data-begin':
             approval_path = self.root/'verification-data-approval.json'
             require(approval_path.exists() or approval_path.is_symlink(),'TARGET_VERIFICATION_DATA_APPROVAL_REQUIRED')
-        phase_status = has_data_phase and action in ('target-verification-data-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status')
+        phase_status = has_data_phase and action in ('target-verification-data-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-runtime-check')
         if phase_status:
             result = self.target_command('verification-data-status')
             self.verify_verification_data(result,plan,database_plan,readonly=True)
-        elif action == 'target-verification-data-status':
+        elif action in ('target-verification-data-status','target-verification-runtime-check'):
             raise Refused('TARGET_VERIFICATION_DATA_NOT_STARTED')
         else:
             result = self.target_command('verification-plan')
@@ -1024,6 +1024,23 @@ class Target(Host):
                     'schema': 1, 'operation_id': self.operation, 'plan_sha256': result['plan_sha256']},
                 'TARGET_VERIFICATION_APPROVAL_CHANGED')
         args = (self.operation, result['plan_sha256'], database_plan['data']['charset'], database_plan['data']['collation'])
+        if action == 'target-verification-runtime-check':
+            # Stopped-host preflight only. Reuse the original phase after valid
+            # authentication changes; never silently start, extend or rebase.
+            before = module.complete_verification_mysql(*args,readonly=True)
+            proof = self.target_command('verification-runtime-check')
+            expected = {'schema':1,'operation_id':self.operation,'phase':result,
+                        'credential_verified':True,'sql_identity_verified':True,'readonly':True,
+                        'service_started':False,'migration_ready':False}
+            require(proof==expected and type(proof['schema']) is int and
+                    all(type(proof[k]) is bool for k in ('credential_verified','sql_identity_verified',
+                        'readonly','service_started','migration_ready')),
+                    'TARGET_VERIFICATION_CREDENTIAL_UNCONFIRMED')
+            self.verify_verification_data(proof['phase'],plan,database_plan,readonly=True)
+            require(module.complete_verification_mysql(*args,readonly=True)==before,
+                    'TARGET_VERIFICATION_ACCOUNT_CHANGED')
+            self.unused_host(configuration=True,verification=True)
+            return {**proof,'root_inventory_verified':True}
         if action == 'target-verification-data-status':
             # This read-only account check works before and after locking; no
             # credential login after revocation and no implicit account unlock.
@@ -1087,7 +1104,7 @@ class Target(Host):
     def prepare(self, action):
         with self.installation_lock():
             verify_installation(self, self.i, target=True)
-            if action in ('target-configuration-publish','target-configuration-status','target-configuration-resume','target-verification-plan','target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status'):
+            if action in ('target-configuration-publish','target-configuration-status','target-configuration-resume','target-verification-plan','target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status','target-verification-runtime-check'):
                 return self.publish_configuration(action)
             self.unused_host()
             plan = self.target_command('plan')
@@ -1156,14 +1173,14 @@ class Arguments(argparse.ArgumentParser):
 
 def main():
     parser = Arguments(description=__doc__)
-    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status'))
+    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check'))
     parser.add_argument('--operation')
     args = parser.parse_args()
     require((args.action in ('capabilities', 'plan') and args.operation is None) or
             (args.action not in ('capabilities', 'plan') and isinstance(args.operation, str) and OP.fullmatch(args.operation)),
             'EXACT_OPERATION_ID_REQUIRED')
     if args.action == 'capabilities':
-        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status'],
+        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check'],
                 'export_restore': False, 'migration_ready': False}
     if args.action.startswith('target-'):
         return Target(install_module(), args.operation).prepare(args.action)

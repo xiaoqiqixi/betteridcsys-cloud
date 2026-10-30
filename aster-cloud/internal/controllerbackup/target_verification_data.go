@@ -52,6 +52,22 @@ func TargetVerificationData(ctx context.Context, operation, action string) (Targ
 	}
 	var result TargetVerificationDataReport
 	err := withTargetArchiveMode(operation, true, func(plan TargetPlan, sha string, a *Archive) error {
+		var err error
+		result, err = targetVerificationData(ctx, plan, sha, a, action)
+		return err
+	})
+	if err != nil {
+		return TargetVerificationDataReport{}, err
+	}
+	return result, nil
+}
+
+// Called only inside the original archive and sealed-target control lock.
+// Status never creates a new baseline and remains valid after account locking.
+func targetVerificationData(ctx context.Context, plan TargetPlan, sha string, a *Archive, action string) (TargetVerificationDataReport, error) {
+	operation := plan.OperationID
+	var result TargetVerificationDataReport
+	err := func() error {
 		db, proof, e := importedTargetInputs(ctx, a, plan, sha)
 		if e != nil {
 			return e
@@ -138,7 +154,7 @@ func TargetVerificationData(ctx context.Context, operation, action string) (Targ
 			AccountReceiptSHA256: binding.AccountReceiptSHA256, StartedAt: approval.StartedAt, ExpiresAt: approval.ExpiresAt,
 			Data: data, ReadOnlyVerification: action == "verification-data-status"}
 		return nil
-	})
+	}()
 	if err != nil {
 		return TargetVerificationDataReport{}, err
 	}

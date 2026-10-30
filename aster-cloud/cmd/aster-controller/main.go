@@ -47,7 +47,7 @@ func run(args []string) error {
 		return control.ErrInput
 	}
 	command := args[0]
-	if command == "migration-target-verification-data-begin" || command == "migration-target-verification-data-status" {
+	if command == "migration-target-verification-data-begin" || command == "migration-target-verification-data-status" || command == "migration-target-verification-runtime-check" {
 		return targetArchive(command, args[1:])
 	}
 	if command == "migration-target-verification-credential-check" || command == "migration-target-verification-plan" || command == "migration-target-configuration-plan" || command == "migration-target-configuration-publish" || command == "migration-target-configuration-status" || command == "migration-target-configuration-resume" {

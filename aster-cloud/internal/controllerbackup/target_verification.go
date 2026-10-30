@@ -105,65 +105,8 @@ func publishedVerificationPlan(a *Archive, plan TargetPlan, sha string, runtime 
 func CheckTargetVerificationCredential(ctx context.Context, operation string) (map[string]any, error) {
 	var result map[string]any
 	err := withTargetVerification(ctx, operation, func(report TargetVerificationPlanReport, runtime RuntimeTarget) error {
-		directory := filepath.Join(runtime.Directory, "database")
-		for _, name := range []string{"verification-revoke-started.json", "verification-revoked.json"} {
-			if _, err := os.Lstat(filepath.Join(directory, name)); !errors.Is(err, os.ErrNotExist) {
-				return ErrInvalid
-			}
-		}
-		raw, e := targetRead(filepath.Join(directory, "verification-started.json"), 8192)
-		if e != nil {
-			return e
-		}
-		var intent struct {
-			Schema      int    `json:"schema"`
-			OperationID string `json:"operation_id"`
-			PlanSHA256  string `json:"plan_sha256"`
-			Database    string `json:"database"`
-			User        string `json:"user"`
-			ServerUUID  string `json:"server_uuid"`
-			OwnerSHA256 string `json:"owner_sha256"`
-			Charset     string `json:"charset"`
-			Collation   string `json:"collation"`
-			Nonce       string `json:"nonce"`
-		}
-		if !exactSourceRecord(raw, &intent) || intent.Schema != 1 || intent.OperationID != operation || intent.PlanSHA256 != report.PlanSHA256 || intent.Database != report.Plan.SQL.Database || intent.User != report.Plan.SQL.User || !shaPattern.MatchString(intent.Nonce) {
-			return ErrInvalid
-		}
-		ownerRaw, e := targetRead(filepath.Join(directory, "mysql-provision.json"), 65536)
-		if e != nil || digestBytes(ownerRaw) != intent.OwnerSHA256 {
-			return ErrInvalid
-		}
-		owner, e := restoreOwner(ownerRaw, runtime.DSN)
-		if e != nil || owner.ServerUUID != intent.ServerUUID {
-			return ErrInvalid
-		}
-		credential, e := targetRead(filepath.Join(directory, "verification-mysql-dsn"), 4096)
-		if e != nil {
-			return e
-		}
-		dsn := strings.TrimSuffix(string(credential), "\n")
-		cfg, e := mysql.ParseDSN(dsn)
-		if e != nil || cfg.User != intent.User || cfg.DBName != intent.Database || cfg.Net != "unix" || cfg.Addr != "/run/mysqld/mysqld.sock" || len(cfg.Passwd) < 16 || len(cfg.Passwd) > 1024 ||
-			string(credential) != cfg.User+":"+cfg.Passwd+"@unix(/run/mysqld/mysqld.sock)/"+cfg.DBName+"\n" {
-			return ErrInvalid
-		}
-		store, e := control.OpenDSN(dsn)
-		if e != nil {
-			return ErrInvalid
-		}
-		defer store.DB.Close()
-		policy, e := identity.CheckVerificationSQLIdentity(ctx, store.DB, operation)
-		if e != nil || !reflect.DeepEqual(policy, report.Plan.SQL) {
-			return ErrInvalid
-		}
-		conn, e := store.DB.Conn(ctx)
-		if e != nil {
-			return ErrInvalid
-		}
-		defer conn.Close()
-		if verifyDatabaseOwnership(ctx, conn, owner, DatabaseSchema{1, intent.Charset, intent.Collation}) != nil {
-			return ErrInvalid
+		if _, err := targetVerificationCredential(ctx, operation, report.Plan, report.PlanSHA256, runtime); err != nil {
+			return err
 		}
 		result = map[string]any{"schema": 1, "operation_id": operation, "plan_sha256": report.PlanSHA256, "credential_verified": true, "sql_identity_verified": true, "exact_database_verified": true, "service_started": false, "migration_ready": false}
 		return nil
@@ -172,4 +115,71 @@ func CheckTargetVerificationCredential(ctx context.Context, operation string) (m
 		return nil, err
 	}
 	return result, nil
+}
+
+// This check authenticates the precise saved least-privilege credential, but
+// makes no SQL-image claim. Each caller must verify its own complete data phase
+// under the target seal; the legacy entry retains its exact zero-session image.
+func targetVerificationCredential(ctx context.Context, operation string, plan TargetVerificationPlan, planSHA string, runtime RuntimeTarget) (string, error) {
+	directory := filepath.Join(runtime.Directory, "database")
+	for _, name := range []string{"verification-revoke-started.json", "verification-revoked.json"} {
+		if _, err := os.Lstat(filepath.Join(directory, name)); !errors.Is(err, os.ErrNotExist) {
+			return "", ErrInvalid
+		}
+	}
+	raw, e := targetRead(filepath.Join(directory, "verification-started.json"), 8192)
+	if e != nil {
+		return "", e
+	}
+	var intent struct {
+		Schema      int    `json:"schema"`
+		OperationID string `json:"operation_id"`
+		PlanSHA256  string `json:"plan_sha256"`
+		Database    string `json:"database"`
+		User        string `json:"user"`
+		ServerUUID  string `json:"server_uuid"`
+		OwnerSHA256 string `json:"owner_sha256"`
+		Charset     string `json:"charset"`
+		Collation   string `json:"collation"`
+		Nonce       string `json:"nonce"`
+	}
+	if !exactSourceRecord(raw, &intent) || intent.Schema != 1 || intent.OperationID != operation || intent.PlanSHA256 != planSHA || intent.Database != plan.SQL.Database || intent.User != plan.SQL.User || !shaPattern.MatchString(intent.Nonce) {
+		return "", ErrInvalid
+	}
+	ownerRaw, e := targetRead(filepath.Join(directory, "mysql-provision.json"), 65536)
+	if e != nil || digestBytes(ownerRaw) != intent.OwnerSHA256 {
+		return "", ErrInvalid
+	}
+	owner, e := restoreOwner(ownerRaw, runtime.DSN)
+	if e != nil || owner.ServerUUID != intent.ServerUUID {
+		return "", ErrInvalid
+	}
+	credential, e := targetRead(filepath.Join(directory, "verification-mysql-dsn"), 4096)
+	if e != nil {
+		return "", e
+	}
+	dsn := strings.TrimSuffix(string(credential), "\n")
+	cfg, e := mysql.ParseDSN(dsn)
+	if e != nil || cfg.User != intent.User || cfg.DBName != intent.Database || cfg.Net != "unix" || cfg.Addr != "/run/mysqld/mysqld.sock" || len(cfg.Passwd) < 16 || len(cfg.Passwd) > 1024 ||
+		string(credential) != cfg.User+":"+cfg.Passwd+"@unix(/run/mysqld/mysqld.sock)/"+cfg.DBName+"\n" {
+		return "", ErrInvalid
+	}
+	store, e := control.OpenDSN(dsn)
+	if e != nil {
+		return "", ErrInvalid
+	}
+	defer store.DB.Close()
+	policy, e := identity.CheckVerificationSQLIdentity(ctx, store.DB, operation)
+	if e != nil || !reflect.DeepEqual(policy, plan.SQL) {
+		return "", ErrInvalid
+	}
+	conn, e := store.DB.Conn(ctx)
+	if e != nil {
+		return "", ErrInvalid
+	}
+	defer conn.Close()
+	if verifyDatabaseOwnership(ctx, conn, owner, DatabaseSchema{1, intent.Charset, intent.Collation}) != nil {
+		return "", ErrInvalid
+	}
+	return dsn, nil
 }

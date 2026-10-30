@@ -151,7 +151,7 @@ def main():
                             'TARGET_INPUT_INVENTORY_CHANGED'}
                 if PHASE == 'malformed-data-before-provision' and action in (
                         'target-configuration-publish','target-configuration-status',
-                        'target-configuration-resume','target-verification-plan','target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status'):
+                        'target-configuration-resume','target-verification-plan','target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status','target-verification-runtime-check'):
                     expected = {'TARGET_DATABASE_STAGE_REQUIRED'}
                 require(r.returncode == 1 and code in expected,
                     'TARGET_DENIAL_NOT_CONFIRMED_' + PHASE + '_' + action + '_' + diagnostic)
@@ -282,6 +282,7 @@ def main():
         entry('target-verification-revoke-status', True)
         entry('target-verification-data-begin', True)
         entry('target-verification-data-status', True)
+        entry('target-verification-runtime-check', True)
         # A partial stage is NOT the same confirmed 'not prepared' state. These
         # faults must remain unconfirmed and must not be repaired or adopted.
         PHASE = 'partial-database-stage-unconfirmed'
