@@ -98,6 +98,11 @@ class NativeFixtureContract(unittest.TestCase):
     def test_verification_failure_reports_preserve_fixed_diagnostics_not_private_text(self):
         metadata = {**self.metadata(), 'scenario': 'controller-restore-configuration'}
         cases = {
+            'target-verification-isolated-process': 'TARGET_NATIVE_ASSERTION_FAILED',
+            'target-verification-process-bad-credential': 'TARGET_NATIVE_ASSERTION_FAILED',
+            'target-verification-process-stop': 'TARGET_NATIVE_ASSERTION_FAILED',
+            'target-verification-process-expiry': 'TARGET_NATIVE_ASSERTION_FAILED',
+            'target-verification-process-parent-death': 'TARGET_NATIVE_ASSERTION_FAILED',
             'target-verification-data-phase': 'TARGET_VERIFICATION_DATA_APPROVAL_REQUIRED',
             'target-verification-data-drift': 'TARGET_COMMAND_REJECTED',
             'target-verification-account': 'TARGET_VERIFICATION_APPROVAL_REQUIRED',

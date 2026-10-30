@@ -792,7 +792,7 @@ def execute(metadata):
         spec = importlib.util.spec_from_file_location('native_verification_process', ROOT/'verification-process-native.py')
         process_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(process_module)
-        process_module.accept(ROOT, inputs, controller, operation, module, directory, require)
+        process_module.accept(ROOT, inputs, controller, operation, module, directory, require, progress)
         # The actual HTTP tests used no login/CSRF creation; original auth and
         # business proofs must remain exactly at the prior phase, without reset.
         runtime_check(phase_readonly)

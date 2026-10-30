@@ -19,7 +19,7 @@ import subprocess
 import time
 
 
-def accept(root, inputs, controller, operation, module, directory, require):
+def accept(root, inputs, controller, operation, module, directory, require, progress):
     require(os.geteuid() == 0)
     require(ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) == 0)
     case = Path('/opt') / ('aster-verification-native-' + operation)
@@ -196,6 +196,7 @@ def accept(root, inputs, controller, operation, module, directory, require):
                 path.unlink(missing_ok=True)
     try:
         for mode in ('bad-credential', 'stop', 'expiry', 'parent-death'):
+            progress('target-verification-process-' + mode)
             run_case(mode)
     finally:
         binary.unlink(missing_ok=True)
