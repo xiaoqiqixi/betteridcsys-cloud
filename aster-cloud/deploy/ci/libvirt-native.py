@@ -672,6 +672,18 @@ def make_seed(work, root, source_sha, image_provenance, scenario="libvirt"):
         content = {'guest.py': (HERE / 'controller-provision-native-guest.py').read_bytes(), name: binary.read_bytes()}
         if scenario == 'controller-provision':
             content['controller-fixture.test'] = fixture.read_bytes()
+        if scenario == 'controller-restore-configuration':
+            process_fixture = work/'verification-process.test'
+            source_fixture = root/'aster-cloud/internal/verificationprocess/native_fixture_test.go'
+            require(not source_fixture.exists(), 'PROCESS_FIXTURE_SOURCE_COLLISION')
+            try:
+                source_fixture.write_bytes((HERE/'verification-process-fixture.gotxt').read_bytes())
+                run([go, 'test', '-mod=readonly', '-c', '-ldflags=-s -w', '-o', str(process_fixture), './internal/verificationprocess'], cwd=root/'aster-cloud', env=env, timeout=300)
+            finally:
+                source_fixture.unlink(missing_ok=True)
+            metadata['verification_process_fixture_sha256'] = digest(process_fixture)
+            content['verification-process.test'] = process_fixture.read_bytes()
+            content['verification-process-native.py'] = (HERE/'verification-process-native.py').read_bytes()
         if scenario in RESTORE_SCENARIOS:
             source = work / 'source-fixture'
             source.mkdir(mode=0o700)
@@ -781,7 +793,7 @@ RESTORE_COMMON = PROVISION_COMMON | set("database_restored real_source_database_
 RESTORE_EVIDENCE = {
     'controller-restore-data': RESTORE_COMMON | PROVISION_NEGATIVE | set("read_only_reentry_verified modified_data_refused removed_constraint_refused foreign_database_refused runtime_material_drift_refused".split()),
     'controller-restore-sessions': RESTORE_COMMON | set("sessions_revoked session_transition_exact_readback session_transition_explicit_recovery".split()),
-    'controller-restore-configuration': RESTORE_COMMON | set("sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock verification_revocation_pending_auth_refused verification_revocation_internal_thread_classified verification_data_phase_bound verification_data_auth_delta_validated verification_data_drift_refused verification_data_immutable_intent verification_data_revocation_compatible verification_runtime_credential_revalidated verification_runtime_preserves_original_phase verification_runtime_drift_and_revocation_refused".split()),
+    'controller-restore-configuration': RESTORE_COMMON | set("sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock verification_revocation_pending_auth_refused verification_revocation_internal_thread_classified verification_data_phase_bound verification_data_auth_delta_validated verification_data_drift_refused verification_data_immutable_intent verification_data_revocation_compatible verification_runtime_credential_revalidated verification_runtime_preserves_original_phase verification_runtime_drift_and_revocation_refused verification_isolated_https_sql verification_nonroot_no_new_privileges verification_network_namespace_isolated verification_stop_expiry_parent_death_drained".split()),
 }
 RESTORE_FALSE = (PROVISION_FALSE - {'database_restored'}) | {'session_browser_verified'}
 

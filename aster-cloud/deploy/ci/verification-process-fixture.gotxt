@@ -1,0 +1,35 @@
+//go:build linux
+
+package verificationprocess_test
+
+// Standalone root/native process fixture, never linked into the shipped binary.
+// The surrounding guest has already verified the real SQL phase. This fixture
+// exercises process handoff only; it is not a managed host activation approval.
+import (
+ "aster/cloud/internal/controllerhost"
+ "aster/cloud/internal/verificationprocess"
+ "context"
+ "encoding/json"
+ "errors"
+ "os"
+ "testing"
+)
+
+func TestMain(m *testing.M) {
+ if len(os.Args)==2 && os.Args[1]==verificationprocess.ChildCommand {
+  if verificationprocess.Child()!=nil {os.Exit(21)};os.Exit(0)
+ }
+ if len(os.Args)!=3 || os.Args[1]!="native-process-fixture" {os.Exit(m.Run())}
+ if os.Getuid()!=0 {os.Exit(22)}
+ raw,err:=os.ReadFile(os.Args[2]);if err!=nil {os.Exit(23)}
+ var input struct {Config verificationprocess.Config `json:"config"`; ConfigurationSHA string `json:"configuration_sha"`; PlanSHA string `json:"plan_sha"`}
+ if json.Unmarshal(raw,&input)!=nil {os.Exit(24)}
+ host,err:=controllerhost.Open(input.Config.Controller.ControllerID,input.ConfigurationSHA);if err!=nil{os.Exit(25)}
+ guard,err:=host.PrepareVerificationRuntime(input.Config.Operation,input.PlanSHA,func()error{return nil});if err!=nil{os.Exit(26)}
+ host.Close()
+ ctx,cancel:=context.WithCancel(context.Background())
+ go func(){var b [1]byte;_,_=os.Stdin.Read(b[:]);cancel()}()
+ err=verificationprocess.Serve(ctx,guard,input.Config)
+ if !errors.Is(err,context.Canceled) && !errors.Is(err,context.DeadlineExceeded){os.Exit(27)}
+ os.Exit(0)
+}

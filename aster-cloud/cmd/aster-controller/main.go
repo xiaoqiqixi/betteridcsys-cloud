@@ -6,6 +6,7 @@ import (
 	"aster/cloud/internal/controllerhost"
 	"aster/cloud/internal/diagnostics"
 	"aster/cloud/internal/identity"
+	"aster/cloud/internal/verificationprocess"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -47,6 +48,12 @@ func run(args []string) error {
 		return control.ErrInput
 	}
 	command := args[0]
+	if command == verificationprocess.ChildCommand {
+		if len(args) != 1 {
+			return control.ErrInput
+		}
+		return verificationprocess.Child()
+	}
 	if command == "migration-target-verification-data-begin" || command == "migration-target-verification-data-status" || command == "migration-target-verification-runtime-check" {
 		return targetArchive(command, args[1:])
 	}
