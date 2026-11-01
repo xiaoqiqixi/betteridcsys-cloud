@@ -16,11 +16,19 @@ let context,page,phase='launch';
 function check(name){assert(CHECKS.includes(name)&&!report.checks.includes(name));report.checks.push(name);console.log('PASS verification '+name);}
 async function read(p){return page.evaluate(async p=>{const r=await fetch('/console/v1'+p,{method:'GET',credentials:'same-origin',cache:'no-store'});return{status:r.status,data:r.status===200?await r.json():null};},p);}
 async function geometry(){
- const proof=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,main:document.querySelector('main')?.getBoundingClientRect().toJSON(),banner:[...document.querySelectorAll('[role="status"]')].find(e=>e.textContent.includes('迁移验证中')||e.textContent.includes('Migration verification'))?.getBoundingClientRect().toJSON()}));
+ const proof=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,main:document.querySelector('main')?.getBoundingClientRect().toJSON(),currentNavigation:document.querySelectorAll('.aw-rail-nav a[aria-current="page"].is-active').length,banner:[...document.querySelectorAll('[role="status"]')].find(e=>e.textContent.includes('迁移验证中')||e.textContent.includes('Migration verification'))?.getBoundingClientRect().toJSON()}));
+ assert.equal(proof.currentNavigation,1);
  assert(proof.scroll<=proof.width);assert(proof.main&&proof.main.left>=-1&&proof.main.right<=proof.width+1);
  assert(proof.banner&&proof.banner.width>0&&proof.banner.left>=-1&&proof.banner.right<=proof.width+1);
 }
-async function shot(name){assert(SHOTS.includes(name)&&!report.screenshots.includes(name));await geometry();await page.screenshot({path:path.join(output,name),fullPage:false});report.screenshots.push(name);}
+async function shot(name){
+ assert(SHOTS.includes(name)&&!report.screenshots.includes(name));await geometry();
+ // Capture the actual settled navigation, not a frame between old/new active
+ // colors. Do not disable CSS, substitute pixels or replay any user action.
+ await page.mouse.move(0,0);
+ await page.waitForFunction(()=>document.fonts.status==='loaded'&&(document.querySelector('.aw-rail-nav')?.getAnimations({subtree:true})||[]).every(a=>!a.pending&&a.playState!=='running'),undefined,{timeout:5000});
+ await page.screenshot({path:path.join(output,name),fullPage:false});report.screenshots.push(name);
+}
 async function disabled(labels){for(const label of labels){const button=page.getByRole('button',{name:label,exact:true});assert.equal(await button.count(),1);assert.equal(await button.isEnabled(),false);}}
 try{
  context=await firefox.launchPersistentContext(process.env.FIREFOX_PROFILE_DIR,{headless:true,ignoreHTTPSErrors:false,acceptDownloads:false,viewport:{width:1440,height:1000},firefoxUserPrefs:{'security.enterprise_roots.enabled':false}});

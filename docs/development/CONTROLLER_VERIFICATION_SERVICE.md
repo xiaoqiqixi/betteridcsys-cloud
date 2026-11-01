@@ -1,6 +1,8 @@
 # 迁移验证服务的运行生命周期
 
-`control.ServeVerificationConsole` 是受限 HTTPS 服务组件，不是迁移宿主的启动许可。当前尚未接入非特权子进程、root 协调器和 systemd；不能直接调用普通 `serve` 来替代这些步骤。
+`control.ServeVerificationConsole` 是受限 HTTPS 服务组件，不是迁移宿主的启动许可。
+已有[独立非特权子进程实现](CONTROLLER_VERIFICATION_PROCESS.md)，但其原生隔离与退出场景尚未完整通过；
+生产 root 协调器、专用系统账号和 systemd 仍未接入，不能直接调用普通 `serve` 来替代这些步骤。
 
 ## 输入与权限
 
