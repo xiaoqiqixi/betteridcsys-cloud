@@ -935,6 +935,7 @@ def execute(metadata):
             'verification_runtime_credential_revalidated', 'verification_runtime_preserves_original_phase',
             'verification_runtime_drift_and_revocation_refused', 'verification_isolated_https_sql', 'verification_static_ui_protected',
             'verification_nonroot_no_new_privileges', 'verification_network_namespace_isolated',
+            'verification_network_all_ipv4_tables_empty',
             'verification_stop_expiry_parent_death_drained')})
         return finish()
     return report

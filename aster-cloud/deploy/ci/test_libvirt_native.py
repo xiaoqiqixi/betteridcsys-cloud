@@ -35,6 +35,33 @@ def load(name, filename):
 
 h = load("libvirt_native_contract", "libvirt-native.py")
 g = load("libvirt_native_guest_contract", "libvirt-native-guest.py")
+verification = load("verification_route_contract", "verification-process-native.py")
+
+
+class VerificationRouteFormatContract(unittest.TestCase):
+    # These are kernel wire-format tests, not proof that a real child has an
+    # isolated network namespace. The native guest must independently query it.
+    HEADER = (b'Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT').ljust(127, b' ') + b'\n'
+
+    def test_uninitialized_main_fib_produces_zero_bytes(self):
+        # Linux v5.15/v6.8 fib_route_seq_start returns NULL before SEQ_START_TOKEN
+        # when RT_TABLE_MAIN does not exist. No table means no header either.
+        self.assertTrue(verification.empty_ipv4_route_snapshot(b''))
+
+    def test_initialized_empty_main_fib_contains_only_kernel_header(self):
+        self.assertTrue(verification.empty_ipv4_route_snapshot(self.HEADER))
+
+    def test_unknown_single_line_or_whitespace_is_not_an_empty_route_table(self):
+        for raw in (b'unknown\n', b'\n', b' ', b'\x00', b'Iface\n', self.HEADER[:-1],
+                    self.HEADER + b'\n', self.HEADER + b' ', self.HEADER.replace(b'Gateway', b'Foreign')):
+            with self.subTest(raw=raw):
+                self.assertFalse(verification.empty_ipv4_route_snapshot(raw))
+
+    def test_any_route_row_is_rejected_with_or_without_a_header(self):
+        row = b'eth0\t00000000\t0102000A\t0003\t0\t0\t0\t00000000\t0\t0\t0\n'
+        for raw in (row, self.HEADER + row, row + self.HEADER):
+            with self.subTest(raw=raw):
+                self.assertFalse(verification.empty_ipv4_route_snapshot(raw))
 
 
 class NativeFixtureContract(unittest.TestCase):
@@ -203,7 +230,7 @@ class NativeFixtureContract(unittest.TestCase):
         phases = {
             'data': set('foreign_account_refused lost_credential_refused_without_reset maintenance_authentication_verified maintenance_drift_refused maintenance_nonroot_denied read_only_reentry_verified modified_data_refused removed_constraint_refused foreign_database_refused runtime_material_drift_refused'.split()),
             'sessions': set('sessions_revoked session_transition_exact_readback session_transition_explicit_recovery'.split()),
-            'configuration': set('sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock verification_revocation_pending_auth_refused verification_revocation_internal_thread_classified verification_data_phase_bound verification_data_auth_delta_validated verification_data_drift_refused verification_data_immutable_intent verification_data_revocation_compatible verification_runtime_credential_revalidated verification_runtime_preserves_original_phase verification_runtime_drift_and_revocation_refused verification_isolated_https_sql verification_static_ui_protected verification_nonroot_no_new_privileges verification_network_namespace_isolated verification_stop_expiry_parent_death_drained'.split()),
+            'configuration': set('sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock verification_revocation_pending_auth_refused verification_revocation_internal_thread_classified verification_data_phase_bound verification_data_auth_delta_validated verification_data_drift_refused verification_data_immutable_intent verification_data_revocation_compatible verification_runtime_credential_revalidated verification_runtime_preserves_original_phase verification_runtime_drift_and_revocation_refused verification_isolated_https_sql verification_static_ui_protected verification_nonroot_no_new_privileges verification_network_namespace_isolated verification_network_all_ipv4_tables_empty verification_stop_expiry_parent_death_drained'.split()),
         }
         for phase, evidence in phases.items():
             metadata = {**self.metadata(), 'scenario': 'controller-restore-' + phase}
@@ -986,7 +1013,7 @@ class WorkflowRestoreEvidenceContract(unittest.TestCase):
         phase_fields = {
             'data': 'foreign_account_refused lost_credential_refused_without_reset maintenance_authentication_verified maintenance_drift_refused maintenance_nonroot_denied read_only_reentry_verified modified_data_refused removed_constraint_refused foreign_database_refused runtime_material_drift_refused'.split(),
             'sessions': 'sessions_revoked session_transition_exact_readback session_transition_explicit_recovery'.split(),
-            'configuration': 'sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock verification_revocation_pending_auth_refused verification_revocation_internal_thread_classified verification_data_phase_bound verification_data_auth_delta_validated verification_data_drift_refused verification_data_immutable_intent verification_data_revocation_compatible verification_runtime_credential_revalidated verification_runtime_preserves_original_phase verification_runtime_drift_and_revocation_refused verification_isolated_https_sql verification_static_ui_protected verification_nonroot_no_new_privileges verification_network_namespace_isolated verification_stop_expiry_parent_death_drained'.split(),
+            'configuration': 'sessions_revoked configuration_plan_verified configuration_plan_readonly configuration_plan_tls_drift_refused configuration_plan_requires_exact_session_postimage configuration_published configuration_publication_readonly configuration_partial_resume_verified published_configuration_remains_fenced verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock verification_revocation_pending_auth_refused verification_revocation_internal_thread_classified verification_data_phase_bound verification_data_auth_delta_validated verification_data_drift_refused verification_data_immutable_intent verification_data_revocation_compatible verification_runtime_credential_revalidated verification_runtime_preserves_original_phase verification_runtime_drift_and_revocation_refused verification_isolated_https_sql verification_static_ui_protected verification_nonroot_no_new_privileges verification_network_namespace_isolated verification_network_all_ipv4_tables_empty verification_stop_expiry_parent_death_drained'.split(),
         }
         guest = dict.fromkeys(common + phase_fields[phase], True)
         guest.update(dict.fromkeys('source_host_export_verified node_takeover_verified migration_ready kvm_ready session_browser_verified'.split(), False))
@@ -1018,7 +1045,7 @@ class WorkflowRestoreEvidenceContract(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_each_new_account_proof_is_required_and_must_be_boolean_true_in_both_reports(self):
-        fields = 'verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock verification_revocation_pending_auth_refused verification_revocation_internal_thread_classified verification_data_phase_bound verification_data_auth_delta_validated verification_data_drift_refused verification_data_immutable_intent verification_data_revocation_compatible verification_runtime_credential_revalidated verification_runtime_preserves_original_phase verification_runtime_drift_and_revocation_refused verification_isolated_https_sql verification_static_ui_protected verification_nonroot_no_new_privileges verification_network_namespace_isolated verification_stop_expiry_parent_death_drained'.split()
+        fields = 'verification_sql_plan_bound_readonly verification_account_prepared verification_account_exact_grants verification_account_readonly_reentry verification_account_foreign_refused verification_account_drift_not_repaired verification_credential_authenticated verification_revocation_locked verification_revocation_active_session_refused verification_revocation_readonly_recovery verification_revocation_no_implicit_unlock verification_revocation_pending_auth_refused verification_revocation_internal_thread_classified verification_data_phase_bound verification_data_auth_delta_validated verification_data_drift_refused verification_data_immutable_intent verification_data_revocation_compatible verification_runtime_credential_revalidated verification_runtime_preserves_original_phase verification_runtime_drift_and_revocation_refused verification_isolated_https_sql verification_static_ui_protected verification_nonroot_no_new_privileges verification_network_namespace_isolated verification_network_all_ipv4_tables_empty verification_stop_expiry_parent_death_drained'.split()
         for name in ('summary.json', 'guest-report.json'):
             for field in fields:
                 for value in (None, False, 1):
@@ -1111,6 +1138,33 @@ class VerificationGuardWorkflowContract(unittest.TestCase):
                     with self.subTest(field=field, value=wrong):
                         self.assertNotEqual(invoke(report).returncode, 0)
             for change in ({'source_sha': 'b'*40}, {'schema': 2}, {'unknown': True}):
+                self.assertNotEqual(invoke({**valid, **change}).returncode, 0)
+
+    def test_process_rejection_gate_requires_actual_kernel_route_preflight(self):
+        workflow = (HERE.parents[2]/'.github/workflows/ci.yml').read_text()
+        step = workflow.split('      - name: Real isolated child reaches SQL refusal (not HTTPS or SQL acceptance)\n')
+        self.assertEqual(len(step), 2)
+        body = step[1].split('      - name:', 1)[0]
+        program = textwrap.dedent(body.split("          python3 -I - <<'PYTEST'\n", 1)[1].split('          PYTEST\n', 1)[0])
+        yes = 'passed real_linux_processes reached_minimum_sql_check guard_drained kernel_route_snapshot_verified'.split()
+        no = 'http_started mysql_verified migration_ready'.split()
+        valid = {'schema':1,'source_sha':'a'*40,**dict.fromkeys(yes, True),**dict.fromkeys(no, False)}
+        with tempfile.TemporaryDirectory(prefix='aster-process-report-contract-') as scratch:
+            def invoke(report):
+                (Path(scratch)/'verification-process-rejection.json').write_text(json.dumps(report))
+                return subprocess.run([sys.executable, '-I', '-'], input=program, text=True,
+                    env={**os.environ,'RUNNER_TEMP':scratch,'GITHUB_SHA':'a'*40},capture_output=True,timeout=10)
+            self.assertEqual(invoke(valid).returncode, 0)
+            for field in yes + no:
+                for wrong in (None, 1, not valid[field]):
+                    report = dict(valid)
+                    if wrong is None:
+                        del report[field]
+                    else:
+                        report[field] = wrong
+                    with self.subTest(field=field, value=wrong):
+                        self.assertNotEqual(invoke(report).returncode, 0)
+            for change in ({'source_sha':'b'*40}, {'schema':2}, {'unapproved':True}):
                 self.assertNotEqual(invoke({**valid, **change}).returncode, 0)
 
 

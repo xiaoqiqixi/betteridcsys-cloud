@@ -25,6 +25,14 @@ def fixture_failure(raw):
     code = raw.decode('ascii', errors='replace').removesuffix('\n')
     return code if len(raw) <= 128 and code in FAILURE_CODES else 'TARGET_NATIVE_ASSERTION_FAILED'
 
+def empty_ipv4_route_snapshot(raw):
+    """Validate the kernel's public /proc/<pid>/net/route wire format."""
+    # fib_route_seq_start returns NULL before emitting a header if there is no
+    # RT_TABLE_MAIN. Both v5.15 and v6.8 use this behavior. Do not accept arbitrary
+    # single-line text, whitespace, or a route row merely because it is one line.
+    header = (b'Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT').ljust(127, b' ') + b'\n'
+    return raw == b'' or raw == header
+
 def accept(root, inputs, controller, operation, module, directory, ui_directory, require, progress):
     require(os.geteuid() == 0)
     require(ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) == 0)
@@ -135,8 +143,25 @@ def accept(root, inputs, controller, operation, module, directory, ui_directory,
         require((p/'ns/net').stat().st_ino != (Path('/proc')/str(parent.pid)/'ns/net').stat().st_ino, 'VERIFICATION_PROCESS_NAMESPACE')
         require((p/'cmdline').read_bytes().split(b'\0') == [str(binary).encode(), b'migration-verification-child', b''], 'VERIFICATION_PROCESS_COMMAND')
         require(set((p/'environ').read_bytes().split(b'\0')) == {b'PATH=/usr/bin:/bin', b'LANG=C', b''}, 'VERIFICATION_PROCESS_ENVIRONMENT')
-        rows = (p/'net/route').read_text().splitlines()
-        require(len(rows) == 1, "VERIFICATION_PROCESS_NETWORK_ROUTES")  # no routes, while the inherited TLS socket works
+        with (p/'net/route').open('rb') as stream:
+            routes = stream.read(129)
+        require(empty_ipv4_route_snapshot(routes), "VERIFICATION_PROCESS_NETWORK_ROUTES")
+        # Independently query every IPv4 table through rtnetlink in the observed
+        # child's namespace. Empty /proc bytes alone are not isolation proof.
+        # This fixed read-only command neither creates a namespace nor adds a
+        # link/route, and never queries a destination or publishes addresses.
+        actual = subprocess.run(['/usr/bin/nsenter', '--target', str(child), '--net', '--',
+                                 '/usr/sbin/ip', '-j', '-4', 'route', 'show', 'table', 'all'],
+                                env={'PATH':'/usr/bin:/bin', 'LANG':'C'},
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+        require(actual.returncode == 0 and not actual.stderr and len(actual.stdout) <= 65536,
+                'VERIFICATION_PROCESS_NETWORK_ROUTES')
+        try:
+            tables = json.loads(actual.stdout)
+        except (ValueError, UnicodeError):
+            require(False, 'VERIFICATION_PROCESS_NETWORK_ROUTES')
+        require(tables == [], 'VERIFICATION_PROCESS_NETWORK_ROUTES')
+        progress('target-verification-routes-empty-file' if routes == b'' else 'target-verification-routes-header-only')
         seen = 0
         for task in (p/'task').iterdir():
             try:

@@ -10,6 +10,7 @@ import ctypes
 import signal
 from datetime import datetime, timedelta, timezone
 import fcntl
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,31 @@ import subprocess
 import sys
 import tempfile
 
+sys.dont_write_bytecode = True
+
+
+def route_format_probe():
+    # Invoked only by the fixed unshare command below. A fast actual-kernel
+    # regression catches /proc representation mistakes before the slow VM run.
+    if sys.platform != 'linux' or os.geteuid() != 0:
+        raise RuntimeError('LINUX_ROOT_ROUTE_PROBE_REQUIRED')
+    own = Path('/proc/self/ns/net').stat().st_ino
+    parent = (Path('/proc')/str(os.getppid())/'ns/net').stat().st_ino
+    if own == parent:
+        raise RuntimeError('ROUTE_PROBE_NAMESPACE_UNCONFIRMED')
+    spec = importlib.util.spec_from_file_location('owned_route_format', Path(__file__).with_name('verification-process-native.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with open('/proc/self/net/route', 'rb') as stream:
+        raw = stream.read(129)
+    if not module.empty_ipv4_route_snapshot(raw):
+        raise RuntimeError('ROUTE_PROBE_KERNEL_FORMAT_REJECTED')
+    observed = subprocess.run(['/usr/sbin/ip', '-j', '-4', 'route', 'show', 'table', 'all'],
+        env={'PATH':'/usr/bin:/bin','LANG':'C'}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+    if observed.returncode or observed.stderr or len(observed.stdout) > 65536 or json.loads(observed.stdout) != []:
+        raise RuntimeError('ROUTE_PROBE_TABLES_NOT_EMPTY')
+    print(json.dumps({'schema':1,'passed':True,'isolated_namespace':True,'all_ipv4_tables_empty':True}))
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -29,6 +55,17 @@ def main():
     args = parser.parse_args()
     if sys.platform != 'linux' or os.geteuid() != 0 or not re.fullmatch('[0-9a-f]{40}', args.source):
         raise RuntimeError('LINUX_ROOT_SOURCE_REQUIRED')
+    probe = subprocess.run(['/usr/bin/unshare', '--net', '--', '/usr/bin/python3', '-I',
+        str(Path(__file__).resolve()), '--route-format-probe'], env={'PATH':'/usr/bin:/bin','LANG':'C'},
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+    if probe.returncode:
+        known = {'LINUX_ROOT_ROUTE_PROBE_REQUIRED','ROUTE_PROBE_NAMESPACE_UNCONFIRMED',
+                 'ROUTE_PROBE_KERNEL_FORMAT_REJECTED','ROUTE_PROBE_TABLES_NOT_EMPTY'}
+        code = probe.stderr.decode('ascii', errors='replace').removesuffix('\n')
+        raise RuntimeError(code if len(probe.stderr) <= 128 and code in known else 'KERNEL_ROUTE_PREFLIGHT_UNCONFIRMED')
+    if probe.stderr or len(probe.stdout) > 1024 or json.loads(probe.stdout) != {
+            'schema':1,'passed':True,'isolated_namespace':True,'all_ipv4_tables_empty':True}:
+        raise RuntimeError('KERNEL_ROUTE_PREFLIGHT_UNCONFIRMED')
     if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
         raise RuntimeError('SUBREAPER_REQUIRED')
     operation = secrets.token_hex(16)
@@ -77,6 +114,7 @@ def main():
             os.close(fd)
         print(json.dumps(dict(schema=1, source_sha=args.source, passed=True,
             real_linux_processes=True, reached_minimum_sql_check=True, guard_drained=True,
+            kernel_route_snapshot_verified=True,
             http_started=False, mysql_verified=False, migration_ready=False),sort_keys=True))
     finally:
         if parent is not None and parent.poll() is None:
@@ -99,7 +137,10 @@ def main():
 
 if __name__ == '__main__':
     try:
-        main()
+        if sys.argv[1:] == ['--route-format-probe']:
+            route_format_probe()
+        else:
+            main()
     except RuntimeError as exc:
         # All RuntimeError values above are fixed literals or allowlisted codes.
         print(str(exc),file=sys.stderr)
