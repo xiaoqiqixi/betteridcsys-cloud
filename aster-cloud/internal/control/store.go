@@ -312,22 +312,26 @@ func (s *SQLStore) Admit(ctx context.Context, r controllerapi.Request, candidate
 		return Job{}, false, e
 	}
 	j := Job{OperationID: r.OperationID, OrderID: r.OrderID, ControllerID: r.Product.ControllerID, RequestSHA: digest, RequestJSON: raw, NodeRequest: []byte{}, State: "rejected", CreatedAt: now, UpdatedAt: now}
-	if len(candidates) > 0 {
-		candidates, e = rankCandidates(ctx, tx, candidates)
+	// Contract compatibility is permanent; allocation policy and missing nodes
+	// are transient. Keep filtered normal candidates retryable even when the
+	// remaining candidates cannot support this product.
+	eligible := make([]Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if !candidate.DirectPublicRequired {
+			eligible = append(eligible, candidate)
+		}
+	}
+	directOnly := len(candidates) > 0 && len(eligible) == 0
+	candidates = eligible
+	transient := false
+	if len(eligible) > 0 {
+		candidates, e = rankCandidates(ctx, tx, eligible)
 		if e != nil {
 			return Job{}, false, e
 		}
-		if len(candidates) == 0 {
-			return Job{}, false, ErrCapacity
-		}
+		transient = len(candidates) < len(eligible)
 	}
-	eligible := 0
-	transient := false
 	for _, candidate := range candidates {
-		if candidate.DirectPublicRequired {
-			continue
-		}
-		eligible++
 		n := candidate.Node
 		var profile string
 		var maintenance bool
@@ -402,7 +406,7 @@ func (s *SQLStore) Admit(ctx context.Context, r controllerapi.Request, candidate
 			return Job{}, false, ErrCapacity
 		}
 		code := "UNSUPPORTED_PRODUCT"
-		if eligible == 0 && len(candidates) > 0 {
+		if directOnly {
 			code = "DIRECT_PUBLIC_LEASE_REQUIRED"
 		}
 		// A rejected job has no node task. Preserve its reason in the existing

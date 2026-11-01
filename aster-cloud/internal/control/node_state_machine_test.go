@@ -29,9 +29,9 @@ func (stateMachineDriver) Open(key string) (driver.Conn, error) {
 }
 
 type stateMachineNode struct {
-	profile                        NodeProfile
-	seen                           time.Time
-	unsupported, full, maintenance bool
+	profile                                            NodeProfile
+	seen                                               time.Time
+	unsupported, full, maintenance, allocationDisabled bool
 }
 type stateMachineFixture struct {
 	job             *Job
@@ -61,7 +61,7 @@ func (c *stateMachineConn) QueryContext(_ context.Context, q string, args []driv
 	case strings.Contains(q, "FROM controller_lock"):
 		return stateMachineRows("id", int64(1)), nil
 	case strings.Contains(q, "FROM controller_node_allocation"):
-		return stateMachineRows("allocation_disabled"), nil
+		return stateMachineRows("disabled", f.nodes[args[0].Value.(string)].allocationDisabled), nil
 	case strings.Contains(q, "FROM controller_region_placement"):
 		return stateMachineRows("policy"), nil
 	case strings.Contains(q, "FROM controller_nodes n WHERE n.id"):
@@ -162,7 +162,7 @@ func stateMachineStore(t *testing.T, f *stateMachineFixture) *SQLStore {
 	return &SQLStore{DB: db}
 }
 func TestBillingPermanentMismatchPersistsWhileShortagesRemainRetryable(t *testing.T) {
-	for _, name := range []string{"direct_only", "unsupported", "missing", "stale", "maintenance", "full", "direct_plus_stale", "unsupported_plus_stale"} {
+	for _, name := range []string{"direct_only", "direct_disabled", "unsupported", "missing", "stale", "maintenance", "full", "disabled", "direct_plus_stale", "direct_plus_disabled", "unsupported_plus_stale", "unsupported_plus_missing", "unsupported_plus_disabled"} {
 		t.Run(name, func(t *testing.T) {
 			p := testProfile()
 			now := time.Now().UTC()
@@ -172,8 +172,9 @@ func TestBillingPermanentMismatchPersistsWhileShortagesRemainRetryable(t *testin
 			f := &stateMachineFixture{now: now, nodes: map[string]stateMachineNode{p.ID: {profile: p, seen: now}}}
 			n := f.nodes[p.ID]
 			switch name {
-			case "direct_only":
+			case "direct_only", "direct_disabled":
 				candidates[0].DirectPublicRequired = true
+				n.allocationDisabled = name == "direct_disabled"
 			case "unsupported":
 				n.unsupported = true
 			case "missing":
@@ -184,21 +185,28 @@ func TestBillingPermanentMismatchPersistsWhileShortagesRemainRetryable(t *testin
 				n.maintenance = true
 			case "full":
 				n.full = true
-			case "unsupported_plus_stale":
+			case "disabled", "direct_plus_disabled":
+				n.allocationDisabled = true
+			case "unsupported_plus_stale", "unsupported_plus_missing", "unsupported_plus_disabled":
 				n.unsupported = true
 			}
 			if name != "missing" {
 				f.nodes[p.ID] = n
 			}
-			if name == "direct_plus_stale" {
+			if name == "direct_plus_stale" || name == "direct_plus_disabled" {
 				direct := candidates[0]
 				direct.DirectPublicRequired = true
 				candidates = append([]Candidate{direct}, candidates...)
 			}
-			if name == "unsupported_plus_stale" {
+			if strings.HasPrefix(name, "unsupported_plus_") {
 				other := p
 				other.ID = "second"
 				f.nodes[other.ID] = stateMachineNode{profile: other, seen: now.Add(-2 * time.Minute)}
+				if name == "unsupported_plus_missing" {
+					delete(f.nodes, other.ID)
+				} else if name == "unsupported_plus_disabled" {
+					f.nodes[other.ID] = stateMachineNode{profile: other, seen: now, allocationDisabled: true}
+				}
 				extra := candidates[0]
 				extra.Node = other
 				extra.ProfileSHA = other.Digest()
@@ -207,7 +215,7 @@ func TestBillingPermanentMismatchPersistsWhileShortagesRemainRetryable(t *testin
 			}
 			s := stateMachineStore(t, f)
 			j, replay, err := s.Admit(context.Background(), r, candidates, now, time.Minute)
-			permanent := name == "direct_only" || name == "unsupported"
+			permanent := name == "direct_only" || name == "direct_disabled" || name == "unsupported"
 			if !permanent {
 				if !errors.Is(err, ErrCapacity) || f.job != nil || f.writes != 0 || f.commits != 0 {
 					t.Fatal(j, err, f)
@@ -215,7 +223,7 @@ func TestBillingPermanentMismatchPersistsWhileShortagesRemainRetryable(t *testin
 				return
 			}
 			code := "UNSUPPORTED_PRODUCT"
-			if name == "direct_only" {
+			if name == "direct_only" || name == "direct_disabled" {
 				code = "DIRECT_PUBLIC_LEASE_REQUIRED"
 			}
 			if err != nil || replay || j.State != "rejected" || j.RejectionCode() != code || f.job == nil || j.InstanceID != "" {
