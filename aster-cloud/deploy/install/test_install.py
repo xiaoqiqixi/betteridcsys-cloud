@@ -32,6 +32,33 @@ class InstallerUnits(unittest.TestCase):
         self.assertGreater(len(tables), 30)
         self.assertEqual(p.RESTORED_CONTROLLER_TABLES, len(tables) + 1)
 
+    def test_heartbeat_templates_match_fixed_renderer_and_controller_hardening(self):
+        units = i.heartbeat_unit_bytes(Path('/opt/aster-cloud'))
+        for name, raw in units.items():
+            self.assertEqual(raw, (Path(__file__).resolve().parents[1]/name).read_bytes())
+        service = units['controller-heartbeat@.service'].decode().splitlines()
+        self.assertIn('ExecStart=/opt/aster-cloud/bin/aster-controller heartbeat -config /etc/aster-controller/config.json -node %i', service)
+        for setting in ('Type=oneshot', 'NoNewPrivileges=true', 'ProtectSystem=strict', 'ProtectHome=true',
+                        'PrivateTmp=true', 'PrivateDevices=true', 'CapabilityBoundingSet=', 'AmbientCapabilities=',
+                        'UMask=0077', 'User=root', 'Group=root', 'TimeoutStartSec=30', 'TimeoutStopSec=45',
+                        'ProtectKernelTunables=true', 'ProtectKernelModules=true', 'ProtectControlGroups=true'):
+            self.assertIn(setting, service)
+        self.assertNotIn('[Install]', service)
+
+    def test_heartbeat_ids_cannot_inject_units_or_duplicate_instances(self):
+        for nodes in ([{'id': '../foreign'}], [{'id': 'x.service\nExecStart=/bin/sh'}],
+                      [{'id': 'node-a'}, {'id': 'node-a'}], [{'id': '-foreign'}], [None], 'node-a'):
+            with self.subTest(nodes=nodes), self.assertRaises(i.InstallerError):
+                i.heartbeat_timers({'nodes': nodes})
+        self.assertEqual(i.heartbeat_timers({'nodes': []}), [])
+
+    def test_heartbeat_rollback_still_stops_services_when_disable_fails(self):
+        with mock.patch.object(i, 'run_fixed', side_effect=[i.InstallerError('disable failed'), b'']) as run:
+            with self.assertRaisesRegex(i.InstallerError, 'rollback unconfirmed'):
+                i.stop_heartbeats(['controller-heartbeat@node-a.timer'])
+        self.assertEqual(run.call_args_list[-1].args[0],
+                         [i.SYSTEMCTL, 'stop', '--', 'controller-heartbeat@node-a.service'])
+
     def test_apply_target_rejects_26_unknown_and_other_platforms_before_host_access(self):
         base = {"system": "Linux", "architecture": "x86_64", "distribution": "ubuntu", "version": "24.04"}
         for change in ({"version": "26.04"}, {"version": "unknown"}, {"version": "24.10"},

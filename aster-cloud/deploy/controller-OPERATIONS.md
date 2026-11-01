@@ -70,7 +70,26 @@ VPC重启必须先shutdown再start，主控早期拒绝旧reboot。本切片明�
 - GET `/v1/provisioning/{operation_id}`：相同billing token、Idempotency-Key与digest header，200当前绑定Result；未知404，不同digest409。
 - 不支持配置可以持久为rejected Result（409）；无健康容量503 `NO_HEALTHY_CAPACITY`，未创建job，不假称已接单。格式错误400、缺认证401、越权403、方法405。错误仅`{error:{code}}`，不回传路径、密钥、节点诊断或SQL。
 - 管理GET `/v1/health`：真实DB ping与controller/protocol；GET `/v1/nodes`、`/v1/instances`、`/v1/tasks`、`/v1/audit`：`{items,limit:100,truncated_possible:true}`。这是最多100条的只读投影，**不是完整分页、全库搜索或导出**。不泄露node endpoint、证书路径、原始request或token。
-- nodes.online仅由实际已认证心跳、TTL、配置存在、非维护模式计算，不把注册或配置存在当在线。周期心跳应由操作员安装的timer执行真实GET；不自动启用监控。
+- nodes.online仅由实际已认证心跳、TTL、配置存在、非维护模式计算，不把注册或配置存在当在线。审批后的原生安装使用下述 timer 执行真实 mTLS GET；timer active 本身不证明节点在线。
+
+## 安装与回退周期心跳
+
+主控安装器在完整 root 审批后安装 `controller-heartbeat@.service` 和 `controller-heartbeat@.timer`，服务固定使用本次版本目录内的 `aster-controller` 与 `/etc/aster-controller/config.json`。配置中的每个节点 ID 对应一个 timer；`--start` 在数据库与严格 TLS 健康检查通过后执行 `enable --now` 并核对 timer active。无节点时不启用实例；仅安装软件或不带 `--start` 时不启动心跳。节点仍须显式 `register-nodes`、通过实际 mTLS 能力检查并按审批解除维护，安装器不会自动解除维护。
+
+timer 开机后 30 秒触发，此后每 20 秒触发；`heartbeat_ttl_seconds` 建议保持默认 60 秒并大于调度间隔与请求耗时。服务使用主控同等的文件系统、内核与权限隔离，单次启动最多 30 秒、停止最多 45 秒。安装回执 `/var/lib/aster-cloud-installer/controller/state.json` 记录精确实例列表 `heartbeat_timers` 与两个模板的 `heartbeat_units_sha256`。已有不同模板、实例覆盖、drop-in 或 mask 会被拒绝，不会被覆盖。
+
+部分启用或后续检查失败时，安装器禁用并停止此次审批的 timers，再停止对应 oneshot 服务和本次主控服务；回执记录清理是否确认。检查失败原因后，以原始 bundle、审批文件和摘要显式 `--resume --start` 可重试。主控迁移的隔离/恢复流程也会清点这些模板和实例。
+
+单独卸载或回退心跳时，先核对上述 root 回执、配置中的节点 ID 和模板 SHA256。对回执里的**每一个**实例执行以下命令（示例 ID 为 `node-a`），先禁用 timer，再等待正在运行的任务退出：
+
+```sh
+sudo systemctl disable --now controller-heartbeat@node-a.timer
+sudo systemctl stop controller-heartbeat@node-a.service
+sudo systemctl list-timers --all 'controller-heartbeat@*'
+sudo systemctl list-units --all 'controller-heartbeat@*'
+```
+
+确认所有实例已停止、无其他实例使用模板且文件仍匹配回执摘要后，才删除 `/etc/systemd/system/controller-heartbeat@.timer` 和 `/etc/systemd/system/controller-heartbeat@.service`，执行 `sudo systemctl daemon-reload`。不删除配置、安装回执、数据库或节点数据；心跳停止后节点会按 TTL 变为不可调度。恢复时使用同一审批执行 `--resume --start`；若配置、版本或摘要已改变，先完成新的人工审批，不能用 resume 覆盖原审批。
 
 ## 持久性、容量和派发
 
