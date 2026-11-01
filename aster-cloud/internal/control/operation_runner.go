@@ -31,7 +31,7 @@ func (r *OperationRunner) StartService(op, password string) error {
 	worker := r.worker
 	worker.GuestPassword = password
 	e := r.launchWith(op, false, func(ctx context.Context, id string) (Operation, error) {
-		defer r.quarantineSecret(id, password)
+		defer r.quarantineService(id)
 		o, e := worker.Dispatch(ctx, id)
 		for e == nil && o.State == "dispatched" {
 			select {
@@ -44,17 +44,17 @@ func (r *OperationRunner) StartService(op, password string) error {
 		return o, e
 	})
 	if e != nil {
-		r.quarantineSecret(op, password)
+		r.quarantineService(op)
 	}
 	return e
 }
-func (r *OperationRunner) quarantineSecret(op, password string) {
-	if password == "" || r.worker.Store == nil {
+func (r *OperationRunner) quarantineService(op string) {
+	if r.worker.Store == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = r.worker.Store.QuarantineServiceSecret(ctx, op, time.Now().UTC())
+	_ = r.worker.Store.QuarantineServiceDispatch(ctx, op, time.Now().UTC())
 }
 func (r *OperationRunner) launchWith(op string, reconcile bool, run func(context.Context, string) (Operation, error)) error {
 	r.mu.Lock()

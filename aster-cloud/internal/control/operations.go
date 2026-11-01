@@ -256,7 +256,7 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 	if e != nil {
 		return Operation{}, false, e
 	}
-	if direct.IsZero() && (in.Action == "start" || in.Action == "reboot" || strings.HasPrefix(in.Action, "migrate_")) {
+	if direct.IsZero() && (nodeproto.StartsGuest(nodeproto.NodeTask{Action: in.Action, Guest: in.Guest}) || strings.HasPrefix(in.Action, "migrate_")) {
 		known, err := instanceHadDirectPublicTx(ctx, tx, v.ID)
 		if err != nil {
 			return Operation{}, false, err

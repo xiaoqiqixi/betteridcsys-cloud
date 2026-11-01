@@ -132,7 +132,7 @@ func (m *Manager) acceptGuest(task nodeproto.NodeTask, raw []byte, password stri
 	if m.active {
 		return reject("NODE_BUSY")
 	}
-	if m.Config.Network.RequirePublicLease && task.DirectPublic.IsZero() && task.Resources.NetworkType == "normal" && task.Resources.IPv4Count == 1 && (task.Action == "create" || task.Action == "start" || task.Action == "reboot") {
+	if m.Config.Network.RequirePublicLease && task.DirectPublic.IsZero() && task.Resources.NetworkType == "normal" && task.Resources.IPv4Count == 1 && nodeproto.StartsGuest(task) {
 		return reject("DIRECT_PUBLIC_LEASE_REQUIRED")
 	}
 	if !task.Network.IsZero() && m.Ledger.HasPendingNetworkProfile(task.Network.ProfileID, task.OperationID) {
@@ -159,7 +159,7 @@ func (m *Manager) acceptGuest(task nodeproto.NodeTask, raw []byte, password stri
 		if instance.OwnerRef != task.OwnerRef || instance.Hostname != task.Hostname || instance.Resources != task.Resources || instance.Network != task.Network || !directTaskMatches(instance, task) || instance.State == "reserved" || instance.State == "uncertain" || instance.State == "deleted" || instance.PublicRetired || instance.SourceFence != nil || (instance.TargetBinding != nil && !instance.TargetBinding.Activated) {
 			return reject("OWNERSHIP_OR_STATE_REJECTED")
 		}
-		if !task.DirectPublic.IsZero() && (task.Action == "start" || task.Action == "reboot" || task.Action == "public_adopt") && m.approvedDirect(task.DirectPublic) != nil {
+		if !task.DirectPublic.IsZero() && (nodeproto.StartsGuest(task) || task.Action == "public_adopt") && m.approvedDirect(task.DirectPublic) != nil {
 			return reject("DIRECT_PUBLIC_APPROVAL_REJECTED")
 		}
 		if task.Action == "public_adopt" {
@@ -310,7 +310,7 @@ func (m *Manager) execute(ctx context.Context, task nodeproto.NodeTask, result n
 	if instance.OwnerRef != task.OwnerRef || instance.Hostname != task.Hostname || instance.Resources != task.Resources || instance.Network != task.Network || !directTaskMatches(instance, task) || instance.State == "reserved" || instance.State == "uncertain" || instance.State == "deleted" || instance.PublicRetired || instance.SourceFence != nil || (instance.TargetBinding != nil && !instance.TargetBinding.Activated) {
 		return finish("rejected", "OWNERSHIP_OR_STATE_REJECTED", nil)
 	}
-	if !task.DirectPublic.IsZero() && (task.Action == "start" || task.Action == "reboot" || task.Action == "public_adopt") && m.approvedDirect(task.DirectPublic) != nil {
+	if !task.DirectPublic.IsZero() && (nodeproto.StartsGuest(task) || task.Action == "public_adopt") && m.approvedDirect(task.DirectPublic) != nil {
 		return finish("rejected", "DIRECT_PUBLIC_APPROVAL_REJECTED", nil)
 	}
 	if instance.DirectPublicDetached && task.Action != "public_adopt" && task.Action != "public_detach" && task.Action != "delete" {

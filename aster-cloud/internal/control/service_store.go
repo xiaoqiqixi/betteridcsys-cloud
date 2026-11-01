@@ -279,10 +279,10 @@ func (s *SQLStore) QuarantineServiceSecrets(ctx context.Context, now time.Time) 
 	return e
 }
 
-// A credential cannot be queued for another worker. If its one in-memory
-// dispatch fails before claiming the intent, quarantine that accepted intent.
-func (s *SQLStore) QuarantineServiceSecret(ctx context.Context, op string, now time.Time) error {
-	_, e := s.DB.ExecContext(ctx, `UPDATE controller_operations o JOIN controller_service_operations s ON s.operation_id=o.id SET o.state='uncertain',o.updated_at=? WHERE o.id=? AND s.requires_secret=TRUE AND o.state='accepted'`, now, op)
+// If an explicitly launched dispatch cannot claim its intent, quarantine it.
+// An unavailable in-memory worker must not leave accepted work stranded.
+func (s *SQLStore) QuarantineServiceDispatch(ctx context.Context, op string, now time.Time) error {
+	_, e := s.DB.ExecContext(ctx, `UPDATE controller_operations o JOIN controller_service_operations s ON s.operation_id=o.id SET o.state='uncertain',o.updated_at=? WHERE o.id=? AND o.state='accepted'`, now, op)
 	return e
 }
 func completeServiceTx(ctx context.Context, tx *sql.Tx, o Operation, now time.Time) error {
@@ -321,6 +321,37 @@ func (s *SQLStore) ServiceOperationCode(ctx context.Context, op string) (string,
 	var code string
 	e := s.DB.QueryRowContext(ctx, "SELECT result_code FROM controller_service_operations WHERE operation_id=?", op).Scan(&code)
 	return code, e
+}
+
+// ServicePowerTransition reports durable intent, without dispatch or reconcile.
+func (s *SQLStore) ServicePowerTransition(ctx context.Context, instance string) (string, error) {
+	var action, state string
+	var raw []byte
+	e := s.DB.QueryRowContext(ctx, "SELECT action,state,request_json FROM controller_operations WHERE instance_id=? AND state IN ('accepted','sending','dispatched','uncertain') ORDER BY seq DESC LIMIT 1", instance).Scan(&action, &state, &raw)
+	if errors.Is(e, sql.ErrNoRows) {
+		return "", nil
+	}
+	if e != nil {
+		return "", e
+	}
+	if state == "uncertain" {
+		return "unknown", nil
+	}
+	switch action {
+	case "start", "rescue_enter", "rescue_exit":
+		return "starting", nil
+	case "shutdown", "force_off", "suspend":
+		return "stopping", nil
+	case "reboot":
+		return "rebooting", nil
+	case "reinstall":
+		return "reinstalling", nil
+	case "unsuspend":
+		if task, e := nodeproto.DecodeTask(raw); e == nil && task.Guest.Params.StartAfter {
+			return "starting", nil
+		}
+	}
+	return "", nil
 }
 func (s *SQLStore) recordServiceCode(ctx context.Context, op, code string) {
 	if code != "" && serviceCodePattern.MatchString(code) {

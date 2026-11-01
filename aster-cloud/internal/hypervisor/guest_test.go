@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -51,9 +53,11 @@ func TestGuestEphemeralSecretIsBoundToOperationAndNeverPersisted(t *testing.T) {
 
 type guestRunner struct {
 	*fakeRunner
-	inputCalls int
-	password   string
-	failInput  bool
+	inputCalls   int
+	password     string
+	failInput    bool
+	sizes        map[string]uint64
+	ignoreResize bool
 }
 
 func (r *guestRunner) Run(ctx context.Context, binary string, args ...string) ([]byte, error) {
@@ -64,9 +68,26 @@ func (r *guestRunner) Run(ctx context.Context, binary string, args ...string) ([
 		if r.fail == "resize" {
 			return nil, errors.New("resize failed")
 		}
+		if !r.ignoreResize {
+			if r.sizes == nil {
+				r.sizes = map[string]uint64{}
+			}
+			gb, _ := strconv.ParseUint(strings.TrimSuffix(args[len(args)-1], "G"), 10, 64)
+			r.sizes[args[len(args)-2]] = gb << 30
+		}
 		return nil, nil
 	}
-	return r.fakeRunner.Run(ctx, binary, args...)
+	raw, e := r.fakeRunner.Run(ctx, binary, args...)
+	if e == nil && binary == QemuImg && args[0] == "info" {
+		if size := r.sizes[args[len(args)-1]]; size != 0 {
+			var info map[string]any
+			if json.Unmarshal(raw, &info) == nil {
+				info["virtual-size"] = size
+				raw, _ = json.Marshal(info)
+			}
+		}
+	}
+	return raw, e
 }
 func (r *guestRunner) RunInput(ctx context.Context, binary string, input []byte, args ...string) ([]byte, error) {
 	r.inputCalls++
@@ -247,6 +268,89 @@ func TestGuestResizeStoppedOnlyAndGrowOnly(t *testing.T) {
 	p.DiskGB = 10
 	if r := submit(t, m, guestTask(m, task, "7", "resize", p)); r.Status != "rejected" || r.Code != "DISK_SHRINK_FORBIDDEN" {
 		t.Fatal(r)
+	}
+}
+
+func TestGuestResizeRequiresObservedGrowthAndRetainsDiskOnUncertainty(t *testing.T) {
+	m, f, task := guestFixture(t)
+	if r := submit(t, m, next(task, "4", "force_off")); r.Status != "succeeded" {
+		t.Fatal(r)
+	}
+	i, _ := m.Ledger.Instance(task.InstanceID)
+	before, _ := os.Stat(i.Disk)
+	f.ignoreResize = true
+	r := submit(t, m, guestTask(m, task, "5", "resize", serviceapi.Params{CPUCores: 1, MemoryMB: 512, DiskGB: 20}))
+	after, _ := os.Stat(i.Disk)
+	if r.Status != "uncertain" || before == nil || after == nil || !os.SameFile(before, after) {
+		t.Fatal(r)
+	}
+}
+
+func TestGuestUnsuspendDoesNotRestartAnAlreadyRunningDomain(t *testing.T) {
+	m, f, task := guestFixture(t)
+	starts := f.count(" start ")
+	r := submit(t, m, guestTask(m, task, "4", "unsuspend", serviceapi.Params{StartAfter: true}))
+	if r.Status != "succeeded" || f.count(" start ") != starts {
+		t.Fatal(r)
+	}
+}
+
+func TestGuestLifecycleBootsRequireThePublicLease(t *testing.T) {
+	m, f, task := guestFixture(t)
+	m.Config.Network.RequirePublicLease = true
+	before, _ := m.Ledger.Instance(task.InstanceID)
+	commands := len(f.commands)
+	for n, action := range []string{"reinstall", "reset_password", "rescue_enter", "rescue_exit", "unsuspend"} {
+		params := serviceapi.Params{}
+		switch action {
+		case "reinstall":
+			params = serviceapi.Params{ImageID: "ubuntu22", Password: "unused-in-lease-refusal"}
+		case "reset_password":
+			params.Password = "unused-in-lease-refusal"
+		case "rescue_enter":
+			params.ImageID = "ubuntu22"
+		case "unsuspend":
+			params.StartAfter = true
+		}
+		request := guestTask(m, task, "4", action, params)
+		request.OperationID = fmt.Sprintf("%032x", n+20)
+		r := submit(t, m, request)
+		if r.Status != "rejected" || r.Code != "DIRECT_PUBLIC_LEASE_REQUIRED" {
+			t.Fatal(action, r)
+		}
+	}
+	after, _ := m.Ledger.Instance(task.InstanceID)
+	if !reflect.DeepEqual(before, after) || len(f.commands) != commands {
+		t.Fatal("lease refusal mutated guest")
+	}
+}
+
+func TestRescueOwnershipRecoveryRefusesLinksAndPublicPermissions(t *testing.T) {
+	for _, kind := range []string{"symlink", "hardlink", "public"} {
+		t.Run(kind, func(t *testing.T) {
+			m, _, task := guestFixture(t)
+			i, _ := m.Ledger.Instance(task.InstanceID)
+			i.Rescue = &RescueState{Writable: false}
+			original := i.Disk + ".protected"
+			if e := os.Rename(i.Disk, original); e != nil {
+				t.Fatal(e)
+			}
+			var e error
+			switch kind {
+			case "symlink":
+				e = os.Symlink(original, i.Disk)
+			case "hardlink":
+				e = os.Link(original, i.Disk)
+			case "public":
+				e = os.WriteFile(i.Disk, []byte("not private"), 0644)
+			}
+			if e != nil {
+				t.Fatal(e)
+			}
+			if e = restoreRescueDiskOwner(i); e == nil {
+				t.Fatal("unsafe rescue disk accepted")
+			}
+		})
 	}
 }
 func TestGuestFailuresAreUncertainAndReplayNeverExecutes(t *testing.T) {

@@ -19,6 +19,18 @@ func GuestAction(action string) bool {
 	}
 	return false
 }
+
+// StartsGuest includes lifecycle actions that boot after their offline work.
+// They must satisfy exactly the same network lease gates as an explicit start.
+func StartsGuest(t NodeTask) bool {
+	switch t.Action {
+	case "create", "start", "reboot", "reinstall", "reset_password", "rescue_enter", "rescue_exit":
+		return true
+	case "unsuspend":
+		return t.Guest.Params.StartAfter
+	}
+	return false
+}
 func (g GuestParams) Valid(action string) bool {
 	if g.SecretSHA256 != "" && (!g.PasswordRequired || !digest.MatchString(g.SecretSHA256)) {
 		return false

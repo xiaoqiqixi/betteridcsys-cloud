@@ -289,6 +289,18 @@ func (s *Services) view(w http.ResponseWriter, r *http.Request, v Instance, now 
 	if v.State == "deleted" {
 		result.Capabilities = serviceapi.Capabilities{}
 	}
+	if reader, ok := s.Store.(interface {
+		ServicePowerTransition(context.Context, string) (string, error)
+	}); ok {
+		transition, e := reader.ServicePowerTransition(r.Context(), v.ID)
+		if e != nil {
+			failure(w, 503, "STORAGE_UNAVAILABLE")
+			return
+		}
+		if transition != "" {
+			result.Power = transition
+		}
+	}
 	// Revalidate ownership/placement after the remote observation.
 	latest, e := s.Store.Instance(r.Context(), v.ID)
 	if e != nil || latest.OwnerRef != v.OwnerRef || latest.NodeID != v.NodeID || latest.Resources != v.Resources {

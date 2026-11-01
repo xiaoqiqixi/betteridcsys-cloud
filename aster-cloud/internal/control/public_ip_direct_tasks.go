@@ -88,7 +88,7 @@ func validateDirectTaskTx(ctx context.Context, tx *sql.Tx, t nodeproto.NodeTask,
 	if !n.IsZero() {
 		return ErrState
 	}
-	if t.Action == "start" || t.Action == "reboot" {
+	if t.Action != "create" && nodeproto.StartsGuest(t) {
 		known, e := instanceHadDirectPublicTx(ctx, tx, v.ID)
 		if e != nil {
 			return e
@@ -189,7 +189,7 @@ func directCapabilityTx(ctx context.Context, tx *sql.Tx, b nodeproto.DirectPubli
 }
 
 func directCleanupAction(action string) bool {
-	return action == "public_detach" || action == "shutdown" || action == "force_off" || action == "delete"
+	return action == "public_detach" || action == "shutdown" || action == "force_off" || action == "delete" || action == "suspend"
 }
 func instanceHadDirectPublicTx(ctx context.Context, tx *sql.Tx, instance string) (bool, error) {
 	var n int

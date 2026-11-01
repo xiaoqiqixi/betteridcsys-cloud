@@ -31,6 +31,9 @@ is a durable accepted/rejected receipt. A matching replay returns that same
 receipt with HTTP 409, even after the underlying operation changes state. A
 different digest under the same ID is a conflict. Progress comes only from the
 read-only action resource. Uncertain actions are never automatically retried.
+The service power field includes durable starting, stopping, rebooting and
+reinstalling intents. An uncertain operation reports unknown power without
+dispatching or reconciling work from the read endpoint.
 
 The controller persists a redacted node task and password commitment. The live
 password goes once in an ephemeral node mTLS header, bound to that operation.

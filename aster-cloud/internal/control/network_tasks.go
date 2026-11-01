@@ -119,7 +119,7 @@ func validateTaskNetwork(ctx context.Context, tx *sql.Tx, task nodeproto.NodeTas
 	if n != task.Network || n.IsZero() && task.Protocol != nodeproto.Protocol || !n.IsZero() && task.Protocol != nodeproto.NetworkProtocol {
 		return ErrState
 	}
-	if !n.IsZero() && (task.Action == "create" || task.Action == "start" || task.Action == "reboot") {
+	if !n.IsZero() && nodeproto.StartsGuest(task) {
 		if e = (&networking.Store{}).CheckTaskReservationTx(ctx, tx, n, true); e != nil {
 			return networkError(e)
 		}

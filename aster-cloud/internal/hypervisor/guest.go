@@ -232,6 +232,12 @@ func (m *Manager) executeGuest(ctx context.Context, t nodeproto.NodeTask, i Inst
 	if code := m.guestAdmission(t, i); code != "" {
 		return reject(code)
 	}
+	if t.Action == "resize" {
+		info, e := m.qcowInfo(ctx, i.Disk, m.Config.Images[i.Resources.ImageID].Path)
+		if e != nil || info.VirtualSize > uint64(i.Resources.SystemDiskGiB)<<30 || info.Backing != "" && info.Backing != m.Config.Images[i.Resources.ImageID].Path {
+			return reject("DISK_VERIFICATION_FAILED")
+		}
+	}
 	if t.Action == "reinstall" || t.Action == "rescue_enter" {
 		if e := m.verifyGuestImage(ctx, t.Guest.Params.ImageID, t.Guest.ImageSHA256, i.Resources.SystemDiskGiB); e != nil {
 			return reject("IMAGE_VERIFICATION_FAILED")
@@ -256,7 +262,7 @@ func (m *Manager) executeGuest(ctx context.Context, t nodeproto.NodeTask, i Inst
 		i.State = "shut off"
 	case "unsuspend":
 		i.Suspended = false
-		if e = m.guestCheckpoint(t, i, "UNSUSPEND"); e == nil && t.Guest.Params.StartAfter {
+		if e = m.guestCheckpoint(t, i, "UNSUSPEND"); e == nil && t.Guest.Params.StartAfter && state != "running" {
 			e = m.guestStart(ctx, t, i)
 			i.State = "running"
 		} else {
@@ -266,6 +272,13 @@ func (m *Manager) executeGuest(ctx context.Context, t nodeproto.NodeTask, i Inst
 		p := t.Guest.Params
 		if p.DiskGB > i.Resources.SystemDiskGiB {
 			_, e = m.Runner.Run(ctx, QemuImg, "resize", "-f", "qcow2", i.Disk, fmt.Sprintf("%dG", p.DiskGB))
+			if e == nil {
+				var info qcowInformation
+				info, e = m.qcowInfo(ctx, i.Disk, m.Config.Images[i.Resources.ImageID].Path)
+				if e == nil && (info.VirtualSize != uint64(p.DiskGB)<<30 || info.Backing != "" && info.Backing != m.Config.Images[i.Resources.ImageID].Path) {
+					e = ErrOwnership
+				}
+			}
 		}
 		if e == nil {
 			i.Resources.CPUCores = p.CPUCores

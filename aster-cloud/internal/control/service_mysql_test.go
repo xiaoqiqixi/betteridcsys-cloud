@@ -141,19 +141,47 @@ func TestMySQLServiceRejectionsAreDurableAndSnapshotQuotaIsLocked(t *testing.T) 
 	}
 }
 
-func TestMySQLServiceRunnerQuarantinesSecretWhenDispatchCannotStart(t *testing.T) {
+func TestMySQLServiceRunnerQuarantinesWhenDispatchCannotStart(t *testing.T) {
+	for _, action := range []string{"start", "reset_password"} {
+		t.Run(action, func(t *testing.T) {
+			s, c, _, v, now := readyService(t)
+			req := serviceapi.ActionRequest{Protocol: serviceapi.Protocol, OperationID: id(), OwnerRef: v.OwnerRef, Action: action}
+			if action == "reset_password" {
+				req.Params.Password = "lost-on-runner-capacity"
+			}
+			if _, _, e := s.AdmitService(context.Background(), c, v.ID, req, now); e != nil {
+				t.Fatal(e)
+			}
+			r := NewOperationRunner(OperationWorker{Store: s, Config: c})
+			r.Close()
+			if e := r.StartService(req.OperationID, req.Params.Password); !errors.Is(e, ErrUnavailable) {
+				t.Fatal(e)
+			}
+			o, e := s.Operation(context.Background(), req.OperationID)
+			if e != nil || o.State != "uncertain" {
+				t.Fatal(o, e)
+			}
+		})
+	}
+}
+
+func TestMySQLServicePowerIntentRemainsReadOnlyAndUncertainIsUnknown(t *testing.T) {
 	s, c, _, v, now := readyService(t)
-	req := serviceapi.ActionRequest{Protocol: serviceapi.Protocol, OperationID: id(), OwnerRef: v.OwnerRef, Action: "reset_password", Params: serviceapi.Params{Password: "lost-on-runner-capacity"}}
-	if _, _, e := s.AdmitService(context.Background(), c, v.ID, req, now); e != nil {
+	ctx := context.Background()
+	r := serviceapi.ActionRequest{Protocol: serviceapi.Protocol, OperationID: id(), OwnerRef: v.OwnerRef, Action: "start"}
+	if receipt, _, e := s.AdmitService(ctx, c, v.ID, r, now); e != nil || receipt.Status != "accepted" {
+		t.Fatal(receipt, e)
+	}
+	if power, e := s.ServicePowerTransition(ctx, v.ID); e != nil || power != "starting" {
+		t.Fatal(power, e)
+	}
+	if e := s.QuarantineServiceDispatch(ctx, r.OperationID, now); e != nil {
 		t.Fatal(e)
 	}
-	r := NewOperationRunner(OperationWorker{Store: s, Config: c})
-	r.Close()
-	if e := r.StartService(req.OperationID, req.Params.Password); !errors.Is(e, ErrUnavailable) {
-		t.Fatal(e)
+	if power, e := s.ServicePowerTransition(ctx, v.ID); e != nil || power != "unknown" {
+		t.Fatal(power, e)
 	}
-	o, e := s.Operation(context.Background(), req.OperationID)
-	if e != nil || o.State != "uncertain" {
+	if o, e := s.Operation(ctx, r.OperationID); e != nil || o.State != "uncertain" {
 		t.Fatal(o, e)
 	}
 }

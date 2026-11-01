@@ -327,7 +327,7 @@ func (c Config) approvesTaskNetwork(t nodeproto.NodeTask) bool {
 		return t.Network.IsZero() && (directCleanupAction(t.Action) && t.DirectPublic.ValidFor(t) || c.approvesDirectPublic(t.DirectPublic))
 	}
 	if t.Protocol == nodeproto.Protocol {
-		return t.Network.IsZero() && t.DirectPublic.IsZero() && (!c.directRequired(t.NodeID) || t.Resources.NetworkType != "normal" || t.Resources.IPv4Count != 1 || t.Action != "create" && t.Action != "start" && t.Action != "reboot")
+		return t.Network.IsZero() && t.DirectPublic.IsZero() && (!c.directRequired(t.NodeID) || t.Resources.NetworkType != "normal" || t.Resources.IPv4Count != 1 || !nodeproto.StartsGuest(t))
 	}
 	if t.Protocol != nodeproto.NetworkProtocol || !t.Network.ValidFor(t) {
 		return false
