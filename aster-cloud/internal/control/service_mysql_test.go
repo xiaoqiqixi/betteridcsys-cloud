@@ -25,6 +25,7 @@ func readyService(t *testing.T) (*SQLStore, Config, NodeProfile, Instance, time.
 	c, p, v, now := readyConsoleInstance(t, s)
 	c.Service = ServiceConfig{SnapshotLimit: 1, Images: []CatalogImage{{ID: v.Resources.ImageID, Family: "linux", Name: "Ubuntu", Version: "22.04", MinDiskGB: 1, SHA256: strings.Repeat("a", 64), NodeIDs: []string{p.ID}}}}
 	caps := testCapabilities(p, now)
+	caps.GuestImages = map[string]nodeproto.GuestImageApproval{v.Resources.ImageID: {SHA256: strings.Repeat("a", 64), Family: "linux"}}
 	caps.Actions = append(caps.Actions, "reinstall", "reset_password", "rescue_enter", "rescue_exit", "suspend", "unsuspend", "resize", "snapshot_create", "snapshot_restore", "snapshot_delete")
 	if e := s.Heartbeat(context.Background(), p, caps, now, time.Minute); e != nil {
 		t.Fatal(e)
@@ -183,5 +184,24 @@ func TestMySQLServicePowerIntentRemainsReadOnlyAndUncertainIsUnknown(t *testing.
 	}
 	if o, e := s.Operation(ctx, r.OperationID); e != nil || o.State != "uncertain" {
 		t.Fatal(o, e)
+	}
+}
+
+func TestMySQLServiceRejectsMismatchedImageApprovalBeforeDispatch(t *testing.T) {
+	s, c, _, v, now := readyService(t)
+	ctx := context.Background()
+	c.Service.Images[0].SHA256 = strings.Repeat("b", 64)
+	r := serviceapi.ActionRequest{Protocol: serviceapi.Protocol, OperationID: id(), OwnerRef: v.OwnerRef, Action: "reinstall", Params: serviceapi.Params{ImageID: v.Resources.ImageID, Password: "unused-unapproved-image-secret"}}
+	receipt, replay, e := s.AdmitService(ctx, c, v.ID, r, now)
+	if e != nil || replay || receipt.Status != "rejected" || receipt.Code != "IMAGE_NOT_APPROVED" {
+		t.Fatal(receipt, replay, e)
+	}
+	if _, e = s.Operation(ctx, r.OperationID); !errors.Is(e, ErrNotFound) {
+		t.Fatal("unapproved image created dispatchable work", e)
+	}
+	c.Service.Images[0].SHA256 = strings.Repeat("a", 64)
+	again, replay, e := s.AdmitService(ctx, c, v.ID, r, now)
+	if e != nil || !replay || receipt.Result() != again.Result() {
+		t.Fatal("approval change replaced the first receipt", again, replay, e)
 	}
 }

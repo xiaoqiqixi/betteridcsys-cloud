@@ -174,6 +174,7 @@ func (m *Manager) Capabilities(ctx context.Context) nodeproto.Capabilities {
 	for id := range m.Config.Images {
 		c.ImageIDs = append(c.ImageIDs, id)
 	}
+	c.GuestImages = m.Config.guestImageApprovals()
 	sort.Strings(c.ImageIDs)
 	if m.Config.AllowIsolatedNoNIC {
 		c.NetworkProfiles = append(c.NetworkProfiles, "normal-isolated-no-nic")

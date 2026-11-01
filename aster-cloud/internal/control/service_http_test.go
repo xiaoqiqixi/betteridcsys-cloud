@@ -68,6 +68,7 @@ func serviceApp() (App, *serviceFixture, *serviceLaunch) {
 	f := &serviceFixture{resourceViewFixture: base, receipts: map[string]ServiceReceipt{}, ops: map[string]Operation{}, caps: testCapabilities(testProfile(), time.Now())}
 	launch := &serviceLaunch{}
 	f.caps.Actions = append(f.caps.Actions, "reinstall", "reset_password", "rescue_enter", "rescue_exit", "resize", "snapshot_create", "snapshot_restore", "snapshot_delete")
+	f.caps.GuestImages = map[string]nodeproto.GuestImageApproval{"ubuntu22": {SHA256: strings.Repeat("a", 64), Family: "linux"}}
 	app.Config.Service = ServiceConfig{SnapshotLimit: 3, Images: []CatalogImage{{ID: "ubuntu22", Name: "Ubuntu", Version: "22.04", Family: "linux", SHA256: strings.Repeat("a", 64), MinDiskGB: 1, NodeIDs: []string{testProfile().ID}}}}
 	app.Services = &Services{Store: f, Config: app.Config, Runner: launch, Observe: func(context.Context, NodeProfile, string) (nodeproto.InstanceObservation, error) {
 		v := f.value
@@ -164,5 +165,43 @@ func TestServiceCapabilitiesReflectNodeImageAndNetwork(t *testing.T) {
 	_ = json.Unmarshal(r.Body.Bytes(), &v)
 	if v.Capabilities != (serviceapi.Capabilities{}) {
 		t.Fatal("unavailable node advertised mutations")
+	}
+}
+
+func TestServiceImageCapabilitiesRequireMatchingNodeApproval(t *testing.T) {
+	for _, missing := range []string{"matching", "catalog", "digest", "family", "rescue"} {
+		t.Run(missing, func(t *testing.T) {
+			app, f, _ := serviceApp()
+			im := app.Services.Config.Service.Images[0]
+			app.Services.Config.Service.Images = append(app.Services.Config.Service.Images, CatalogImage{ID: "rescue", Family: "linux", Name: "Rescue", Version: "1", SHA256: im.SHA256, MinDiskGB: 1, NodeIDs: im.NodeIDs, Rescue: true})
+			f.caps.ImageIDs = append(f.caps.ImageIDs, "rescue")
+			f.caps.GuestImages["rescue"] = nodeproto.GuestImageApproval{SHA256: im.SHA256, Family: "linux", Rescue: true}
+			if missing == "catalog" {
+				f.caps.GuestImages = nil
+			} else {
+				for id, approval := range f.caps.GuestImages {
+					switch missing {
+					case "digest":
+						approval.SHA256 = strings.Repeat("b", 64)
+					case "family":
+						approval.Family = "windows"
+					case "rescue":
+						approval.Rescue = false
+					}
+					f.caps.GuestImages[id] = approval
+				}
+			}
+			r := requestHTTP(app, "GET", "/v1/services/"+f.value.ID, app.Secrets.Billing, nil, map[string]string{"X-Aster-Owner-Ref": f.value.OwnerRef}, true)
+			var v serviceapi.Service
+			if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &v) != nil || v.Capabilities.Rescue != (missing == "matching") {
+				t.Fatal(r.Body.String())
+			}
+			if missing != "matching" && missing != "rescue" && (v.Capabilities.Reinstall || v.Capabilities.ResetPassword) {
+				t.Fatal("mismatched image approval advertised", v.Capabilities)
+			}
+			if (missing == "matching" || missing == "rescue") && (!v.Capabilities.Reinstall || !v.Capabilities.ResetPassword) {
+				t.Fatal("unrelated supported image actions removed", v.Capabilities)
+			}
+		})
 	}
 }

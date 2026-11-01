@@ -22,6 +22,8 @@ Add the approved catalog to the existing root-owned controller configuration:
 Set `rescue: true` on approved rescue entries. The corresponding node image ID,
 SHA-256, family and rescue approval must match. Catalog writes are operator
 configuration changes; the API never accepts an image path, source URL or XML.
+The node heartbeat publishes these approvals; missing or mismatched approval
+disables the affected capability and rejects the action before dispatch.
 Zero snapshot quota disables the billing snapshot capability. Snapshots use the
 existing stopped-only normal-network storage operations.
 

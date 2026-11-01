@@ -19,22 +19,28 @@ type DirectPublicApproval struct {
 	Gateway       string   `json:"gateway"`
 	Addresses     []string `json:"addresses"`
 }
+type GuestImageApproval struct {
+	SHA256 string `json:"sha256"`
+	Family string `json:"family"`
+	Rescue bool   `json:"rescue"`
+}
 type Capabilities struct {
-	DirectPublicNetwork *DirectPublicApproval `json:"direct_public_network,omitempty"`
-	OVSNetworkProfiles  []string              `json:"ovs_network_profiles,omitempty"`
-	Protocol            string                `json:"protocol"`
-	NodeID              string                `json:"node_id"`
-	Hypervisor          string                `json:"hypervisor"`
-	Maintenance         bool                  `json:"maintenance"`
-	ObservedAt          string                `json:"observed_at"`
-	Actions             []string              `json:"actions"`
-	ImageIDs            []string              `json:"image_ids"`
-	StorageIDs          []string              `json:"storage_ids"`
-	NetworkProfiles     []string              `json:"network_profiles"`
-	IPv4Counts          []int                 `json:"ipv4_counts"`
-	IPv6Counts          []int                 `json:"ipv6_counts"`
-	BandwidthMbps       []int                 `json:"bandwidth_mbps"`
-	TransferGiB         []int                 `json:"transfer_gib"`
-	Capacity            Capacity              `json:"capacity"`
-	Limitations         []string              `json:"limitations"`
+	GuestImages         map[string]GuestImageApproval `json:"guest_images,omitempty"`
+	DirectPublicNetwork *DirectPublicApproval         `json:"direct_public_network,omitempty"`
+	OVSNetworkProfiles  []string                      `json:"ovs_network_profiles,omitempty"`
+	Protocol            string                        `json:"protocol"`
+	NodeID              string                        `json:"node_id"`
+	Hypervisor          string                        `json:"hypervisor"`
+	Maintenance         bool                          `json:"maintenance"`
+	ObservedAt          string                        `json:"observed_at"`
+	Actions             []string                      `json:"actions"`
+	ImageIDs            []string                      `json:"image_ids"`
+	StorageIDs          []string                      `json:"storage_ids"`
+	NetworkProfiles     []string                      `json:"network_profiles"`
+	IPv4Counts          []int                         `json:"ipv4_counts"`
+	IPv6Counts          []int                         `json:"ipv6_counts"`
+	BandwidthMbps       []int                         `json:"bandwidth_mbps"`
+	TransferGiB         []int                         `json:"transfer_gib"`
+	Capacity            Capacity                      `json:"capacity"`
+	Limitations         []string                      `json:"limitations"`
 }

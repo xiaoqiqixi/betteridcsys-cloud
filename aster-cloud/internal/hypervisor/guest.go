@@ -34,6 +34,25 @@ func (g GuestConfig) validate(images map[string]Image) error {
 	return nil
 }
 
+func (c Config) guestImageApprovals() map[string]nodeproto.GuestImageApproval {
+	if !c.Guest.Enabled {
+		return nil
+	}
+	approved := map[string]nodeproto.GuestImageApproval{}
+	for id, family := range c.Guest.Families {
+		image, ok := c.Images[id]
+		if !ok || family != "linux" && family != "windows" {
+			continue
+		}
+		rescue := false
+		for _, rescueID := range c.Guest.RescueImages {
+			rescue = rescue || rescueID == id
+		}
+		approved[id] = nodeproto.GuestImageApproval{SHA256: image.SHA256, Family: family, Rescue: rescue}
+	}
+	return approved
+}
+
 type RescueState struct {
 	OperationID string `json:"operation_id"`
 	ImageID     string `json:"image_id"`

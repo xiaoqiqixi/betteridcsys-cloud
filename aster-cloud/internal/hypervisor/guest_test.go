@@ -60,6 +60,18 @@ type guestRunner struct {
 	ignoreResize bool
 }
 
+func TestGuestImageCapabilitiesBindTheRootCatalog(t *testing.T) {
+	c := Config{Images: map[string]Image{"linux": {SHA256: strings.Repeat("a", 64)}, "windows": {SHA256: strings.Repeat("b", 64)}}, Guest: GuestConfig{Enabled: true, Families: map[string]string{"linux": "linux", "windows": "windows"}, RescueImages: []string{"linux"}}}
+	images := c.guestImageApprovals()
+	if len(images) != 2 || images["linux"] != (nodeproto.GuestImageApproval{SHA256: c.Images["linux"].SHA256, Family: "linux", Rescue: true}) || images["windows"] != (nodeproto.GuestImageApproval{SHA256: c.Images["windows"].SHA256, Family: "windows"}) {
+		t.Fatal(images)
+	}
+	c.Guest.Enabled = false
+	if len(c.guestImageApprovals()) != 0 {
+		t.Fatal("disabled lifecycle advertised image approval")
+	}
+}
+
 func (r *guestRunner) Run(ctx context.Context, binary string, args ...string) ([]byte, error) {
 	if binary == QemuImg && args[0] == "resize" {
 		r.fakeRunner.mu.Lock()

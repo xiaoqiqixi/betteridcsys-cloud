@@ -270,11 +270,11 @@ func (s *Services) view(w http.ResponseWriter, r *http.Request, v Instance, now 
 		}
 	}
 	im, linux := s.Config.serviceImage(v.Resources.ImageID, v.NodeID)
-	linux = linux && im.Family == "linux"
+	linux = linux && im.Family == "linux" && supportsServiceImage(caps, im)
 	normal := v.Resources.NetworkType == "normal"
 	approved, rescue := false, false
 	for _, im := range s.Config.Service.Images {
-		if contains(im.NodeIDs, v.NodeID) && contains(caps.ImageIDs, im.ID) && im.Family == "linux" && im.MinDiskGB <= v.Resources.SystemDiskGiB {
+		if contains(im.NodeIDs, v.NodeID) && supportsServiceImage(caps, im) && im.Family == "linux" && im.MinDiskGB <= v.Resources.SystemDiskGiB {
 			if im.Rescue {
 				rescue = true
 			} else {

@@ -152,6 +152,10 @@ type serviceRejection struct{ Code string }
 
 func (e *serviceRejection) Error() string { return e.Code }
 func serviceReject(code string) error     { return &serviceRejection{code} }
+func supportsServiceImage(c Capability, im CatalogImage) bool {
+	node, ok := c.GuestImages[im.ID]
+	return ok && contains(c.ImageIDs, im.ID) && node.SHA256 == im.SHA256 && node.Family == im.Family && (!im.Rescue || node.Rescue)
+}
 func bindServiceReceipt(prior, wanted ServiceReceipt) error {
 	if prior.InstanceID != wanted.InstanceID || prior.OwnerRef != wanted.OwnerRef || prior.Digest != wanted.Digest {
 		return ErrConflict
@@ -230,10 +234,13 @@ func serviceGateTx(ctx context.Context, tx *sql.Tx, c Config, v Instance, in Ope
 		if !ok || im.Family != "linux" {
 			return serviceReject("UNSUPPORTED_GUEST")
 		}
+		if !supportsServiceImage(caps, im) {
+			return serviceReject("IMAGE_NOT_APPROVED")
+		}
 	}
 	if in.Action == "reinstall" || in.Action == "rescue_enter" {
 		im, ok := c.serviceImage(in.Guest.Params.ImageID, v.NodeID)
-		if !ok || im.SHA256 != in.Guest.ImageSHA256 || !contains(caps.ImageIDs, im.ID) || im.MinDiskGB > v.Resources.SystemDiskGiB || in.Action == "rescue_enter" && !im.Rescue {
+		if !ok || im.SHA256 != in.Guest.ImageSHA256 || !supportsServiceImage(caps, im) || im.MinDiskGB > v.Resources.SystemDiskGiB || in.Action == "rescue_enter" && !im.Rescue {
 			return serviceReject("IMAGE_NOT_APPROVED")
 		}
 		if im.Family != "linux" {
