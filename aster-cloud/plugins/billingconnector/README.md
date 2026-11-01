@@ -4,6 +4,8 @@
 
 ## 与插件管理器资源 worker 的区别
 
+同名 `aster.resource/1` 的云主控 HTTP 只读资源视图与财务插件 RPC 是不同合同，参见 [资源协议上下文](../../docs/RESOURCE_PROTOCOLS.md)。
+
 本目录产物是独立 `aster-billing-plugin` CLI，manifest 的 `runtime_plugin=false`，
 继续使用 `aster.controller/1` 的原商品/请求/六字段结果合同，不添加资源worker的 `core_min` 字段。
 
