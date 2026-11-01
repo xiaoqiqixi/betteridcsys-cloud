@@ -100,7 +100,12 @@ class NativeFixtureContract(unittest.TestCase):
         cases = {
             'target-verification-isolated-process': 'TARGET_NATIVE_ASSERTION_FAILED',
             'target-verification-process-bad-credential': 'TARGET_NATIVE_ASSERTION_FAILED',
-            'target-verification-process-stop': 'TARGET_NATIVE_ASSERTION_FAILED',
+            'target-verification-process-stop': 'VERIFICATION_CHILD_SQL',
+            'target-verification-process-identity': 'VERIFICATION_CHILD_IDENTITY',
+            'target-verification-process-write-denied': 'TARGET_NATIVE_ASSERTION_FAILED',
+            'target-verification-process-stop-drain': 'TARGET_NATIVE_ASSERTION_FAILED',
+            'target-verification-process-expiry-drain': 'TARGET_NATIVE_ASSERTION_FAILED',
+            'target-verification-process-parent-death-drain': 'TARGET_NATIVE_ASSERTION_FAILED',
             'target-verification-process-expiry': 'TARGET_NATIVE_ASSERTION_FAILED',
             'target-verification-process-parent-death': 'TARGET_NATIVE_ASSERTION_FAILED',
             'target-verification-data-phase': 'TARGET_VERIFICATION_DATA_APPROVAL_REQUIRED',

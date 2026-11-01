@@ -35,7 +35,7 @@ elif os.environ.get('FAIL_GROUP')=='1':raise SystemExit(1)
             result,calls=self.invoke(*args)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(calls[0],['list','-mod=readonly','./...'])
-            runs=calls[1:];self.assertEqual(len(runs),3)
+            runs=calls[1:];self.assertEqual(len(runs),4)
             self.assertEqual(runs[0][-1],PACKAGES[0])
             self.assertEqual(runs[1][-1],PACKAGES[0])
             self.assertEqual(runs[0][runs[0].index('-run')+1],'^TestControllerSourceValidation$')
@@ -51,8 +51,12 @@ elif os.environ.get('FAIL_GROUP')=='1':raise SystemExit(1)
                     exclude=run[run.index('-skip')+1] if '-skip' in run else '^$'
                     selected+=bool(re.search(include,test) and not re.search(exclude,test))
                 self.assertEqual(selected,1,test)
-            self.assertEqual([p for p in runs[2] if p.startswith('aster/cloud/')],PACKAGES[1:])
-            self.assertEqual('-skip' in runs[2],bool(args))
+            # Backup takes whole-schema locks and memory-hard archive KDFs. Run
+            # this complete package alone, not concurrently with other SQL suites.
+            self.assertEqual([p for p in runs[2] if p.startswith('aster/cloud/')],[PACKAGES[2]])
+            self.assertEqual([p for p in runs[3] if p.startswith('aster/cloud/')],[PACKAGES[1],PACKAGES[3]])
+            for run in runs[2:]:
+                self.assertEqual('-skip' in run,bool(args))
 
     def test_failure_stops_without_claiming_later_packages_passed(self):
         result,calls=self.invoke(fail=True)

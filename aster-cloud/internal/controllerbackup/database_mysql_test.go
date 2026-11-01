@@ -590,8 +590,13 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 	}
 	// A foreign table must not be silently omitted or included in the backup.
 	afterTargetChanges, afterCount, e := capture()
-	if e != nil || afterCount != count || !reflect.DeepEqual(afterTargetChanges, files) {
-		t.Fatal("target restore/session transition changed the source database", e)
+	if e != nil {
+		// A failed observation is not evidence of changed data. Retain the
+		// original deadline; expose only its safe context status, never a DSN.
+		t.Fatal("final source snapshot unavailable", "context_status", ctx.Err())
+	}
+	if afterCount != count || !reflect.DeepEqual(afterTargetChanges, files) {
+		t.Fatal("target restore/session transition changed the source database")
 	}
 	if _, e = store.DB.ExecContext(ctx, "CREATE TABLE foreign_table(id INT PRIMARY KEY) ENGINE=InnoDB"); e != nil {
 		t.Fatal(e)

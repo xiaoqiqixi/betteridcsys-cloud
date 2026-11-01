@@ -11,6 +11,7 @@ import (
  "context"
  "encoding/json"
  "errors"
+ "fmt"
  "os"
  "testing"
 )
@@ -19,17 +20,18 @@ func TestMain(m *testing.M) {
  if len(os.Args)==2 && os.Args[1]==verificationprocess.ChildCommand {
   if verificationprocess.Child()!=nil {os.Exit(21)};os.Exit(0)
  }
- if len(os.Args)!=3 || os.Args[1]!="native-process-fixture" {os.Exit(m.Run())}
+ if len(os.Args)!=3 || (os.Args[1]!="native-process-fixture" && os.Args[1]!="native-process-rejection") {os.Exit(m.Run())}
  if os.Getuid()!=0 {os.Exit(22)}
  raw,err:=os.ReadFile(os.Args[2]);if err!=nil {os.Exit(23)}
  var input struct {Config verificationprocess.Config `json:"config"`; ConfigurationSHA string `json:"configuration_sha"`; PlanSHA string `json:"plan_sha"`}
  if json.Unmarshal(raw,&input)!=nil {os.Exit(24)}
  host,err:=controllerhost.Open(input.Config.Controller.ControllerID,input.ConfigurationSHA);if err!=nil{os.Exit(25)}
+ if os.Args[1]=="native-process-rejection" {if _,err:=host.PrepareTarget(input.Config.Operation,input.PlanSHA);err!=nil{os.Exit(26)}}
  guard,err:=host.PrepareVerificationRuntime(input.Config.Operation,input.PlanSHA,func()error{return nil});if err!=nil{os.Exit(26)}
  host.Close()
  ctx,cancel:=context.WithCancel(context.Background())
  go func(){var b [1]byte;_,_=os.Stdin.Read(b[:]);cancel()}()
  err=verificationprocess.Serve(ctx,guard,input.Config)
- if !errors.Is(err,context.Canceled) && !errors.Is(err,context.DeadlineExceeded){os.Exit(27)}
+ if !errors.Is(err,context.Canceled) && !errors.Is(err,context.DeadlineExceeded){fmt.Fprintln(os.Stdout,verificationprocess.FailureCode(err));os.Exit(27)}
  os.Exit(0)
 }

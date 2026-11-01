@@ -28,7 +28,15 @@ func TestVerificationProcessConsumesInvalidGuardWithoutStarting(t *testing.T) {
 }
 
 func TestVerificationChildRefusesDirectInvocation(t *testing.T) {
-	if err := verificationprocess.Child(); !errors.Is(err, verificationprocess.ErrRefused) {
+	if err := verificationprocess.Child(); !errors.Is(err, verificationprocess.ErrRefused) || verificationprocess.FailureCode(err) != "VERIFICATION_CHILD_AUTHORITY" {
 		t.Fatal("unrelated process admitted as verification child")
+	}
+}
+
+func TestVerificationFailureCodeNeverExportsForeignErrorText(t *testing.T) {
+	for _, err := range []error{nil, errors.New("PRIVATE_DSN_AND_KEY"), verificationprocess.ErrRefused} {
+		if verificationprocess.FailureCode(err) != "VERIFICATION_UNCONFIRMED" {
+			t.Fatal("arbitrary error became a public diagnostic")
+		}
 	}
 }

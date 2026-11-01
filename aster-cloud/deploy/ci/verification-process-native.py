@@ -19,6 +19,12 @@ import subprocess
 import time
 
 
+FAILURE_CODES = set('VERIFICATION_HOST_GUARD VERIFICATION_HOST_EXECUTABLE VERIFICATION_LISTENER VERIFICATION_SPAWN VERIFICATION_HANDSHAKE VERIFICATION_EARLY_EXIT VERIFICATION_CHILD_AUTHORITY VERIFICATION_CHILD_IDENTITY VERIFICATION_CHILD_GUARD VERIFICATION_CHILD_BOOTSTRAP VERIFICATION_CHILD_LISTENER VERIFICATION_CHILD_SQL VERIFICATION_CHILD_RECHECK VERIFICATION_CHILD_SERVICE'.split())
+
+def fixture_failure(raw):
+    code = raw.decode('ascii', errors='replace').removesuffix('\n')
+    return code if len(raw) <= 128 and code in FAILURE_CODES else 'TARGET_NATIVE_ASSERTION_FAILED'
+
 def accept(root, inputs, controller, operation, module, directory, require, progress):
     require(os.geteuid() == 0)
     require(ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) == 0)
@@ -118,6 +124,13 @@ def accept(root, inputs, controller, operation, module, directory, require, prog
             require(time.monotonic() < deadline)
             time.sleep(.1)
 
+    def require_parent_running(parent):
+        if parent.poll() is None:
+            return
+        # This is fixed fixture output, never the child's private stderr/SQL.
+        raw = parent.stdout.read(129)
+        require(False, fixture_failure(raw))
+
     def run_case(mode):
         parent, child = None, None
         input_created = False
@@ -143,12 +156,12 @@ def accept(root, inputs, controller, operation, module, directory, require, prog
                 # minimum-account authentication rejection.
                 require(parent.wait(timeout=20) == 27)
                 out, err = parent.communicate()
-                require(not out and not err)
+                require(out == b'VERIFICATION_CHILD_SQL\n' and not err, fixture_failure(out))
                 probe_drained(True); sql_drained()
                 return
             deadline = time.monotonic()+12
             while True:
-                require(parent.poll() is None)
+                require_parent_running(parent)
                 try:
                     code, body = request('GET', '/console/v1/auth/me')
                     require(code == 401)
@@ -156,11 +169,14 @@ def accept(root, inputs, controller, operation, module, directory, require, prog
                 except (OSError, http.client.HTTPException):
                     require(time.monotonic() < deadline)
                     time.sleep(.1)
+            progress('target-verification-process-identity')
             child = child_of(parent)
             restricted(child, parent)
             probe_drained(False)
+            progress('target-verification-process-write-denied')
             code, body = request('POST', '/console/v1/users')
             require(code == 403 and body.get('error', {}).get('code') == 'MIGRATION_VERIFICATION_READ_ONLY')
+            progress('target-verification-process-'+mode+'-drain')
             if mode == 'stop':
                 parent.stdin.write(b'stop\n'); parent.stdin.flush()
             elif mode == 'parent-death':
