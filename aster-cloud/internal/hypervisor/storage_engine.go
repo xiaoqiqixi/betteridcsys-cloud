@@ -612,7 +612,9 @@ func (m *Manager) restoreArtifact(ctx context.Context, t nodeproto.TypedStorageT
 	if e = m.verifyFlat(ctx, i.Disk, manifest); e != nil {
 		return e
 	}
-	return m.assertOwned(ctx, i)
+	// The replacement is flat. Refresh the explicit backing chain only after
+	// the disk swap is durable; a failed define leaves the restore uncertain.
+	return m.defineDirectNetwork(ctx, i, t.OperationID)
 }
 func (m *Manager) copyExact(ctx context.Context, source, target string, manifest nodeproto.StorageManifest) error {
 	if e := m.verifyFlat(ctx, source, manifest); e != nil {
