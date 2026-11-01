@@ -46,7 +46,27 @@ def context():
     env = os.environ
     require(env.get('GITHUB_ACTIONS') == 'true' and env.get('RUNNER_ENVIRONMENT') == 'github-hosted', 'hosted_runner_required')
     require(env.get('GITHUB_REPOSITORY') == REPOSITORY and env.get('GITHUB_REPOSITORY_ID') == REPOSITORY_ID, 'repository_mismatch')
-    require(env.get('GITHUB_REF') == 'refs/heads/main' and env.get('GITHUB_EVENT_NAME') in ('push', 'workflow_dispatch'), 'main_event_required')
+    event, ref = env.get('GITHUB_EVENT_NAME'), env.get('GITHUB_REF', '')
+    if event == 'pull_request':
+        match = re.fullmatch(r'refs/pull/([1-9][0-9]*)/merge', ref)
+        require(match is not None, 'pull_request_merge_ref_required')
+        path = owned_path(env.get('GITHUB_EVENT_PATH'), directory=False)
+        with path.open('rb') as stream:
+            raw = stream.read(1024*1024+1)
+        require(len(raw) <= 1024*1024, 'pull_request_event_too_large')
+        payload = json.loads(raw)
+        require(isinstance(payload, dict) and type(payload.get('number')) is int and
+                str(payload['number']) == match[1], 'pull_request_number_mismatch')
+        pr = payload.get('pull_request')
+        require(isinstance(pr, dict), 'pull_request_identity_required')
+        for side in ('head', 'base'):
+            branch = pr.get(side)
+            repo = branch.get('repo') if isinstance(branch, dict) else None
+            require(isinstance(repo, dict) and repo.get('full_name') == REPOSITORY and
+                    type(repo.get('id')) is int and str(repo['id']) == REPOSITORY_ID,
+                    'same_repository_pull_request_required')
+    else:
+        require(ref == 'refs/heads/main' and event in ('push', 'workflow_dispatch'), 'main_event_required')
     require(re.fullmatch(r'[0-9a-f]{40}', env.get('GITHUB_SHA', '')) is not None, 'source_sha_required')
     require(all(re.fullmatch(r'[1-9][0-9]{0,19}', env.get(key, '')) for key in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT')), 'run_identity_required')
     require(os.geteuid() != 0 and platform.system() == 'Linux' and platform.machine() == 'x86_64', 'unprivileged_linux_amd64_required')
