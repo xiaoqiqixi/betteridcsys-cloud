@@ -190,8 +190,12 @@ power operation. Original status, request digest and error code remain uncertain
 It never starts/stops a guest or removes disks. OVS/network recovery, storage
 operations and migration fences require their own recovery procedures; this
 command cannot bypass them. Missing/unowned domains and failed observations
-retain quarantine. Restart the service and run controller `operation-reconcile`
-for the original operation to collect the annotation before submitting new work.
+retain quarantine. Restarting the service exposes the annotation through GET of the original task.
+The controller store can record this as a terminal `resolved` operation and apply
+the observed state while retaining the uncertain audit. The dispatcher adapter
+in `internal/control/operation_worker.go` is still required: until that adapter
+is installed, `operation-reconcile` keeps the controller operation uncertain and
+new operations remain blocked. Do not edit operation rows to bypass that gate.
 
 Explicit force tasks, resolution annotations and additional observed states use
 journal schema 6. Schemas 1–5 remain readable; older binaries reject schema 6.
@@ -465,7 +469,8 @@ counter accuracy, guest-agent freshness or historical monitoring/alerts.
 New `aster.node/2` requests carry a strict immutable network binding: owner,
 instance, node, lease/pool/VPC, private CIDR/IP, deterministic MAC/interface UUID,
 VLAN metadata, positive ingress/egress Mbps, profile ID and canonical fabric
-config SHA-256. Legacy `aster.node/1` bytes and behavior are unchanged. The
+config SHA-256. Legacy `aster.node/1` bytes remain compatible when optional force/resolution fields
+are absent. Normal reboot follows the observed sequence described above. The
 controller reserves IPAM and stores the binding in the same transaction as the
 instance and task; the node never selects a lease from a guessed current pool.
 The financial request/digest, money, payment and sold product snapshots are not
