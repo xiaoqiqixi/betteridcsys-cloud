@@ -10,6 +10,8 @@ import (
 	"errors"
 	"io"
 	"regexp"
+	"strings"
+	"time"
 )
 
 const Protocol = "aster.node/1"
@@ -33,19 +35,50 @@ type NodeTask struct {
 	Resources    controllerapi.Resources `json:"resources"`
 	// Delete additionally requires the operator-configured allow_delete and this exact ID.
 	ConfirmInstanceID string `json:"confirm_instance_id,omitempty"`
+	// Force permits destroy only after an observed graceful reboot timeout.
+	Force bool `json:"force,omitempty"`
 }
 
 type NodeResult struct {
-	Protocol      string `json:"protocol"`
-	OperationID   string `json:"operation_id"`
-	RequestSHA256 string `json:"request_sha256"`
-	Status        string `json:"status"` // accepted, succeeded, rejected, uncertain
-	InstanceID    string `json:"instance_id"`
+	Protocol      string              `json:"protocol"`
+	OperationID   string              `json:"operation_id"`
+	RequestSHA256 string              `json:"request_sha256"`
+	Status        string              `json:"status"` // accepted, succeeded, rejected, uncertain
+	InstanceID    string              `json:"instance_id"`
+	Resolved      *InstanceResolution `json:"resolved,omitempty"`
+}
+
+// Resolution releases quarantine without claiming the original mutation succeeded.
+type InstanceResolution struct {
+	Who           string `json:"who"`
+	When          string `json:"when"`
+	ObservedState string `json:"observed_state"`
+	Reason        string `json:"reason"`
+}
+
+func ValidResolutionReason(reason string) bool {
+	return strings.TrimSpace(reason) == reason && len(reason) > 0 && len(reason) <= 1024 && !strings.ContainsAny(reason, "\r\n\x00")
+}
+
+func ValidObservedState(state string) bool {
+	switch state {
+	case "running", "shut off", "paused", "crashed", "pmsuspended", "blocked":
+		return true
+	}
+	return false
+}
+
+func (r InstanceResolution) Valid() bool {
+	at, err := time.Parse(time.RFC3339Nano, r.When)
+	return err == nil && at.UTC().Format(time.RFC3339Nano) == r.When && r.Who == "uid:0" && ValidObservedState(r.ObservedState) && ValidResolutionReason(r.Reason)
 }
 
 func ValidID(value string) bool     { return hexID.MatchString(value) }
 func ValidNodeID(value string) bool { return nodeID.MatchString(value) }
 func (t NodeTask) Valid() bool {
+	if t.Force && t.Action != "reboot" {
+		return false
+	}
 	if (t.Protocol != Protocol && t.Protocol != NetworkProtocol && t.Protocol != DirectPublicProtocol) || !ValidID(t.OperationID) || !ValidNodeID(t.NodeID) || !ValidID(t.InstanceID) || !ValidID(t.OwnerRef) || !hostname.MatchString(t.Hostname) {
 		return false
 	}
@@ -75,6 +108,9 @@ func (t NodeTask) BytesAndDigest() ([]byte, string, error) {
 	return raw, Digest(raw), nil
 }
 func (r NodeResult) Matches(t NodeTask, requestSHA string) bool {
+	if r.Resolved != nil && (r.Status != "uncertain" || !r.Resolved.Valid() || !t.Network.IsZero() || t.Action == "public_adopt" || t.Action == "public_detach") {
+		return false
+	}
 	if !t.Valid() || r.Protocol != t.Protocol || r.OperationID != t.OperationID || r.InstanceID != t.InstanceID || !digest.MatchString(requestSHA) || r.RequestSHA256 != requestSHA {
 		return false
 	}
@@ -101,7 +137,7 @@ func DecodeTask(raw []byte) (NodeTask, error) {
 	if json.Unmarshal(raw, &fields) != nil {
 		return NodeTask{}, ErrInvalid
 	}
-	allowed := map[string]bool{"protocol": true, "operation_id": true, "node_id": true, "action": true, "instance_id": true, "owner_ref": true, "hostname": true, "resources": true, "confirm_instance_id": true}
+	allowed := map[string]bool{"protocol": true, "operation_id": true, "node_id": true, "action": true, "instance_id": true, "owner_ref": true, "hostname": true, "resources": true, "confirm_instance_id": true, "force": true}
 	if task.Protocol == NetworkProtocol {
 		allowed["network"] = true
 		n, err := decodeNetworkBinding(fields["network"])

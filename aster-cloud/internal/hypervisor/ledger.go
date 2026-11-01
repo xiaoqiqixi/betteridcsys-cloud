@@ -116,7 +116,7 @@ func OpenLedger(directory, nodeID string) (*Ledger, error) {
 			l.Close()
 			return nil, e
 		}
-		if len(raw) > maxJournalBytes || json.Unmarshal(raw, &l.state) != nil || (l.state.Schema != 1 && l.state.Schema != 2 && l.state.Schema != 3 && l.state.Schema != 4 && l.state.Schema != 5) || l.state.NodeID != nodeID || l.state.Operations == nil || l.state.Instances == nil {
+		if len(raw) > maxJournalBytes || json.Unmarshal(raw, &l.state) != nil || (l.state.Schema != 1 && l.state.Schema != 2 && l.state.Schema != 3 && l.state.Schema != 4 && l.state.Schema != 5 && l.state.Schema != 6) || l.state.NodeID != nodeID || l.state.Operations == nil || l.state.Instances == nil {
 			l.Close()
 			return nil, errors.New("invalid journal")
 		}
@@ -250,9 +250,12 @@ func (l *Ledger) Claim(task nodeproto.NodeTask, sha string) (nodeproto.NodeResul
 		if op.Result.RequestSHA256 != sha {
 			return nodeproto.NodeResult{}, false, ErrConflict
 		}
-		return op.Result, false, nil
+		return cloneNodeResult(op.Result), false, nil
 	}
 	result := nodeproto.NodeResult{Protocol: task.Protocol, OperationID: task.OperationID, RequestSHA256: sha, InstanceID: task.InstanceID, Status: "accepted"}
+	if task.Force && l.state.Schema < 6 {
+		l.state.Schema = 6
+	}
 	if task.Protocol == nodeproto.DirectPublicProtocol && l.state.Schema < 5 {
 		l.state.Schema = 5
 	}
@@ -303,6 +306,9 @@ func (l *Ledger) Finish(id, status, code string, instance *Instance) (nodeproto.
 	op.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	l.state.Operations[id] = op
 	if instance != nil {
+		if nodeproto.ValidObservedState(instance.State) && instance.State != "running" && instance.State != "shut off" && l.state.Schema < 6 {
+			l.state.Schema = 6
+		}
 		l.state.Instances[instance.ID] = cloneInstance(*instance)
 		if instance.State == "deleted" {
 			for opID, storageOp := range l.state.StorageOperations {
@@ -327,6 +333,7 @@ func (l *Ledger) Query(id string) (Operation, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	op, ok := l.state.Operations[id]
+	op.Result = cloneNodeResult(op.Result)
 	return op, ok
 }
 func (l *Ledger) Instances() []Instance {
@@ -354,6 +361,9 @@ func (l *Ledger) validateLoaded() error {
 	for id, op := range l.state.Operations {
 		if id != op.Task.OperationID || !op.Result.Matches(op.Task, op.Result.RequestSHA256) || op.Task.NodeID != l.state.NodeID {
 			return errors.New("invalid journal operation identity")
+		}
+		if (op.Task.Force || op.Result.Resolved != nil) && l.state.Schema < 6 {
+			return errors.New("force/resolution needs schema 6")
 		}
 		if !op.Task.DirectPublic.IsZero() && l.state.Schema < 5 {
 			return errors.New("direct public task needs schema 5")
@@ -398,6 +408,10 @@ func (l *Ledger) validateLoaded() error {
 		}
 		switch i.State {
 		case "reserved", "uncertain", "running", "shut off", "deleted", "imported", "retired":
+		case "paused", "crashed", "pmsuspended", "blocked":
+			if l.state.Schema < 6 {
+				return errors.New("observed state needs schema 6")
+			}
 		default:
 			return errors.New("invalid journal instance state")
 		}
@@ -421,4 +435,12 @@ func cloneInstance(i Instance) Instance {
 		i.TargetBinding = &b
 	}
 	return i
+}
+
+func cloneNodeResult(r nodeproto.NodeResult) nodeproto.NodeResult {
+	if r.Resolved != nil {
+		resolution := *r.Resolved
+		r.Resolved = &resolution
+	}
+	return r
 }

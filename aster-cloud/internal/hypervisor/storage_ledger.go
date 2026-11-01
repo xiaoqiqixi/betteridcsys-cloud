@@ -197,7 +197,7 @@ func (l *Ledger) HasPendingInstance(id, except string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for opID, op := range l.state.Operations {
-		if opID != except && op.Task.InstanceID == id && (op.Result.Status == "accepted" || op.Result.Status == "uncertain") {
+		if opID != except && op.Task.InstanceID == id && (op.Result.Status == "accepted" || op.Result.Status == "uncertain" && op.Result.Resolved == nil) {
 			return true
 		}
 	}

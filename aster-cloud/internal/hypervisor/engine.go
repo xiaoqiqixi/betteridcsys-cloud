@@ -172,7 +172,7 @@ func (m *Manager) Accept(task nodeproto.NodeTask, raw []byte) (nodeproto.NodeRes
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), (time.Duration(m.Config.ShutdownTimeoutSeconds)*time.Second)+10*time.Minute)
 	m.cancel = cancel
 	m.active = true
 	m.activeOperation = task.OperationID
@@ -382,7 +382,17 @@ func (m *Manager) execute(ctx context.Context, task nodeproto.NodeTask, result n
 		if state != "running" {
 			return finish("rejected", "DOMAIN_STATE_REJECTED", &instance)
 		}
-		command = "reboot"
+		state, e = m.reboot(ctx, instance, task.Force)
+		if errors.Is(e, errGuestShutdownTimeout) {
+			instance.State = state
+			return finish("rejected", "GUEST_SHUTDOWN_TIMEOUT", &instance)
+		}
+		if e != nil {
+			instance.State = "uncertain"
+			return finish("uncertain", "REBOOT_OUTCOME_UNCERTAIN", &instance)
+		}
+		instance.State = state
+		return finish("succeeded", "", &instance)
 	case "force_off":
 		if state == "shut off" {
 			instance.State = state
@@ -417,10 +427,6 @@ func (m *Manager) execute(ctx context.Context, task nodeproto.NodeTask, result n
 		instance.State = "uncertain"
 		return finish("uncertain", "POWER_OUTCOME_UNCERTAIN", &instance)
 	}
-	if task.Action == "reboot" {
-		instance.State = "uncertain"
-		return finish("uncertain", "REBOOT_ACK_NOT_COMPLETION", &instance)
-	}
 	if task.Action == "delete" {
 		// Destructive disk removal only after verified ownership, explicit confirmation and undefine.
 		paths := []string{instance.Disk, instance.Seed, filepath.Join(instance.Directory, "user-data"), filepath.Join(instance.Directory, "meta-data"), filepath.Join(instance.Directory, "network-config"), filepath.Join(instance.Directory, "domain.xml")}
@@ -452,25 +458,19 @@ func (m *Manager) execute(ctx context.Context, task nodeproto.NodeTask, result n
 	if task.Action == "start" {
 		desired = "running"
 	}
-	deadline := time.NewTimer(10 * time.Second)
-	defer deadline.Stop()
-	for {
-		state, e = m.state(ctx, instance.Domain)
-		if e == nil && state == desired {
-			instance.State = desired
-			return finish("succeeded", "", &instance)
-		}
-		select {
-		case <-ctx.Done():
-			instance.State = "uncertain"
-			return finish("uncertain", "POWER_STATE_UNCONFIRMED", &instance)
-		case <-deadline.C:
-			instance.State = "uncertain"
-			return finish("uncertain", "POWER_STATE_UNCONFIRMED", &instance)
-		case <-time.After(200 * time.Millisecond):
-		}
+	timeout := 10 * time.Second
+	if task.Action == "shutdown" {
+		timeout = m.shutdownTimeout()
 	}
+	state, e = m.observePower(ctx, instance.Domain, desired, timeout)
+	if e != nil {
+		instance.State = "uncertain"
+		return finish("uncertain", "POWER_STATE_UNCONFIRMED", &instance)
+	}
+	instance.State = state
+	return finish("succeeded", "", &instance)
 }
+
 func safeCode(err error) string {
 	switch {
 	case errors.Is(err, ErrUnsupported):

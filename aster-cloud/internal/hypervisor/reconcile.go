@@ -21,6 +21,9 @@ func (m *Manager) Reconcile(ctx context.Context, id string) (nodeproto.NodeResul
 	if !ok {
 		return nodeproto.NodeResult{}, ErrNotFound
 	}
+	if op.Result.Resolved != nil {
+		return op.Result, nil
+	}
 	if op.Result.Status != "accepted" && op.Result.Status != "uncertain" {
 		return op.Result, errors.New("only accepted/uncertain operations can be reconciled")
 	}

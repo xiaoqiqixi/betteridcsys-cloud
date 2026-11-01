@@ -32,6 +32,9 @@ func main() {
 }
 
 type options struct {
+	resolveInstance           string
+	resolveProvided           bool
+	reason                    string
 	printPublicFilter         string
 	printPublicFilterProvided bool
 	networkStatus             string
@@ -57,6 +60,8 @@ func parseArgs(args []string) (options, error) {
 	flags.StringVar(&o.networkStatus, "network-recovery-status", "", "root-only read-only fabric recovery expectation for a profile")
 	flags.StringVar(&o.recoverNetwork, "recover-network", "", "root-owned canonical recovery approval JSON; service must be stopped")
 	flags.StringVar(&o.config, "config", "/etc/aster-node/node.json", "root-owned 0600 configuration")
+	flags.StringVar(&o.resolveInstance, "resolve-instance", "", "root-only ownership-checked quarantine resolution; service must be stopped")
+	flags.StringVar(&o.reason, "reason", "", "required operator reason for instance resolution")
 	flags.StringVar(&o.reconcile, "reconcile-operation", "", "root-only read-only original-domain observation; service must be stopped")
 	flags.StringVar(&o.approveImport, "approve-storage-import", "", "root approval of a protected offline handoff artifact")
 	flags.StringVar(&o.reviewedFence, "reviewed-source-fence", "", "exact source fence token independently verified by root")
@@ -66,9 +71,16 @@ func parseArgs(args []string) (options, error) {
 	}
 	doctorProvided := false
 	reviewedProvided := false
+	reasonProvided := false
 	visited := 0
 	flags.Visit(func(f *flag.Flag) {
 		visited++
+		if f.Name == "resolve-instance" {
+			o.resolveProvided = true
+		}
+		if f.Name == "reason" {
+			reasonProvided = true
+		}
 		if f.Name == "print-public-network-filter" {
 			o.printPublicFilterProvided = true
 		}
@@ -96,6 +108,13 @@ func parseArgs(args []string) (options, error) {
 			return o, fmt.Errorf("standalone public filter requires safe aster-prefixed filter name")
 		}
 		return o, nil
+	}
+	if o.resolveProvided {
+		if !nodeproto.ValidID(o.resolveInstance) || !reasonProvided || !nodeproto.ValidResolutionReason(o.reason) || doctorProvided || o.reconcileProvided || o.approveProvided || reviewedProvided || o.networkStatusProvided || o.recoverNetworkProvided {
+			return o, fmt.Errorf("resolution requires an instance ID and reason, and is exclusive")
+		}
+	} else if reasonProvided {
+		return o, fmt.Errorf("reason requires resolve-instance")
 	}
 	if o.networkStatusProvided || o.recoverNetworkProvided {
 		if o.networkStatusProvided && o.recoverNetworkProvided || doctorProvided || o.reconcileProvided || o.approveProvided || reviewedProvided {
@@ -169,6 +188,15 @@ func run() error {
 	defer ledger.Close()
 	defer manager.Shutdown()
 	manager.Ledger = ledger
+	if o.resolveProvided {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		result, e := manager.ResolveInstance(ctx, o.resolveInstance, o.reason)
+		if e != nil {
+			return e
+		}
+		return json.NewEncoder(os.Stdout).Encode(result)
+	}
 	if o.networkStatusProvided {
 		result, e := manager.NetworkRecoveryStatus(o.networkStatus)
 		if e != nil {

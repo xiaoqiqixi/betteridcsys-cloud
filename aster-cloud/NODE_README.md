@@ -64,7 +64,7 @@ result without re-execution; any changed raw bytes (including whitespace) gives
 HTTP 409. The controller must persist the raw body and, if a response is lost,
 **only GET the original operation**. There are no automatic POST retries.
 
-One detached worker runs at a time (10-minute upper bound). A different operation
+One detached worker runs at a time (10 minutes plus the configured shutdown timeout). A different operation
 while busy is durably rejected; there is no queue. HTTP disconnect/cancellation
 does not cancel an accepted operation. Graceful shutdown cancels the worker and
 waits for a conservative terminal journal update; crash/restart turns accepted
@@ -78,8 +78,20 @@ Unknown outcomes retain disk/address reservations, are never automatically
 rolled back or retried, and block further mutations on that instance. Successful
 create means **libvirt reports the owned domain running** (and, for OVS, the
 exact gate completed), not that guest boot,
-SSH, public networking or a billing-service activation succeeded. Reboot command
-acknowledgement remains uncertain because state=running cannot prove a reboot.
+SSH, public networking or a billing-service activation succeeded. Normal-network
+reboot uses graceful shutdown, an observed `shut off`, start, and an observed
+`running`. Both observations are required. `shutdown_timeout_seconds` defaults
+to 120 when omitted; configuration accepts only integers from 10 through 600.
+It applies to graceful shutdown on normal and OVS networks, including the stop
+phase of normal reboot. OVS reboot still requires separate shutdown/start tasks.
+
+If a reboot's graceful stop times out and libvirt still reports a known live
+state, the task is `rejected` with journal code `GUEST_SHUTDOWN_TIMEOUT`; the
+instance returns to that observed state and can accept another operation.
+The optional reboot task field `"force": true` explicitly permits one `destroy`
+after this timeout, followed by observed shut-off/start/running. It defaults to
+false and is rejected on other actions. A virsh error, interrupted worker, or
+unconfirmed start remains uncertain. No unknown mutation is automatically retried.
 
 Delete is disabled by default, additionally requires the exact confirmation ID,
 verified owned live XML and shut-off state. It undefines without libvirt's bulk
@@ -159,6 +171,31 @@ operation. No automatic operator command or HTTP reconciliation write is exposed
 /usr/local/sbin/aster-node --config /etc/aster-node/node.json \
   --reconcile-operation 0123456789abcdef0123456789abcdef
 ```
+
+### Resolve quarantine while preserving uncertain history
+
+With the service stopped and its journal backed up, root can explicitly release
+an owned normal-network instance whose original outcome remains unknown:
+
+```sh
+/usr/local/sbin/aster-node --config /etc/aster-node/node.json \
+  --resolve-instance 0123456789abcdef0123456789abcdef \
+  --reason 'Checked the original guest console after the interrupted reboot'
+```
+
+This command verifies the original ownership metadata and managed devices,
+reads the current libvirt state, and atomically saves that state plus a `resolved`
+annotation (effective UID, UTC time, observed state, reason) on each unresolved
+power operation. Original status, request digest and error code remain uncertain.
+It never starts/stops a guest or removes disks. OVS/network recovery, storage
+operations and migration fences require their own recovery procedures; this
+command cannot bypass them. Missing/unowned domains and failed observations
+retain quarantine. Restart the service and run controller `operation-reconcile`
+for the original operation to collect the annotation before submitting new work.
+
+Explicit force tasks, resolution annotations and additional observed states use
+journal schema 6. Schemas 1–5 remain readable; older binaries reject schema 6.
+Back up before upgrading and never downgrade by editing the schema number.
 
 ## Build / regression
 
