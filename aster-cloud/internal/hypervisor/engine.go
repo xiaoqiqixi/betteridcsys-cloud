@@ -778,7 +778,9 @@ func (m *Manager) seedFiles(ctx context.Context, i Instance, keys []string, netw
 	}
 	_, err := m.Runner.Run(ctx, CloudLocalDS, "--network-config", filepath.Join(i.Directory, "network-config"), i.Seed, filepath.Join(i.Directory, "user-data"), filepath.Join(i.Directory, "meta-data"))
 	if err == nil {
-		err = os.Chmod(i.Seed, 0600)
+		// The seed contains public SSH keys and guest network metadata only.
+		// Keep root ownership while allowing QEMU to read without DAC chown.
+		err = os.Chmod(i.Seed, 0644)
 	}
 	return err
 }
@@ -795,6 +797,23 @@ type ownershipXML struct {
 	OwnerRef           string   `xml:"owner_ref,attr"`
 	NodeID             string   `xml:"node_id,attr"`
 }
+type diskSecurityLabelXML struct {
+	Model   string `xml:"model,attr"`
+	Relabel string `xml:"relabel,attr"`
+}
+type diskSourceXML struct {
+	File          string                `xml:"file,attr"`
+	SecurityLabel *diskSecurityLabelXML `xml:"seclabel,omitempty"`
+}
+type diskFormatXML struct {
+	Type string `xml:"type,attr"`
+}
+type backingStoreXML struct {
+	Type         string           `xml:"type,attr,omitempty"`
+	Format       *diskFormatXML   `xml:"format,omitempty"`
+	Source       *diskSourceXML   `xml:"source,omitempty"`
+	BackingStore *backingStoreXML `xml:"backingStore,omitempty"`
+}
 type diskXML struct {
 	Device string `xml:"device,attr"`
 	Type   string `xml:"type,attr"`
@@ -802,10 +821,9 @@ type diskXML struct {
 		Name string `xml:"name,attr"`
 		Type string `xml:"type,attr"`
 	} `xml:"driver,omitempty"`
-	Source struct {
-		File string `xml:"file,attr"`
-	} `xml:"source"`
-	Target struct {
+	Source       diskSourceXML    `xml:"source"`
+	BackingStore *backingStoreXML `xml:"backingStore,omitempty"`
+	Target       struct {
 		Dev string `xml:"dev,attr"`
 		Bus string `xml:"bus,attr"`
 	} `xml:"target"`
@@ -914,12 +932,21 @@ func (m *Manager) domainXML(i Instance) ([]byte, error) {
 		Type string `xml:"type,attr"`
 	}{"qemu", "qcow2"}
 	disk.Source.File = i.Disk
+	backing, err := m.domainBacking(i)
+	if err != nil {
+		return nil, err
+	}
+	disk.BackingStore = &backingStoreXML{}
+	if backing != "" {
+		disk.BackingStore = &backingStoreXML{Type: "file", Format: &diskFormatXML{Type: "qcow2"}, Source: &diskSourceXML{File: backing, SecurityLabel: &diskSecurityLabelXML{Model: "dac", Relabel: "no"}}, BackingStore: &backingStoreXML{}}
+	}
 	disk.Target.Dev = "vda"
 	disk.Target.Bus = "virtio"
 	d.Devices.Disks = append(d.Devices.Disks, disk)
 	if i.Seed != "" {
 		seed := diskXML{Type: "file", Device: "cdrom", ReadOnly: &struct{}{}}
 		seed.Source.File = i.Seed
+		seed.Source.SecurityLabel = &diskSecurityLabelXML{Model: "dac", Relabel: "no"}
 		seed.Target.Dev = "sda"
 		seed.Target.Bus = "sata"
 		d.Devices.Disks = append(d.Devices.Disks, seed)

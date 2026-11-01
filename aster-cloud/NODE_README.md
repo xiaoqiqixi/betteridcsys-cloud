@@ -197,6 +197,31 @@ Explicit force tasks, resolution annotations and additional observed states use
 journal schema 6. Schemas 1–5 remain readable; older binaries reject schema 6.
 Back up before upgrading and never downgrade by editing the schema number.
 
+### Preserve root ownership of immutable disk sources
+
+New domain XML disables DAC relabeling on the approved backing image and on
+`seed.iso` with `<seclabel model='dac' relabel='no'/>` inside each source. The
+writable overlay keeps normal QEMU DAC labeling. The backing chain names only the
+approved flat base; flat imports/restores have no base attached. Restores refresh
+the domain definition after the durable disk swap and retain the old disk on any
+uncertainty. The node does not change the host's global `dynamic_ownership` policy.
+
+Approved bases must remain root-owned, hash-approved and not writable by QEMU.
+Provide QEMU read access (for example root-owned 0644 bases) and traversal through
+the approved directories. Generated seeds are root-owned 0644 and contain only
+public SSH keys and guest metadata; configuration, keys and journals stay 0600.
+Existing domains are not silently rewritten at service startup: review their
+backing/seed labels offline before reuse. A previously chowned base must be
+independently verified against its approved hash before restoring ownership.
+
+Verification is based on [libvirt 8 DAC source](https://github.com/libvirt/libvirt/blob/v8.0.0/src/security/security_dac.c)
+and the [disk source XML contract](https://libvirt.org/formatdomain.html#hard-drives-floppy-disks-cdroms),
+plus generated-XML regression tests. DAC changes backing/read-only ownership and
+skips restoring those shared sources. The current native CI checks real libvirt
+daemon preparation in TCG guests, but does not boot managed domains. A real Linux
+guest start/stop test with ownership/hash checks remains necessary; it was not
+reproduced on the macOS development host.
+
 ## Build / regression
 
 From the `aster-cloud` module with its local `aster/billing` replace present:
