@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -173,7 +174,20 @@ func (m *Manager) Handler() http.Handler {
 				respond(w, 400, errorBody("INVALID_TASK_OR_DIGEST"))
 				return
 			}
-			result, err := m.Accept(task, body)
+			password := ""
+			if values := r.Header.Values("X-Aster-Guest-Secret"); len(values) > 0 {
+				if len(values) != 1 || len(values[0]) > 2048 {
+					respond(w, 400, errorBody("INVALID_GUEST_SECRET"))
+					return
+				}
+				decoded, e := base64.RawStdEncoding.DecodeString(values[0])
+				if e != nil {
+					respond(w, 400, errorBody("INVALID_GUEST_SECRET"))
+					return
+				}
+				password = string(decoded)
+			}
+			result, err := m.acceptGuest(task, body, password)
 			if errors.Is(err, ErrConflict) {
 				respond(w, 409, errorBody("OPERATION_CONFLICT"))
 				return

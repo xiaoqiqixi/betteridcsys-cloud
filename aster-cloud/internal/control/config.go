@@ -23,6 +23,7 @@ import (
 
 type Config struct {
 	Telemetry            TelemetryConfig       `json:"telemetry,omitzero"`
+	Service              ServiceConfig         `json:"service,omitzero"`
 	PlacementRegions     []string              `json:"placement_regions,omitempty"`
 	Dispatcher           DispatcherConfig      `json:"dispatcher,omitzero"`
 	Schema               int                   `json:"schema"`
@@ -236,7 +237,7 @@ func LoadConfig(path string) (Config, Secrets, error) {
 	return c, Secrets{b, r, w}, nil
 }
 func (c Config) Valid() bool {
-	if !c.validDirectPublicProfiles() {
+	if !c.validDirectPublicProfiles() || !c.validServiceConfig() {
 		return false
 	}
 	if c.Schema != 1 || !nodeproto.ValidNodeID(c.ControllerID) || c.HeartbeatTTLSeconds < 10 || c.HeartbeatTTLSeconds > 300 || len(c.Nodes) > 64 || c.Nodes == nil || c.Presets == nil || len(c.Presets) > 256 {

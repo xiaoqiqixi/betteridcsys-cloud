@@ -15,10 +15,11 @@ import (
 )
 
 type App struct {
-	Store   Store
-	Config  Config
-	Secrets Secrets
-	Now     func() time.Time
+	Services *Services
+	Store    Store
+	Config   Config
+	Secrets  Secrets
+	Now      func() time.Time
 }
 
 func (a App) now() time.Time {
@@ -48,11 +49,11 @@ func (a App) Handler() http.Handler {
 			failure(w, 426, "TLS_REQUIRED")
 			return
 		}
-		if r.Header.Get("Origin") != "" {
+		if len(r.Header.Values("Origin")) != 0 {
 			failure(w, 403, "BROWSER_ACCESS_UNAVAILABLE")
 			return
 		}
-		if r.URL.RawQuery != "" {
+		if r.URL.RawQuery != "" && !(strings.HasPrefix(r.URL.Path, "/v1/services/") && strings.HasSuffix(r.URL.Path, "/metrics")) {
 			failure(w, 400, "INVALID_QUERY")
 			return
 		}
@@ -60,7 +61,7 @@ func (a App) Handler() http.Handler {
 		defer cancel()
 		r = r.WithContext(ctx)
 		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") {
+		if len(r.Header.Values("Authorization")) != 1 || !strings.HasPrefix(auth, "Bearer ") {
 			failure(w, 401, "AUTH_REQUIRED")
 			return
 		}
@@ -73,6 +74,14 @@ func (a App) Handler() http.Handler {
 			return
 		}
 		path := r.URL.Path
+		if path == "/v1/images" || strings.HasPrefix(path, "/v1/services/") {
+			if !billing {
+				failure(w, 403, "FORBIDDEN")
+				return
+			}
+			a.Services.Handle(w, r, a.now())
+			return
+		}
 		if strings.HasPrefix(path, "/v1/resources/") {
 			if !billing {
 				failure(w, 403, "FORBIDDEN")

@@ -12,7 +12,10 @@ import (
 )
 
 type OperationInput struct {
-	Force        bool   `json:"force,omitempty"`
+	Force   bool                  `json:"force,omitempty"`
+	Guest   nodeproto.GuestParams `json:"guest,omitzero"`
+	service *serviceIntent        `json:"-"`
+
 	Action       string `json:"action"`
 	Confirmation string `json:"confirmation"`
 	ArtifactID   string `json:"artifact_id,omitempty"`
@@ -67,7 +70,7 @@ func OperationPermission(action string) string {
 	switch action {
 	case "create", "start", "shutdown", "public_adopt", "public_detach":
 		return "instances.manage"
-	case "reboot", "force_off", "delete":
+	case "reboot", "force_off", "delete", "reinstall", "reset_password", "rescue_enter", "rescue_exit", "suspend", "unsuspend", "resize":
 		return "instances.dangerous"
 	case "snapshot_create", "snapshot_delete", "backup_create", "backup_verify", "backup_delete":
 		return "storage.manage"
@@ -94,6 +97,13 @@ func dangerous(action string) bool {
 }
 func (in OperationInput) valid(instance string) bool {
 	if in.Force && in.Action != "reboot" {
+		return false
+	}
+	if nodeproto.GuestAction(in.Action) {
+		if !in.Guest.Valid(in.Action) || in.Guest.Params.Password != "" {
+			return false
+		}
+	} else if in.Guest != (nodeproto.GuestParams{}) {
 		return false
 	}
 	if publicIPBindingAction(in.Action) || OperationPermission(in.Action) == "" || (in.Confirmation != "" && in.Confirmation != instance) || dangerous(in.Action) && in.Confirmation != instance {
@@ -166,17 +176,36 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 		Input           OperationInput
 	}{actor, instance, in})
 	fingerprint := nodeproto.Digest(intent)
+	if in.service != nil {
+		fingerprint = in.service.Receipt.Digest
+	}
 	tx, e := s.locked(ctx)
 	if e != nil {
 		return Operation{}, false, e
 	}
 	defer tx.Rollback()
+	if in.service != nil {
+		wanted := in.service.Receipt
+		if e = checkServiceOwnerTx(ctx, tx, wanted); e != nil {
+			return Operation{}, false, e
+		}
+		prior, e := scanServiceReceipt(tx.QueryRowContext(ctx, "SELECT "+serviceReceiptColumns+" FROM controller_service_operations WHERE operation_id=?", op))
+		if e == nil {
+			if e = bindServiceReceipt(prior, wanted); e != nil {
+				return Operation{}, false, e
+			}
+			return Operation{ID: op}, true, tx.Commit()
+		}
+		if !errors.Is(e, ErrNotFound) {
+			return Operation{}, false, e
+		}
+	}
 	if e = publicResourceIDUnusedTx(ctx, tx, op); e != nil {
 		return Operation{}, false, e
 	}
 	prior, e := scanOperation(tx.QueryRowContext(ctx, "SELECT "+operationColumns+" FROM controller_operations WHERE id=?", op))
 	if e == nil {
-		if prior.ActorID != actor || prior.IntentSHA != fingerprint {
+		if in.service != nil || prior.ActorID != actor || prior.IntentSHA != fingerprint {
 			return Operation{}, false, ErrConflict
 		}
 		return prior, true, tx.Commit()
@@ -211,6 +240,11 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 	}
 	if moving != 0 && in.Action != "migrate_transfer" && in.Action != "migrate_import" && in.Action != "migrate_activate" {
 		return Operation{}, false, ErrState
+	}
+	if in.service != nil {
+		if e = serviceGateTx(ctx, tx, c, v, in, now); e != nil {
+			return Operation{}, false, e
+		}
 	}
 	o := Operation{ID: op, ActorID: actor, InstanceID: instance, NodeID: v.NodeID, Action: in.Action, ArtifactID: in.ArtifactID, TargetNodeID: in.TargetNodeID, IntentSHA: fingerprint, State: "accepted", CreatedAt: now, UpdatedAt: now}
 	if !strings.HasPrefix(in.Action, "migrate_") || in.Action == "migrate_prepare" {
@@ -252,9 +286,10 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 		st.DirectPublic = direct
 	}
 	switch in.Action {
-	case "start", "shutdown", "reboot", "force_off", "delete":
+	case "start", "shutdown", "reboot", "force_off", "delete", "reinstall", "reset_password", "rescue_enter", "rescue_exit", "suspend", "unsuspend", "resize":
 		t := nodeproto.NodeTask{Protocol: nodeproto.Protocol, OperationID: op, NodeID: v.NodeID, Action: in.Action, InstanceID: v.ID, OwnerRef: v.OwnerRef, Hostname: v.Hostname, Resources: v.Resources}
 		t.Force = in.Force
+		t.Guest = in.Guest
 		if !network.IsZero() {
 			t.Protocol, t.Network = nodeproto.NetworkProtocol, network
 		}
@@ -458,6 +493,11 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 	if e != nil {
 		return Operation{}, false, e
 	}
+	if in.service != nil {
+		if e = serviceReceiptTx(ctx, tx, in.service.Receipt); e != nil {
+			return Operation{}, false, e
+		}
+	}
 	if e = audit(ctx, tx, "user:"+actor, "operation."+in.Action, op, now); e != nil {
 		return Operation{}, false, e
 	}
@@ -616,12 +656,20 @@ func (s *SQLStore) CompleteOperation(ctx context.Context, c Config, op, status s
 		return Operation{}, e
 	}
 	if status == "succeeded" {
+		if e = completeServiceTx(ctx, tx, o, now); e != nil {
+			return Operation{}, e
+		}
 		state := ""
 		switch o.Action {
-		case "create", "start", "reboot":
+		case "create", "start", "reboot", "reinstall", "reset_password", "rescue_enter", "rescue_exit":
 			state = "running"
-		case "shutdown", "force_off":
+		case "shutdown", "force_off", "suspend", "resize":
 			state = "shutoff"
+		case "unsuspend":
+			t, _ := nodeproto.DecodeTask(o.Request)
+			if t.Guest.Params.StartAfter {
+				state = "running"
+			}
 		case "delete":
 			state = "deleted"
 		case "snapshot_create", "backup_create":

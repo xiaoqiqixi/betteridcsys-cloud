@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"io"
 	"mime"
 	"net"
@@ -83,9 +84,15 @@ func (c *NodeClient) callStatus(ctx context.Context, method, path string, body [
 	return c.callStatusTimed(ctx, method, path, body, sha, 10*time.Second, 6*time.Second)
 }
 func (c *NodeClient) callStatusTimed(ctx context.Context, method, path string, body []byte, sha string, total, header time.Duration) ([]byte, int, error) {
+	return c.callWithSecret(ctx, method, path, body, sha, total, header, "")
+}
+func (c *NodeClient) callWithSecret(ctx context.Context, method, path string, body []byte, sha string, total, header time.Duration, password string) ([]byte, int, error) {
 	req, e := http.NewRequestWithContext(ctx, method, c.profile.Endpoint+path, bytes.NewReader(body))
 	if e != nil {
 		return nil, 0, ErrUnavailable
+	}
+	if password != "" {
+		req.Header.Set("X-Aster-Guest-Secret", base64.RawStdEncoding.EncodeToString([]byte(password)))
 	}
 	req.GetBody = nil
 	req.Close = true
@@ -248,4 +255,20 @@ func (w Worker) Reconcile(ctx context.Context, op string) (out Job, err error) {
 		return j, ErrUnavailable
 	}
 	return w.Store.Complete(ctx, op, result.Status, w.now())
+}
+
+func (c *NodeClient) SendGuest(ctx context.Context, raw []byte, sha, password string) (nodeproto.NodeResult, error) {
+	t, e := nodeproto.DecodeTask(raw)
+	if e != nil || t.NodeID != c.profile.ID || nodeproto.Digest(raw) != sha || !t.Guest.PasswordRequired || t.Guest.Params.Password != "" || t.Guest.SecretSHA256 != nodeproto.Digest([]byte(t.OperationID+":"+password)) {
+		return nodeproto.NodeResult{}, ErrInput
+	}
+	out, status, e := c.callWithSecret(ctx, "POST", "/v1/tasks", raw, sha, 10*time.Second, 6*time.Second, password)
+	if e != nil || status != 200 && status != 202 {
+		return nodeproto.NodeResult{}, ErrUnavailable
+	}
+	var r nodeproto.NodeResult
+	if !strict(out, &r) || !r.Matches(t, sha) {
+		return nodeproto.NodeResult{}, ErrUnavailable
+	}
+	return r, nil
 }

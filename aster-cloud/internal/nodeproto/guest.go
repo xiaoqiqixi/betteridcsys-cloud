@@ -6,6 +6,7 @@ import "aster/billing/serviceapi"
 // over mTLS, then removed before either side writes its durable operation.
 // PasswordRequired remains so restart cannot silently dispatch without it.
 type GuestParams struct {
+	SecretSHA256     string            `json:"secret_sha256,omitempty"`
 	Params           serviceapi.Params `json:"params"`
 	ImageSHA256      string            `json:"image_sha256,omitempty"`
 	PasswordRequired bool              `json:"password_required,omitempty"`
@@ -19,6 +20,9 @@ func GuestAction(action string) bool {
 	return false
 }
 func (g GuestParams) Valid(action string) bool {
+	if g.SecretSHA256 != "" && (!g.PasswordRequired || !digest.MatchString(g.SecretSHA256)) {
+		return false
+	}
 	p := g.Params
 	if g.PasswordRequired {
 		if p.Password == "" {

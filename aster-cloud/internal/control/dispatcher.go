@@ -46,7 +46,7 @@ func (s *SQLStore) LeaseDispatch(ctx context.Context, holder string, c Config, n
 	}
 	err = tx.QueryRowContext(ctx, `SELECT q.op,q.kind,q.state FROM (
 SELECT operation_id AS op,'billing' AS kind,state,created_at,node_id FROM controller_jobs WHERE CAST(state AS BINARY) IN ('accepted','sending','dispatched')
-UNION ALL SELECT id AS op,'operation' AS kind,state,created_at,node_id FROM controller_operations WHERE CAST(state AS BINARY) IN ('accepted','sending','dispatched')
+UNION ALL SELECT id AS op,'operation' AS kind,state,created_at,node_id FROM controller_operations o WHERE CAST(state AS BINARY) IN ('accepted','sending','dispatched') AND NOT (state='accepted' AND EXISTS (SELECT 1 FROM controller_service_operations s WHERE s.operation_id=o.id AND s.requires_secret=TRUE))
 ) q LEFT JOIN controller_dispatch_leases l ON l.operation_id=q.op
 WHERE (l.operation_id IS NULL OR l.expires_at<=?) AND q.node_id IN (`+strings.Join(placeholders, ",")+`)
 ORDER BY COALESCE(l.expires_at,q.created_at),q.op LIMIT 1`, args...).Scan(&lease.OperationID, &lease.Kind, &lease.State)

@@ -197,7 +197,7 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 		var err error
 		dataPlan, err = a.PlanDatabase(ctx)
 		return err
-	}); err != nil || dataPlan.Schema != 1 || dataPlan.Charset != "utf8mb4" || dataPlan.Collation != "utf8mb4_bin" || len(dataPlan.Tables) != 39 || dataPlan.Rows != count {
+	}); err != nil || dataPlan.Schema != 1 || dataPlan.Charset != "utf8mb4" || dataPlan.Collation != "utf8mb4_bin" || len(dataPlan.Tables) != 41 || dataPlan.Rows != count {
 		t.Fatal("authenticated data plan must preserve source encoding and complete row inventory", err, dataPlan)
 	}
 	restore := func() (controllerbackup.DatabaseRestoreReport, error) {

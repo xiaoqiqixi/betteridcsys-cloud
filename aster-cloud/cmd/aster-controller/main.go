@@ -282,7 +282,14 @@ func run(args []string) error {
 		if e1 != nil || e2 != nil || e3 != nil {
 			return control.ErrUnavailable
 		}
-		app := control.App{Store: store, Config: config, Secrets: secrets}
+		if e := store.QuarantineServiceSecrets(ctx, time.Now().UTC()); e != nil {
+			return e
+		}
+		worker := control.OperationWorker{Store: store, Config: config}
+		runner := control.NewOperationRunner(worker)
+		defer runner.Close()
+		services := &control.Services{Store: store, Config: config, Runner: runner}
+		app := control.App{Store: store, Config: config, Secrets: secrets, Services: services}
 		overlayWorker := control.OverlayWorker{Store: store, Config: config}
 		overlayRunner := control.NewOverlayRunner(overlayWorker)
 		overlayContext, stopOverlay := context.WithCancel(context.Background())
@@ -308,9 +315,6 @@ func run(args []string) error {
 			}
 			mux := http.NewServeMux()
 			mux.Handle("/v1/", app.Handler())
-			worker := control.OperationWorker{Store: store, Config: config}
-			runner := control.NewOperationRunner(worker)
-			defer runner.Close()
 			mux.Handle("/console/v1/", (control.Console{Store: store, Config: config, Identity: auth, Worker: &worker, Runner: runner, OverlayWorker: &overlayWorker, OverlayRunner: overlayRunner}).Handler())
 			if *uiDirectory != "" {
 				web, e := control.Web(*uiDirectory)

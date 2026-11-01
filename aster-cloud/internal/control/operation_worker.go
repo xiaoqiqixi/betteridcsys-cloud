@@ -42,11 +42,12 @@ func (c *NodeClient) LookupStorage(ctx context.Context, op, sha string) (nodepro
 }
 
 type OperationWorker struct {
-	Store      *SQLStore
-	Config     Config
-	RPC        func(context.Context, NodeProfile) (NodeRPC, error)
-	StorageRPC func(context.Context, NodeProfile) (StorageRPC, error)
-	Now        func() time.Time
+	GuestPassword string `json:"-"`
+	Store         *SQLStore
+	Config        Config
+	RPC           func(context.Context, NodeProfile) (NodeRPC, error)
+	StorageRPC    func(context.Context, NodeProfile) (StorageRPC, error)
+	Now           func() time.Time
 }
 
 func (w OperationWorker) now() time.Time {
@@ -130,12 +131,27 @@ func (w OperationWorker) Dispatch(ctx context.Context, op string) (out Operation
 	status := "uncertain"
 	var storage *nodeproto.StorageResult
 	var callErr error
+	serviceCode := ""
 	if rpc != nil {
 		t, _ := nodeproto.DecodeTask(o.Request)
-		r, e := rpc.Send(ctx, o.Request, o.RequestSHA)
+		var r nodeproto.NodeResult
+		var e error
+		if t.Guest.PasswordRequired {
+			guest, ok := rpc.(interface {
+				SendGuest(context.Context, []byte, string, string) (nodeproto.NodeResult, error)
+			})
+			if !ok || w.GuestPassword == "" || t.Guest.SecretSHA256 != nodeproto.Digest([]byte(t.OperationID+":"+w.GuestPassword)) {
+				e = ErrState
+			} else {
+				r, e = guest.SendGuest(ctx, o.Request, o.RequestSHA, w.GuestPassword)
+			}
+		} else {
+			r, e = rpc.Send(ctx, o.Request, o.RequestSHA)
+		}
 		callErr = e
 		if e == nil && r.Matches(t, o.RequestSHA) {
 			status = r.Status
+			serviceCode = r.Code
 		}
 	} else {
 		t, _ := nodeproto.DecodeStorageTask(o.Request)
@@ -152,6 +168,7 @@ func (w OperationWorker) Dispatch(ctx context.Context, op string) (out Operation
 	if e != nil {
 		return o, e
 	}
+	w.Store.recordServiceCode(finish, op, serviceCode)
 	if callErr != nil {
 		return result, ErrUnavailable
 	}
@@ -185,6 +202,7 @@ func (w OperationWorker) Reconcile(ctx context.Context, op string) (out Operatio
 			return o, ErrUnavailable
 		}
 		status = r.Status
+		w.Store.recordServiceCode(ctx, op, r.Code)
 	} else {
 		rpc, e := w.storage(ctx, p)
 		if e != nil {

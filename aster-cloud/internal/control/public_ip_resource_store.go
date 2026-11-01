@@ -284,6 +284,13 @@ func (s *SQLStore) ReleasePublicIPResource(ctx context.Context, c Config, actor,
 }
 
 func publicResourceIDUnusedTx(ctx context.Context, tx *sql.Tx, op string) error {
+	var service int
+	if e := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM controller_service_operations WHERE operation_id=?", op).Scan(&service); e != nil {
+		return e
+	}
+	if service != 0 {
+		return ErrConflict
+	}
 	if e := publicIngressOperationIDUnusedTx(ctx, tx, op); e != nil {
 		return e
 	}

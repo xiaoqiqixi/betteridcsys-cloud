@@ -12,7 +12,42 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestGuestEphemeralSecretIsBoundToOperationAndNeverPersisted(t *testing.T) {
+	m, _, original := guestFixture(t)
+	secret := "header-only-password-never-journalled"
+	task := guestTask(m, original, "4", "reset_password", serviceapi.Params{Password: secret})
+	task.Guest.SecretSHA256 = nodeproto.Digest([]byte(task.OperationID + ":" + secret))
+	task = task.Redacted()
+	raw, _, e := task.BytesAndDigest()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = m.acceptGuest(task, raw, "wrong-secret"); e == nil {
+		t.Fatal("wrong secret accepted")
+	}
+	if _, ok := m.Lookup(task.OperationID); ok {
+		t.Fatal("invalid secret claimed an intent")
+	}
+	r, e := m.acceptGuest(task, raw, secret)
+	if e != nil || r.Status != "accepted" {
+		t.Fatal(r, e)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		r, _ = m.Lookup(task.OperationID)
+		if r.Status != "accepted" {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if r.Status != "succeeded" {
+		t.Fatal(r)
+	}
+	assertNoGuestSecret(t, m, secret)
+}
 
 type guestRunner struct {
 	*fakeRunner

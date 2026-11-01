@@ -88,12 +88,25 @@ func (m *Manager) virsh(ctx context.Context, args ...string) ([]byte, error) {
 // HTTP cancellation never cancels an accepted host command. Busy work is rejected,
 // never queued or silently retried. A process crash leaves accepted => uncertain.
 func (m *Manager) Accept(task nodeproto.NodeTask, raw []byte) (nodeproto.NodeResult, error) {
+	return m.acceptGuest(task, raw, "")
+}
+
+func (m *Manager) acceptGuest(task nodeproto.NodeTask, raw []byte, password string) (nodeproto.NodeResult, error) {
 	if !task.Valid() || task.NodeID != m.Config.NodeID {
 		return nodeproto.NodeResult{}, nodeproto.ErrInvalid
 	}
 	decoded, err := nodeproto.DecodeTask(raw)
 	if err != nil || decoded != task {
 		return nodeproto.NodeResult{}, nodeproto.ErrInvalid
+	}
+	if password != "" {
+		if !task.Guest.PasswordRequired || task.Guest.Params.Password != "" || task.Guest.SecretSHA256 != nodeproto.Digest([]byte(task.OperationID+":"+password)) {
+			return nodeproto.NodeResult{}, nodeproto.ErrInvalid
+		}
+		task.Guest.Params.Password = password
+		if !task.Valid() {
+			return nodeproto.NodeResult{}, nodeproto.ErrInvalid
+		}
 	}
 	m.admission.Lock()
 	defer m.admission.Unlock()

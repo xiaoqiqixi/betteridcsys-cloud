@@ -25,6 +25,38 @@ func NewOperationRunner(worker OperationWorker) *OperationRunner {
 func (r *OperationRunner) Start(op string) error          { return r.launch(op, false) }
 func (r *OperationRunner) StartReconcile(op string) error { return r.launch(op, true) }
 func (r *OperationRunner) launch(op string, reconcile bool) error {
+	return r.launchWith(op, reconcile, r.run)
+}
+func (r *OperationRunner) StartService(op, password string) error {
+	worker := r.worker
+	worker.GuestPassword = password
+	e := r.launchWith(op, false, func(ctx context.Context, id string) (Operation, error) {
+		defer r.quarantineSecret(id, password)
+		o, e := worker.Dispatch(ctx, id)
+		for e == nil && o.State == "dispatched" {
+			select {
+			case <-ctx.Done():
+				return o, ctx.Err()
+			case <-time.After(time.Second):
+			}
+			o, e = worker.Reconcile(ctx, id)
+		}
+		return o, e
+	})
+	if e != nil {
+		r.quarantineSecret(op, password)
+	}
+	return e
+}
+func (r *OperationRunner) quarantineSecret(op, password string) {
+	if password == "" || r.worker.Store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = r.worker.Store.QuarantineServiceSecret(ctx, op, time.Now().UTC())
+}
+func (r *OperationRunner) launchWith(op string, reconcile bool, run func(context.Context, string) (Operation, error)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.stopping {
@@ -47,7 +79,7 @@ func (r *OperationRunner) launch(op string, reconcile bool) error {
 		if reconcile {
 			o, e = r.reconcile(ctx, op)
 		} else {
-			o, e = r.run(ctx, op)
+			o, e = run(ctx, op)
 		}
 		logTransferOutcome(ctx, op, o.State, e)
 		r.mu.Lock()

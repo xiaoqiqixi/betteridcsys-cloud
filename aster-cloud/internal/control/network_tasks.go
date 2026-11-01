@@ -50,7 +50,7 @@ func networkError(e error) error {
 
 func networkActionSupported(action string) bool {
 	switch action {
-	case "start", "shutdown", "force_off", "delete":
+	case "start", "shutdown", "force_off", "delete", "suspend", "unsuspend":
 		return true
 	}
 	return false

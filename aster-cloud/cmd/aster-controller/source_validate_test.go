@@ -76,7 +76,7 @@ func sourceFixture(t *testing.T) map[string][]byte {
 	identity := map[string]string{"controller_id": "source-one", "configuration_sha256": sourceHash(files["controller/config.json"]), "installation_sha256": sourceHash(files["source/installation.json"]), "manifest_sha256": strings.Repeat("c", 64), "source_commit": strings.Repeat("b", 40), "bundle_sha256": strings.Repeat("d", 64), "machine_id_sha256": strings.Repeat("e", 64), "runtime_materials_sha256": sourceHash(digestInput.Bytes())}
 	files["source/plan.json"] = sourceJSON(map[string]any{"schema": 1, "identity": identity, "units": []any{map[string]any{"name": "aster-controller.service", "fragment": "/etc/systemd/system/aster-controller.service", "sha256": strings.Repeat("f", 64), "original_inode": map[string]int{"device": 1, "inode": 2}, "control_group": "/system.slice/aster-controller.service", "enabled": "disabled", "index": 0}}})
 	files["source/isolated.json"] = sourceJSON(map[string]any{"schema": 1, "operation_id": strings.Repeat("a", 32), "identity": identity})
-	for _, name := range strings.Fields(`controller_schema controller_lock controller_nodes controller_instances controller_jobs controller_reservations controller_audit controller_identity_lock controller_console_users controller_console_sessions controller_console_login_limits controller_identity_audit controller_operations controller_artifacts controller_migrations controller_network_vpcs controller_network_pools controller_network_leases controller_instance_networks controller_overlay_vpcs controller_overlay_epochs controller_overlay_tasks controller_overlay_members controller_public_ip_pools controller_public_ip_inventory controller_public_ip_leases controller_public_ip_active controller_public_ip_operations controller_public_ip_resources controller_public_ip_resource_operations controller_public_ip_bindings controller_public_ingress_versions controller_public_ingress_operations controller_identity_operations controller_dispatch_leases controller_region_placement controller_node_allocation controller_metrics controller_metric_cursors`) {
+	for _, name := range strings.Fields(`controller_schema controller_lock controller_nodes controller_instances controller_jobs controller_reservations controller_audit controller_identity_lock controller_console_users controller_console_sessions controller_console_login_limits controller_identity_audit controller_operations controller_artifacts controller_migrations controller_network_vpcs controller_network_pools controller_network_leases controller_instance_networks controller_overlay_vpcs controller_overlay_epochs controller_overlay_tasks controller_overlay_members controller_public_ip_pools controller_public_ip_inventory controller_public_ip_leases controller_public_ip_active controller_public_ip_operations controller_public_ip_resources controller_public_ip_resource_operations controller_public_ip_bindings controller_public_ingress_versions controller_public_ingress_operations controller_identity_operations controller_dispatch_leases controller_region_placement controller_node_allocation controller_metrics controller_metric_cursors controller_service_operations controller_service_state`) {
 		files["database/"+name+".jsonl"] = nil
 	}
 	return files
@@ -96,7 +96,7 @@ func sourceArchiveFor(t *testing.T, files map[string][]byte, key, controller, op
 	for _, name := range names {
 		entries = append(entries, map[string]any{"name": name, "size": len(files[name]), "sha256": sourceHash(files[name])})
 	}
-	manifest := sourceJSON(map[string]any{"schema": 1, "protocol": "aster.controller-backup/1", "controller_id": controller, "operation_id": operation, "source_commit": source, "schema_version": 15, "source_plan_sha256": sourceHash(files["source/plan.json"]), "files": entries})
+	manifest := sourceJSON(map[string]any{"schema": 1, "protocol": "aster.controller-backup/1", "controller_id": controller, "operation_id": operation, "source_commit": source, "schema_version": 16, "source_plan_sha256": sourceHash(files["source/plan.json"]), "files": entries})
 	var plaintext bytes.Buffer
 	tw := tar.NewWriter(&plaintext)
 	for _, name := range append([]string{"manifest.json"}, names...) {
@@ -634,7 +634,7 @@ func TestAuthenticatedDatabasePlanBeforeProvision(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil || plan.Schema != 1 || plan.Charset != "utf8mb4" || plan.Collation != "utf8mb4_bin" || plan.Rows != 15 || len(plan.Tables) != 39 {
+	if err != nil || plan.Schema != 1 || plan.Charset != "utf8mb4" || plan.Collation != "utf8mb4_bin" || plan.Rows != 16 || len(plan.Tables) != 41 {
 		t.Fatal("synthetic complete-record plan rejected or encoding/count changed", err, plan)
 	}
 	last := ""
@@ -645,7 +645,7 @@ func TestAuthenticatedDatabasePlanBeforeProvision(t *testing.T) {
 		last = table.Name
 		want := int64(0)
 		if table.Name == "controller_schema" {
-			want = 15
+			want = 16
 		}
 		if table.Rows != want {
 			t.Fatal("table row inventory")
