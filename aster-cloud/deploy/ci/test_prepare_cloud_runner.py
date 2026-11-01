@@ -88,6 +88,49 @@ class CloudRunnerCLI(unittest.TestCase):
         self.assertEqual((outside / 'keep').read_text(), 'unchanged')
         self.assertEqual(self.commands, [])
 
+    def pull_request(self, **changes):
+        repo = {'full_name': self.env['GITHUB_REPOSITORY'], 'id': int(self.env['GITHUB_REPOSITORY_ID'])}
+        payload = {'number': 7, 'pull_request': {'head': {'repo': dict(repo)}, 'base': {'repo': dict(repo)}}}
+        path = self.root/'event.json'
+        path.write_text(json.dumps(payload))
+        env = dict(self.env, GITHUB_EVENT_NAME='pull_request', GITHUB_REF='refs/pull/7/merge',
+                   GITHUB_EVENT_PATH=str(path), **changes)
+        return env, payload, path
+
+    def test_same_repository_pull_request_prepares_and_cleans_owned_fixture(self):
+        env, _, _ = self.pull_request()
+        code, _, error = self.call('prepare', env=env)
+        self.assertEqual(code, 0, error)
+        case = Path(self.env_file.read_text().strip().split('=', 1)[1])
+        self.commands.clear()
+        code, output, error = self.call('cleanup', env=dict(env, ASTER_NATIVE_FIXTURE_ROOT=str(case)))
+        self.assertEqual(code, 0, error)
+        self.assertTrue(json.loads(output)['removed'])
+        self.assertFalse(case.exists())
+        self.assertEqual(self.commands, [])
+
+    def test_fork_wrong_base_missing_or_mismatched_pr_event_refused_before_host_actions(self):
+        for side in ('head', 'base'):
+            for repo in ({'full_name': 'foreign/fork', 'id': 123},
+                         {'full_name': self.env['GITHUB_REPOSITORY'], 'id': 123}, None):
+                with self.subTest(side=side, repo=repo):
+                    env, payload, path = self.pull_request()
+                    payload['pull_request'][side]['repo'] = repo
+                    path.write_text(json.dumps(payload))
+                    self.assertEqual(self.call('prepare', env=env)[0], 1)
+                    self.assertEqual(self.call('cleanup', env=env)[0], 1)
+        env, payload, path = self.pull_request()
+        for bad in ('', '{', '[]', json.dumps({**payload, 'number': 8}),
+                    json.dumps({**payload, 'pull_request': None}), ' '* (1024*1024+1)):
+            path.write_text(bad)
+            self.assertEqual(self.call('prepare', env=env)[0], 1)
+        env, _, path = self.pull_request()
+        for ref in ('refs/heads/main', 'refs/pull/7/head', 'refs/pull/8/merge'):
+            self.assertEqual(self.call('prepare', env=dict(env, GITHUB_REF=ref))[0], 1)
+        self.assertEqual(self.call('prepare', env=dict(env, GITHUB_EVENT_NAME='pull_request_target'))[0], 1)
+        self.assertEqual(self.commands, [])
+        self.assertEqual(list(self.root.glob('aster-cloud-ci.*')), [])
+
     def test_other_repositories_events_platforms_and_root_cannot_prepare(self):
         for key, value in (('GITHUB_REPOSITORY', 'xiaoqiqixi/betteridcsys'),
                            ('GITHUB_REPOSITORY_ID', '1418618420'), ('GITHUB_ACTIONS', 'false'),
