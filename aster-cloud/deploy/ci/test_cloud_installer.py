@@ -1097,6 +1097,27 @@ class InstallerContract(unittest.TestCase):
             run.assert_not_called()
             self.assertTrue((installer.SYSTEMD_ROOT/'controller-heartbeat@.timer').is_file())
 
+    def test_service_enable_failure_stops_heartbeats_and_api_even_if_disable_fails(self):
+        with self.isolated_host(), self.synthetic_certificate_acceptance():
+            approval, _, cfg, config = self.approval_input()
+            cfg['nodes'] = [{'id': 'node-a'}]
+            config.write_text(json.dumps(cfg))
+            args = self.args(extra=('--apply', '--approval', str(approval), '--start'))
+            def failed_enable(argv, **kwargs):
+                if argv in ([installer.SYSTEMCTL, 'enable', 'aster-controller.service'],
+                            [installer.SYSTEMCTL, 'disable', 'aster-controller.service']):
+                    raise installer.InstallerError('synthetic enable/disable failure')
+                return b''
+            with mock.patch.object(installer, 'run_fixed', side_effect=failed_enable) as run, \
+                    mock.patch.object(installer, 'strict_health'), self.assertRaises(installer.InstallerError):
+                installer.execute(args)
+            calls = [call.args[0] for call in run.call_args_list]
+            self.assertIn([installer.SYSTEMCTL, 'disable', '--now', '--', 'controller-heartbeat@node-a.timer'], calls)
+            self.assertIn([installer.SYSTEMCTL, 'stop', '--', 'controller-heartbeat@node-a.service'], calls)
+            self.assertIn([installer.SYSTEMCTL, 'stop', 'aster-controller.service'], calls)
+            receipt = json.loads((installer.STATE_ROOT/'controller/state.json').read_text())
+            self.assertEqual(receipt['failure_cleanup'], 'own-service-stop-unconfirmed')
+
     def test_foreign_heartbeat_template_and_instance_override_refused_before_commands(self):
         for name in ('controller-heartbeat@.timer', 'controller-heartbeat@node-a.service', 'controller-heartbeat@.service.d'):
             with self.subTest(name=name), self.isolated_host(), self.synthetic_certificate_acceptance():

@@ -1188,13 +1188,17 @@ def execute(args):
             if start_uncertain:
                 # This exact dedicated unit was installed by this operation. Do
                 # not leave a newly started, unverified API running after failure.
-                try:
-                    if "service-enable" in state["steps"] or state.get("current_step") == "service-enable":
+                cleanup_failed = False
+                if "service-enable" in state["steps"] or state.get("current_step") == "service-enable":
+                    try:
                         run_fixed([SYSTEMCTL, "disable", unit_path.name])
+                    except InstallerError:
+                        cleanup_failed = True
+                try:
                     run_fixed([SYSTEMCTL, "stop", unit_path.name])
-                    state["failure_cleanup"] = "own-service-stopped"
                 except InstallerError:
-                    state["failure_cleanup"] = "own-service-stop-unconfirmed"
+                    cleanup_failed = True
+                state["failure_cleanup"] = "own-service-stop-unconfirmed" if cleanup_failed else "own-service-stopped"
             atomic_state(state_path, state)
             raise
         return {"component": args.component, "status": state["status"], "configuration": state["configuration"],
