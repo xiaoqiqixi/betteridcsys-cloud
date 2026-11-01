@@ -321,12 +321,13 @@ func (s *SQLStore) Admit(ctx context.Context, r controllerapi.Request, candidate
 			return Job{}, false, ErrCapacity
 		}
 	}
-	supported := false
-	fresh := false
+	eligible := 0
+	transient := false
 	for _, candidate := range candidates {
 		if candidate.DirectPublicRequired {
 			continue
 		}
+		eligible++
 		n := candidate.Node
 		var profile string
 		var maintenance bool
@@ -335,6 +336,7 @@ func (s *SQLStore) Admit(ctx context.Context, r controllerapi.Request, candidate
 		var caps []byte
 		e = tx.QueryRowContext(ctx, "SELECT profile_sha256,maintenance,heartbeat_at,free_cpu,free_memory_mib,free_disk_gib,capabilities FROM controller_nodes WHERE id=?", n.ID).Scan(&profile, &maintenance, &seen, &cpu, &mem, &disk, &caps)
 		if errors.Is(e, sql.ErrNoRows) {
+			transient = true
 			continue
 		}
 		if e != nil {
@@ -345,9 +347,9 @@ func (s *SQLStore) Admit(ctx context.Context, r controllerapi.Request, candidate
 			at = &seen.Time
 		}
 		if profile != candidate.ProfileSHA || maintenance || !heartbeatFresh(at, now, ttl) {
+			transient = true
 			continue
 		}
-		fresh = true
 		var capability Capability
 		if !strict(caps, &capability) {
 			return Job{}, false, ErrUnavailable
@@ -355,7 +357,6 @@ func (s *SQLStore) Admit(ctx context.Context, r controllerapi.Request, candidate
 		if !capability.SupportsNetwork(candidate.Resources, n, candidate.NetworkProfileID) {
 			continue
 		}
-		supported = true
 		var rc, rm, rd int64
 		e = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(cpu),0),COALESCE(SUM(memory_mib),0),COALESCE(SUM(disk_gib),0) FROM controller_reservations WHERE node_id=? AND released=FALSE", n.ID).Scan(&rc, &rm, &rd)
 		if e != nil {
@@ -365,6 +366,7 @@ func (s *SQLStore) Admit(ctx context.Context, r controllerapi.Request, candidate
 		// Reservations remain conservative after heartbeat (including existing VMs),
 		// so externally consumed capacity can never be sold as a fresh reservation.
 		if int64(rsc.CPUCores) > cpu-rc || int64(rsc.MemoryMiB) > mem-rm || int64(rsc.SystemDiskGiB) > disk-rd {
+			transient = true
 			continue
 		}
 		j.InstanceID = id()
@@ -395,11 +397,25 @@ func (s *SQLStore) Admit(ctx context.Context, r controllerapi.Request, candidate
 		}
 		break
 	}
-	if j.State == "rejected" && len(candidates) > 0 && (!fresh || supported) {
-		return Job{}, false, ErrCapacity
+	if j.State == "rejected" {
+		if transient {
+			return Job{}, false, ErrCapacity
+		}
+		code := "UNSUPPORTED_PRODUCT"
+		if eligible == 0 && len(candidates) > 0 {
+			code = "DIRECT_PUBLIC_LEASE_REQUIRED"
+		}
+		// A rejected job has no node task. Preserve its reason in the existing
+		// immutable request slot so replay never reclassifies changed capacity.
+		j.NodeRequest = mustJSON(billingRejection{Code: code})
 	}
 	if _, e = tx.ExecContext(ctx, "INSERT INTO controller_jobs("+jobColumns+") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", j.OperationID, j.OrderID, j.ControllerID, j.RequestSHA, j.RequestJSON, j.InstanceID, j.NodeID, j.NodeProfileSHA, j.NodeRequestSHA, j.NodeRequest, j.State, now, now); e != nil {
 		return Job{}, false, e
+	}
+	if j.State == "rejected" {
+		if e = audit(ctx, tx, "billing:"+r.Product.ControllerID, "provisioning.rejected."+j.RejectionCode(), j.OperationID, now); e != nil {
+			return Job{}, false, e
+		}
 	}
 	if e = audit(ctx, tx, "billing:"+r.Product.ControllerID, "provisioning."+j.State, j.OperationID, now); e != nil {
 		return Job{}, false, e
@@ -661,4 +677,24 @@ func (s *SQLStore) Audits(ctx context.Context) ([]Audit, error) {
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// billingRejection is controller-local evidence, never a dispatchable node task.
+type billingRejection struct {
+	Code string `json:"rejection_code"`
+}
+
+func (j Job) RejectionCode() string {
+	if j.State != "rejected" || j.NodeID != "" || j.InstanceID != "" {
+		return ""
+	}
+	var reason billingRejection
+	if !strict(j.NodeRequest, &reason) {
+		return ""
+	}
+	switch reason.Code {
+	case "DIRECT_PUBLIC_LEASE_REQUIRED", "UNSUPPORTED_PRODUCT":
+		return reason.Code
+	}
+	return ""
 }
