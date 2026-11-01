@@ -18,7 +18,7 @@ class HostMigrationEntry(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         value = json.loads(r.stdout)
         self.assertEqual(value['protocol'], 'aster.controller-migration/1')
-        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check', 'target-verification-system-prepare', 'target-verification-system-status'])
+        self.assertEqual(value['actions'], ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check', 'target-verification-system-prepare', 'target-verification-system-status', 'target-verification-serve'])
         self.assertIs(value['export_restore'], False)
         self.assertIs(value['migration_ready'], False)
 
@@ -125,6 +125,20 @@ class HostMigrationEntry(unittest.TestCase):
                     self.assertEqual(result.returncode,1)
                     self.assertEqual(result.stdout,b'')
                     self.assertNotIn(b'PRIVATE_SENTINEL',result.stderr)
+
+    def test_managed_verification_service_accepts_no_paths_identity_or_success_tickets(self):
+        for args in ((),('--operation','../escape'),('--operation','a'*32,'--uid','999'),
+                     ('--operation','a'*32,'--command','PRIVATE_SENTINEL'),
+                     ('--operation','a'*32,'--proof','PRIVATE_SENTINEL'),
+                     ('--operation','a'*32,'--dsn','PRIVATE_SENTINEL'),
+                     ('--operation','a'*32,'--expires','2099-01-01'),
+                     ('--operation','a'*32,'--force')):
+            with self.subTest(args=args):
+                result=self.invoke('target-verification-serve',*args)
+                self.assertEqual(result.returncode,1)
+                self.assertEqual(result.stdout,b'')
+                self.assertNotIn(b'PRIVATE_SENTINEL',result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()

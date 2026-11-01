@@ -9,6 +9,7 @@ that a new release has been authenticated.
 import argparse
 import contextlib
 import ctypes
+from datetime import datetime, timezone
 import fcntl
 import hashlib
 import importlib.util
@@ -16,14 +17,18 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
+import socket
 import stat
 import subprocess
 import sys
+import time
 
 PROTOCOL = 'aster.controller-migration/1'
 RESTORE_ERRORS = set('TARGET_RESTORE_SERVER_INVENTORY_REJECTED TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED'.split())
 VERIFICATION_ERRORS = set('TARGET_VERIFICATION_IDENTITY_REJECTED TARGET_VERIFICATION_GRANTS_REJECTED TARGET_VERIFICATION_BINDING_REJECTED TARGET_VERIFICATION_CREDENTIAL_REJECTED TARGET_VERIFICATION_CREATE_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_UNCONFIRMED TARGET_VERIFICATION_REVOCATION_STARTED TARGET_VERIFICATION_REVOCATION_BINDING_REJECTED TARGET_VERIFICATION_REVOCATION_UNCONFIRMED TARGET_VERIFICATION_REVOCATION_NOT_STARTED TARGET_VERIFICATION_CONNECTION_INVENTORY_UNCONFIRMED TARGET_VERIFICATION_SESSIONS_ACTIVE'.split())
 VERIFICATION_SYSTEM_ACTIONS = ('target-verification-system-prepare','target-verification-system-status')
+VERIFICATION_SERVICE_ACTIONS = ('target-verification-serve',)
 SYSTEMD = Path('/etc/systemd/system')
 CONFIG = Path('/etc/aster-controller/config.json')
 INSTALL_STATE = Path('/var/lib/aster-cloud-installer/controller/state.json')
@@ -929,6 +934,137 @@ class Target(Host):
         return {'name':name,'uid':identity['uid'],'gid':identity['gid'],
                 'receipt_sha256':digest(self.i.protected_read(str(receipt_path),8192))}
 
+    def serve_verification(self, module, plan, database_plan, proof, account):
+        """Fixed installed root manager; keeps installation/target locks to exit.
+
+        This is not an alternate HTTP server. Only the installed Go coordinator
+        can authenticate the original archive, destroy its plaintext, and launch
+        the existing isolated service. A fresh root inventory approves its
+        in-flight proof, not a previously printed runtime-check report.
+        """
+        code = 'TARGET_VERIFICATION_SERVICE_UNCONFIRMED'
+        args = (self.operation,proof['phase']['plan_sha256'],
+                database_plan['data']['charset'],database_plan['data']['collation'])
+        # Go has authenticated this UTC, microsecond-aligned <= 1 hour phase.
+        # Retain its remaining duration once; wall-clock rollback cannot extend
+        # the root manager, and no retry reconstructs a fresh approval window.
+        expiry = datetime.fromisoformat(proof['phase']['expires_at'].removesuffix('Z')+'+00:00')
+        remaining = (expiry-datetime.now(timezone.utc)).total_seconds()
+        require(0 < remaining <= 3600,code)
+        deadline = time.monotonic()+remaining
+        identity = self.system_identity(proof,readonly=True)
+        parent, child = socket.socketpair(socket.AF_UNIX,socket.SOCK_STREAM)
+        parent.settimeout(180)
+        process, stream = None, None
+        stopping = False
+        previous = {}
+        def stop(_number, _frame):
+            nonlocal stopping
+            stopping = True
+            try:
+                parent.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        try:
+            for number in (signal.SIGTERM,signal.SIGINT):
+                previous[number] = signal.signal(number,stop)
+            # The held installation lock already occupies a live descriptor 3.
+            # Replace it in the disposable child only; no shared parent FD is
+            # overwritten, and no root lock descriptor reaches the ELF.
+            os.fstat(3)
+            child_fd = child.fileno()
+            def inherited_channel():
+                if child_fd != 3:
+                    os.dup2(child_fd,3)
+                    os.close(child_fd)
+                os.set_inheritable(3,True)
+            process = subprocess.Popen([str(self.binary),'migration-verification-coordinator'],
+                pass_fds=tuple(sorted({3,child_fd})),preexec_fn=inherited_channel,
+                stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+                cwd='/',env={'PATH':'/usr/bin:/bin','LANG':'C'})
+            child.close()
+            nonce = os.urandom(32).hex()
+            require(not stopping,code)
+            parent.sendall((json.dumps({'schema':1,'operation_id':self.operation,'nonce':nonce},
+                separators=(',',':'))+'\n').encode())
+            stream = parent.makefile('rb')
+            raw = stream.readline((256 << 10)+2)
+            require(raw.endswith(b'\n') and len(raw)<=(256 << 10)+1 and process.poll() is None,code)
+            received = self.i.strict_json(raw)
+            require(isinstance(received,dict) and set(received)=={'schema','nonce','proof'} and
+                    type(received['schema']) is int and received=={'schema':1,'nonce':nonce,'proof':proof},code)
+            # Go holds its original sealed-target control lock here. Do not
+            # recurse into a Go preflight and deadlock that lock. Independently
+            # recheck full root SQL, immutable approval, bytes and OS identity.
+            require(module.complete_verification_mysql(*args,readonly=True)==account,code)
+            verify_installation(self,self.i,target=True)
+            self.verify_verification_data(received['proof']['phase'],plan,database_plan,readonly=True)
+            require(self.system_identity(proof,readonly=True)==identity and not stopping,code)
+            parent.sendall((json.dumps({'schema':1,'nonce':nonce,'proof_sha256':digest(raw),
+                'uid':identity['uid'],'gid':identity['gid']},separators=(',',':'))+'\n').encode())
+            # Go independently enforces the ORIGINAL absolute deadline in both
+            # parent and child. This manager never sends a second approval or
+            # asks for restart/renewal. Signals close admission before waiting.
+            while process.poll() is None:
+                if stopping or time.monotonic()>=deadline:
+                    stop(None,None)
+                    try:
+                        process.wait(timeout=20)
+                    except subprocess.TimeoutExpired:
+                        raise Refused(code) from None
+                    break
+                try:
+                    process.wait(timeout=.25)
+                except subprocess.TimeoutExpired:
+                    continue
+            require(process.returncode==0,code)
+        finally:
+            # EOF also cancels an in-flight archive check. Bounded wait is on
+            # our actual Popen child, never a PID read from a file or a stranger.
+            try:
+                parent.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            if stream is not None:
+                stream.close()
+            parent.close()
+            child.close()
+            try:
+                if process is not None and process.poll() is None:
+                    try:
+                        process.wait(timeout=20)
+                    except subprocess.TimeoutExpired:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=10)
+            finally:
+                for number,handler in previous.items():
+                    signal.signal(number,handler)
+        self.unused_host(configuration=True,verification=True)
+        verify_installation(self,self.i,target=True)
+        # Expiry must not make stop verification impossible. This is the data
+        # status path, not runtime-check (which correctly refuses expired use).
+        after = self.target_command('verification-data-status')
+        self.verify_verification_data(after,plan,database_plan,readonly=True)
+        for key in ('operation_id','plan','plan_sha256','account_receipt_sha256','started_at','expires_at'):
+            require(after[key]==proof['phase'][key],code)
+        require(module.complete_verification_mysql(*args,readonly=True)==account and
+                self.system_identity(proof,readonly=True)==identity,code)
+        deadline = time.monotonic()+10
+        while True:
+            connections = module.verification_connection_inventory(self.root/'database','aster_v_'+self.operation[:23])
+            if connections['active']==connections['pending']==0:
+                break
+            require(time.monotonic()<deadline,'TARGET_VERIFICATION_SERVICE_CONNECTIONS_NOT_DRAINED')
+            time.sleep(.1)
+        return {'schema':1,'operation_id':self.operation,'coordinator_exited':True,
+                'system_identity_idle':True,'original_data_phase_verified':True,
+                'sql_connections_drained':True,'root_inventory_verified':True,
+                'target_remains_sealed':True,'service_started':False,'migration_ready':False}
+
     def prepare_database(self, action):
         # Full records and embedded migration checks precede directory creation,
         # APT, credentials, SQL and even the data-stage start journal.
@@ -1139,7 +1275,7 @@ class Target(Host):
         # bytes are not accepted here as proof; Go must authenticate and derive
         # every file under the original target seal before claiming success.
         with self.lock('target.lock'):
-            verification = action in ('target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status','target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS)
+            verification = action in ('target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status','target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS, *VERIFICATION_SERVICE_ACTIONS)
             self.unused_host(configuration=True, verification=verification)
             plan = self.read(self.root / 'plan.json')
             plan_path, directory = self.root / 'database-plan.json', self.root / 'database'
@@ -1203,11 +1339,11 @@ class Target(Host):
         if action == 'target-verification-data-begin':
             approval_path = self.root/'verification-data-approval.json'
             require(approval_path.exists() or approval_path.is_symlink(),'TARGET_VERIFICATION_DATA_APPROVAL_REQUIRED')
-        phase_status = has_data_phase and action in ('target-verification-data-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS)
+        phase_status = has_data_phase and action in ('target-verification-data-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS, *VERIFICATION_SERVICE_ACTIONS)
         if phase_status:
             result = self.target_command('verification-data-status')
             self.verify_verification_data(result,plan,database_plan,readonly=True)
-        elif action in ('target-verification-data-status','target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS):
+        elif action in ('target-verification-data-status','target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS, *VERIFICATION_SERVICE_ACTIONS):
             raise Refused('TARGET_VERIFICATION_DATA_NOT_STARTED')
         else:
             result = self.target_command('verification-plan')
@@ -1219,7 +1355,7 @@ class Target(Host):
                     'schema': 1, 'operation_id': self.operation, 'plan_sha256': result['plan_sha256']},
                 'TARGET_VERIFICATION_APPROVAL_CHANGED')
         args = (self.operation, result['plan_sha256'], database_plan['data']['charset'], database_plan['data']['collation'])
-        if action in ('target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS):
+        if action in ('target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS, *VERIFICATION_SERVICE_ACTIONS):
             # Stopped-host preflight only. Reuse the original phase after valid
             # authentication changes; never silently start, extend or rebase.
             before = module.complete_verification_mysql(*args,readonly=True)
@@ -1235,6 +1371,8 @@ class Target(Host):
             require(module.complete_verification_mysql(*args,readonly=True)==before,
                     'TARGET_VERIFICATION_ACCOUNT_CHANGED')
             self.unused_host(configuration=True,verification=True)
+            if action=='target-verification-serve':
+                return self.serve_verification(module,plan,database_plan,proof,before)
             if action in VERIFICATION_SYSTEM_ACTIONS:
                 readonly = action=='target-verification-system-status'
                 identity = self.system_identity(proof,readonly=readonly)
@@ -1309,7 +1447,7 @@ class Target(Host):
     def prepare(self, action):
         with self.installation_lock():
             verify_installation(self, self.i, target=True)
-            if action in ('target-configuration-publish','target-configuration-status','target-configuration-resume','target-verification-plan','target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status','target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS):
+            if action in ('target-configuration-publish','target-configuration-status','target-configuration-resume','target-verification-plan','target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status','target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS, *VERIFICATION_SERVICE_ACTIONS):
                 return self.publish_configuration(action)
             self.unused_host()
             plan = self.target_command('plan')
@@ -1378,14 +1516,14 @@ class Arguments(argparse.ArgumentParser):
 
 def main():
     parser = Arguments(description=__doc__)
-    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS))
+    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS, *VERIFICATION_SERVICE_ACTIONS))
     parser.add_argument('--operation')
     args = parser.parse_args()
     require((args.action in ('capabilities', 'plan') and args.operation is None) or
             (args.action not in ('capabilities', 'plan') and isinstance(args.operation, str) and OP.fullmatch(args.operation)),
             'EXACT_OPERATION_ID_REQUIRED')
     if args.action == 'capabilities':
-        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS],
+        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS, *VERIFICATION_SERVICE_ACTIONS],
                 'export_restore': False, 'migration_ready': False}
     if args.action.startswith('target-'):
         return Target(install_module(), args.operation).prepare(args.action)

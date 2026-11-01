@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Disposable Linux root/non-root HTTPS + real minimum-SQL process acceptance.
 
-Only called inside the owned TCG restore guest. The original managed launcher,
-source-host export, successful staff login and browser/UI are NOT certified here.
+Only called inside the owned TCG restore guest. These scenarios exercise the
+installed root launcher; systemd management, source-host export, successful
+staff login and browser/UI are NOT certified by these process checks.
 """
 import base64
 import ctypes
@@ -16,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import socket
 import ssl
 import subprocess
@@ -283,6 +285,106 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
                     except subprocess.TimeoutExpired:
                         process.kill()
                         process.wait(timeout=10)
+
+    # Now exercise the PRODUCTION installed root manager. The native fixture
+    # no longer supplies its approval response, UID/GID or SQL checks here.
+    # This foreground lifecycle is still not systemd or a staff browser login.
+    progress('target-verification-installed-manager')
+    entry = version/'templates/host-management/controller-migration.py'
+    process = subprocess.Popen(['/usr/bin/python3','-I',str(entry),
+        'target-verification-serve','--operation',operation],stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE,cwd='/',env=manager.ENV)
+    try:
+        deadline = time.monotonic()+240
+        while True:
+            require(process.poll() is None and time.monotonic()<deadline,code)
+            try:
+                status, body = request('/')
+                break
+            except (ConnectionRefusedError,TimeoutError):
+                time.sleep(.1)
+        require(status==200 and body==(version/'ui/index.html').read_bytes() and
+            not list(inputs.glob('.restore-verify-*')),code)
+        status, body = request('/console/v1/auth/me')
+        require(status==401 and isinstance(json.loads(body),dict),code)
+        duplicate = subprocess.run(['/usr/bin/python3','-I',str(entry),
+            'target-verification-serve','--operation',operation],stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,stderr=subprocess.PIPE,cwd='/',env=manager.ENV,timeout=60)
+        require(duplicate.returncode==1 and not duplicate.stdout and
+            json.loads(duplicate.stderr)=={'error':'TARGET_INSTALLATION_BUSY'} and request('/')[0]==200,code)
+        process.terminate()  # fixed managed SIGTERM, not a fake stop receipt
+        stdout,stderr = process.communicate(timeout=90)
+        require(process.returncode==0 and not stderr and json.loads(stdout)=={
+            'schema':1,'operation_id':operation,'coordinator_exited':True,
+            'system_identity_idle':True,'original_data_phase_verified':True,
+            'sql_connections_drained':True,'root_inventory_verified':True,
+            'target_remains_sealed':True,'service_started':False,'migration_ready':False},code)
+        stopped()
+        require(target.prepare('target-verification-runtime-check')=={**expected,'root_inventory_verified':True},code)
+        require(system_command('target-verification-system-status')=={**prepared,'readonly':True},code)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=10)
+
+    progress('target-verification-installed-manager-parent-death')
+    process = subprocess.Popen(['/usr/bin/python3','-I',str(entry),
+        'target-verification-serve','--operation',operation],stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE,cwd='/',env=manager.ENV)
+    try:
+        deadline = time.monotonic()+240
+        while True:
+            require(process.poll() is None and time.monotonic()<deadline,code)
+            try:
+                require(request('/')[0]==200,code)
+                break
+            except (ConnectionRefusedError,TimeoutError):
+                time.sleep(.1)
+        def child_ids(pid):
+            result = set()
+            for task in (Path('/proc')/str(pid)/'task').iterdir():
+                try:
+                    result.update((task/'children').read_text().split())
+                except FileNotFoundError:
+                    continue
+            require(len(result)==1 and all(value.isdigit() for value in result),code)
+            return result
+        coordinators = child_ids(process.pid)
+        descendants = coordinators | child_ids(next(iter(coordinators)))
+        # Observe real numeric identities and kernel start times before killing
+        # only OUR Popen parent. No pidfile or arbitrary cleanup target is used.
+        identities = {pid:(Path('/proc')/pid/'stat').read_text().rsplit(')',1)[1].split()[19]
+                      for pid in descendants}
+        process.kill()
+        stdout,stderr = process.communicate(timeout=10)
+        require(process.returncode==-signal.SIGKILL and not stdout and not stderr,code)
+        deadline = time.monotonic()+30
+        while identities:
+            for pid,started in list(identities.items()):
+                try:
+                    current = (Path('/proc')/pid/'stat').read_text().rsplit(')',1)[1].split()[19]
+                except FileNotFoundError:
+                    current = None
+                if current!=started:
+                    del identities[pid]
+            require(not identities or time.monotonic()<deadline,code)
+            if identities:
+                time.sleep(.1)
+        stopped()
+        require(target.prepare('target-verification-runtime-check')=={**expected,'root_inventory_verified':True} and
+            system_command('target-verification-system-status')=={**prepared,'readonly':True},code)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=10)
 
 def accept(root, inputs, controller, operation, module, directory, ui_directory, require, progress):
     require(os.geteuid() == 0)

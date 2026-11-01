@@ -934,7 +934,7 @@ def execute(metadata):
             'verification_data_phase_bound', 'verification_data_auth_delta_validated', 'verification_data_drift_refused',
             'verification_data_immutable_intent', 'verification_data_revocation_compatible',
             'verification_runtime_credential_revalidated', 'verification_runtime_preserves_original_phase',
-            'verification_runtime_drift_and_revocation_refused', 'verification_isolated_https_sql', 'verification_original_approval_launch', 'verification_dedicated_system_identity', 'verification_static_ui_protected',
+            'verification_runtime_drift_and_revocation_refused', 'verification_isolated_https_sql', 'verification_original_approval_launch', 'verification_dedicated_system_identity', 'verification_installed_root_manager', 'verification_static_ui_protected',
             'verification_nonroot_no_new_privileges', 'verification_network_namespace_isolated',
             'verification_network_all_ipv4_tables_empty',
             'verification_stop_expiry_parent_death_drained')})
