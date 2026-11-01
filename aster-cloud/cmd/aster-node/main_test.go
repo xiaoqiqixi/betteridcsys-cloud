@@ -79,3 +79,16 @@ func TestPublicFilterPrintIsStandaloneAndNeverFallsBackToServe(t *testing.T) {
 		t.Fatal(o, e)
 	}
 }
+
+func TestResolveInstanceRequiresReasonAndExclusiveMode(t *testing.T) {
+	id := strings.Repeat("a", 32)
+	for _, args := range [][]string{{"--resolve-instance="}, {"--resolve-instance", id}, {"--reason", "reviewed"}, {"--resolve-instance", id, "--reason", " "}, {"--resolve-instance", id, "--reason", "reviewed", "--doctor=false"}, {"--resolve-instance", id, "--reason", "reviewed", "--reconcile-operation", id}, {"--resolve-instance", id, "--reason", "reviewed", "--network-recovery-status", "private-v1"}, {"--resolve-instance", id, "--reason", "reviewed", "--recover-network", "/root/recovery.json"}} {
+		if _, err := parseArgs(args); err == nil {
+			t.Fatal("ambiguous resolution accepted", args)
+		}
+	}
+	o, err := parseArgs([]string{"--resolve-instance", id, "--reason", "Reviewed original guest"})
+	if err != nil || !o.resolveProvided || o.resolveInstance != id || o.reason != "Reviewed original guest" {
+		t.Fatal(o, err)
+	}
+}

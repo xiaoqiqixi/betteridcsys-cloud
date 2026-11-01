@@ -313,23 +313,12 @@ func (m *Manager) stopOVS(ctx context.Context, i Instance, t nodeproto.NodeTask,
 		if _, e = m.virsh(ctx, command, i.Domain); e != nil {
 			return e
 		}
-		deadline := time.NewTimer(10 * time.Second)
-		defer deadline.Stop()
-		tick := time.NewTicker(100 * time.Millisecond)
-		defer tick.Stop()
-		for {
-			s, e = m.state(ctx, i.Domain)
-			if e == nil && s == "shut off" {
-				return nil
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-deadline.C:
-				return errors.New("stop unconfirmed")
-			case <-tick.C:
-			}
+		timeout := 10 * time.Second
+		if command == "shutdown" {
+			timeout = m.shutdownTimeout()
 		}
+		_, e = m.observePower(ctx, i.Domain, "shut off", timeout)
+		return e
 	})
 	return e
 }

@@ -188,7 +188,7 @@ func newFixture(t *testing.T) (*Manager, *fakeRunner, nodeproto.NodeTask) {
 	for i := 19; i < 51; i++ {
 		key[i] = byte(i)
 	}
-	c := Config{NodeID: "node-a", DatacenterID: "dc-a", NodeGroupID: "group-a", Listen: "127.0.0.1:9443", ExpectedControllerCertificateSHA256: strings.Repeat("a", 64), Certificate: filepath.Join(root, "server.crt"), PrivateKey: filepath.Join(root, "server.key"), ControllerCA: filepath.Join(root, "ca.crt"), StateDirectory: filepath.Join(root, "state"), StorageID: "local", StorageDirectory: storage, Images: map[string]Image{"ubuntu22": {imagePath, nodeproto.Digest(body)}}, AllowUnmeteredDefault: true, CPUAllocationLimit: 32, MemoryAllocationLimitMiB: 32768, DiskAllocationLimitGiB: 1000, Network: Network{Enabled: true, DedicatedBridgeAcknowledged: true, Bridge: "asterbr0", CIDR: "192.0.2.0/24", Gateway: "192.0.2.1", Addresses: []string{"192.0.2.10", "192.0.2.11"}, DNS: []string{"192.0.2.53"}, Filter: "aster-static-ipv4", FilterSHA256: nodeproto.Digest(f.filter), SSHAuthorizedKeys: []string{"ssh-ed25519 " + base64.StdEncoding.EncodeToString(key)}}}
+	c := Config{ShutdownTimeoutSeconds: 120, NodeID: "node-a", DatacenterID: "dc-a", NodeGroupID: "group-a", Listen: "127.0.0.1:9443", ExpectedControllerCertificateSHA256: strings.Repeat("a", 64), Certificate: filepath.Join(root, "server.crt"), PrivateKey: filepath.Join(root, "server.key"), ControllerCA: filepath.Join(root, "ca.crt"), StateDirectory: filepath.Join(root, "state"), StorageID: "local", StorageDirectory: storage, Images: map[string]Image{"ubuntu22": {imagePath, nodeproto.Digest(body)}}, AllowUnmeteredDefault: true, CPUAllocationLimit: 32, MemoryAllocationLimitMiB: 32768, DiskAllocationLimitGiB: 1000, Network: Network{Enabled: true, DedicatedBridgeAcknowledged: true, Bridge: "asterbr0", CIDR: "192.0.2.0/24", Gateway: "192.0.2.1", Addresses: []string{"192.0.2.10", "192.0.2.11"}, DNS: []string{"192.0.2.53"}, Filter: "aster-static-ipv4", FilterSHA256: nodeproto.Digest(f.filter), SSHAuthorizedKeys: []string{"ssh-ed25519 " + base64.StdEncoding.EncodeToString(key)}}}
 	if e := c.Validate(); e != nil {
 		t.Fatal("fixture config", e)
 	}
@@ -546,6 +546,7 @@ func TestReadonlyReconcileNeverRepeatsMutation(t *testing.T) {
 		t.Fatal("reconcile executed write")
 	}
 	reboot := next(task, "4", "reboot")
+	f.fail = "shutdown" // A lost mutation acknowledgement cannot be reconciled from running alone.
 	if r := submit(t, m, reboot); r.Status != "uncertain" {
 		t.Fatal(r)
 	}

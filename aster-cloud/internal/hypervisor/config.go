@@ -57,6 +57,7 @@ type StorageConfig struct {
 }
 
 type Config struct {
+	ShutdownTimeoutSeconds              int                   `json:"shutdown_timeout_seconds"`
 	OVSProfiles                         map[string]OVSProfile `json:"ovs_profiles,omitempty"`
 	Storage                             StorageConfig         `json:"storage"`
 	NodeID                              string                `json:"node_id"`
@@ -136,7 +137,7 @@ func ownedPath(path string, private bool, directory bool) error {
 	return nil
 }
 func LoadConfig(path string) (Config, error) {
-	var cfg Config
+	cfg := Config{ShutdownTimeoutSeconds: 120}
 	if err := ownedPath(path, true, false); err != nil {
 		return cfg, err
 	}
@@ -152,9 +153,16 @@ func LoadConfig(path string) (Config, error) {
 	if d.Decode(&cfg) != nil || d.Decode(new(any)) != io.EOF {
 		return cfg, errors.New("invalid config")
 	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || bytes.Equal(bytes.TrimSpace(fields["shutdown_timeout_seconds"]), []byte("null")) {
+		return cfg, errors.New("invalid shutdown_timeout_seconds")
+	}
 	return cfg, cfg.Validate()
 }
 func (c Config) Validate() error {
+	if c.ShutdownTimeoutSeconds < 10 || c.ShutdownTimeoutSeconds > 600 {
+		return errors.New("shutdown_timeout_seconds must be between 10 and 600")
+	}
 	if !nodeproto.ValidNodeID(c.NodeID) || !safeName.MatchString(c.StorageID) || !hashString(c.ExpectedControllerCertificateSHA256) || len(c.Images) == 0 {
 		return errors.New("invalid node identity/config")
 	}
