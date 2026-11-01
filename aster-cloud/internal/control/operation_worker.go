@@ -180,7 +180,7 @@ func (w OperationWorker) Reconcile(ctx context.Context, op string) (out Operatio
 	if e != nil {
 		return o, e
 	}
-	if o.State == "succeeded" || o.State == "rejected" {
+	if o.State == "succeeded" || o.State == "rejected" || o.State == "resolved" {
 		return o, nil
 	}
 	if o.State != "sending" && o.State != "dispatched" && o.State != "uncertain" {
@@ -200,6 +200,9 @@ func (w OperationWorker) Reconcile(ctx context.Context, op string) (out Operatio
 		t, _ := nodeproto.DecodeTask(o.Request)
 		if e != nil || !r.Matches(t, o.RequestSHA) {
 			return o, ErrUnavailable
+		}
+		if r.Resolved != nil {
+			return w.Store.CompleteResolvedOperation(ctx, w.Config, o.ID, r, w.now())
 		}
 		status = r.Status
 		w.Store.recordServiceCode(ctx, op, r.Code)

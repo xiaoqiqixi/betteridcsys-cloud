@@ -190,12 +190,13 @@ power operation. Original status, request digest and error code remain uncertain
 It never starts/stops a guest or removes disks. OVS/network recovery, storage
 operations and migration fences require their own recovery procedures; this
 command cannot bypass them. Missing/unowned domains and failed observations
-retain quarantine. Restarting the service exposes the annotation through GET of the original task.
-The controller store can record this as a terminal `resolved` operation and apply
-the observed state while retaining the uncertain audit. The dispatcher adapter
-in `internal/control/operation_worker.go` is still required: until that adapter
-is installed, `operation-reconcile` keeps the controller operation uncertain and
-new operations remain blocked. Do not edit operation rows to bypass that gate.
+retain quarantine. Restarting the service exposes the annotation through GET of
+the original task. Run controller `operation-reconcile` for that operation: it
+verifies the original task binding, records terminal `resolved`, and applies the
+observed instance state while retaining the uncertain audit and a digest of the
+resolution receipt. New operations on the instance can then be accepted. Repeating
+reconciliation of a resolved operation never overwrites a newer instance state
+or resends the original mutation. Do not edit operation rows to bypass that gate.
 
 Explicit force tasks, resolution annotations and additional observed states use
 journal schema 6. Schemas 1–5 remain readable; older binaries reject schema 6.

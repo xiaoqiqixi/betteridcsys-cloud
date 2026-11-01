@@ -289,3 +289,45 @@ func TestConsoleForceOnlyAppliesToConfirmedReboot(t *testing.T) {
 		t.Fatal("force bypassed confirmation")
 	}
 }
+
+type resolutionResultRPC struct {
+	NodeRPC
+	result nodeproto.NodeResult
+}
+
+func (r resolutionResultRPC) Lookup(context.Context, string, string) (nodeproto.NodeResult, error) {
+	return r.result, nil
+}
+
+func TestOperationReconcileRejectsUnboundOrInvalidResolution(t *testing.T) {
+	for _, invalid := range []string{"operation", "request", "instance", "status", "operator", "reason"} {
+		t.Run(invalid, func(t *testing.T) {
+			now := time.Now().UTC()
+			p := testProfile()
+			v := Instance{ID: id(), NodeID: p.ID, OwnerRef: id(), Hostname: "guest", Resources: testResources(p), State: "running", CreatedAt: now, UpdatedAt: now}
+			task := nodeproto.NodeTask{Protocol: nodeproto.Protocol, OperationID: id(), NodeID: p.ID, InstanceID: v.ID, OwnerRef: v.OwnerRef, Hostname: v.Hostname, Resources: v.Resources, Action: "reboot"}
+			raw, sha, _ := task.BytesAndDigest()
+			op := Operation{ID: task.OperationID, ActorID: id(), InstanceID: v.ID, NodeID: p.ID, ProfileSHA: p.Digest(), Action: task.Action, Protocol: task.Protocol, Request: raw, RequestSHA: sha, State: "uncertain", CreatedAt: now, UpdatedAt: now}
+			f := &stateMachineFixture{op: op, instance: v}
+			r := nodeproto.NodeResult{Protocol: task.Protocol, OperationID: op.ID, RequestSHA256: sha, InstanceID: v.ID, Status: "uncertain", Resolved: &nodeproto.InstanceResolution{Who: "uid:0", When: now.Format(time.RFC3339Nano), ObservedState: "shut off", Reason: "Checked original guest"}}
+			switch invalid {
+			case "operation":
+				r.OperationID = id()
+			case "request":
+				r.RequestSHA256 = strings.Repeat("0", 64)
+			case "instance":
+				r.InstanceID = id()
+			case "status":
+				r.Status = "succeeded"
+			case "operator":
+				r.Resolved.Who = "uid:1000"
+			case "reason":
+				r.Resolved.Reason = ""
+			}
+			w := OperationWorker{Store: stateMachineStore(t, f), Config: testConfig(p), RPC: func(context.Context, NodeProfile) (NodeRPC, error) { return resolutionResultRPC{result: r}, nil }}
+			if _, err := w.Reconcile(context.Background(), op.ID); !errors.Is(err, ErrUnavailable) || f.writes != 0 || f.op.State != "uncertain" || f.instance.State != "running" {
+				t.Fatal("invalid resolution cleared quarantine", invalid, err, f)
+			}
+		})
+	}
+}
