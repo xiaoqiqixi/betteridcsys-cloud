@@ -93,10 +93,14 @@ func serviceReceiptTx(ctx context.Context, tx *sql.Tx, r ServiceReceipt) error {
 }
 func (s *SQLStore) AdmitService(ctx context.Context, c Config, instance string, r serviceapi.ActionRequest, now time.Time) (ServiceReceipt, bool, error) {
 	_, digest, e := r.BytesAndDigest()
-	if e != nil || !nodeproto.ValidID(instance) || r.Action == "terminate" && r.Params.Confirmation != instance {
+	if e != nil || !nodeproto.ValidID(instance) {
 		return ServiceReceipt{}, false, ErrInput
 	}
 	receipt := ServiceReceipt{OperationID: r.OperationID, InstanceID: instance, OwnerRef: r.OwnerRef, Action: r.Action, Digest: digest, Status: "accepted", Code: "ACCEPTED", RequiresSecret: r.Params.Password != "", SnapshotName: r.Params.Name, CreatedAt: now}
+	if r.Action == "terminate" && r.Params.Confirmation != instance {
+		receipt.Status, receipt.Code = "rejected", "CONFIRMATION_REQUIRED"
+		return s.rejectService(ctx, receipt)
+	}
 	in := OperationInput{Action: r.Action, Confirmation: instance, ArtifactID: r.Params.SnapshotID}
 	if in.Action == "stop" {
 		in.Action = "shutdown"
@@ -302,6 +306,10 @@ func completeServiceTx(ctx context.Context, tx *sql.Tx, o Operation, now time.Ti
 			resources.CPUCores = t.Guest.Params.CPUCores
 			resources.MemoryMiB = t.Guest.Params.MemoryMB
 			resources.SystemDiskGiB = t.Guest.Params.DiskGB
+			if t.Guest.Params.SetBandwidth {
+				resources.BandwidthMbps = t.Guest.Params.BandwidthMbps
+				resources.InboundBandwidthMbps = t.Guest.Params.InboundBandwidthMbps
+			}
 		}
 		raw, _ := json.Marshal(resources)
 		_, e = tx.ExecContext(ctx, "UPDATE controller_instances SET resources=?,updated_at=? WHERE id=?", raw, now, o.InstanceID)

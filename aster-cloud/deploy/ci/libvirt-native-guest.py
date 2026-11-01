@@ -92,7 +92,7 @@ def progress(stage):
     """Fixed diagnostic checkpoints only; never a success/acceptance signal."""
     if PROGRESS_NONCE is None:
         return
-    allowed = {"preflight", "prepare", "inspect", "resume", "image-and-config", "doctor"}
+    allowed = {"preflight", "prepare", "inspect", "resume", "image-and-config", "doctor", "guest-lifecycle"}
     commands = {"apt-update", "apt-simulate", "apt-install", "network-rules-readonly", "other-fixed-command"}
     commands |= {"systemd-" + name for name in ("start", "stop", "enable", "disable", "daemon-reload", "show", "is-active")}
     commands |= {"virsh-" + name for name in ("net-list", "list", "capabilities")}
@@ -352,12 +352,20 @@ def execute(metadata):
         raise Refused("DOCTOR_CONFIG_NOT_ACCEPTED")
     checks = doctor_evidence(doctor.returncode, report)
     require(sha(ROOT / "bandwidth-fixture.test") == metadata["bandwidth_fixture_sha256"], "REAL_NODE_BINARY_HASH_MISMATCH")
-    run([str(ROOT / "bandwidth-fixture.test"), "-test.run=^TestNativeBandwidthLiveXML$", "-test.timeout=90s"], timeout=100)
+    PHASE = "guest-lifecycle"
+    progress(PHASE)
+    lifecycle = run([str(ROOT / "bandwidth-fixture.test"), "-test.run=^TestNative(BandwidthLiveXML|GuestLifecycleAndConsole)$", "-test.timeout=7m", "-test.v"], timeout=430, check=False)
+    if lifecycle.returncode != 0:
+        for action in ("create", "reinstall", "rescue_enter", "rescue_exit", "delete"):
+            if ("native " + action + ":").encode() in lifecycle.stdout:
+                raise Refused("GUEST_LIFECYCLE_" + action.upper() + "_FAILED")
+        raise Refused("GUEST_LIFECYCLE_FAILED")
+    require(all(("--- PASS: " + name + " ").encode() in lifecycle.stdout for name in ("TestNativeBandwidthLiveXML", "TestNativeGuestLifecycleAndConsole")), "GUEST_LIFECYCLE_FAILED")
     require(inspect_libvirt() == proof, "PREPARE_RESUME_CHANGED_PROOF")
     return {"schema": 1, "passed": True, "real_apt": True, "real_systemd": True, "libvirt_prepared": True,
             "kvm_ready": False, "explicit_kvm_denial": True, "non_kvm_doctor_checks_passed": True,
             "source_sha": metadata["source_sha"], "ubuntu": metadata["ubuntu"], "image_sha256": metadata["image_sha256"],
-            "real_approved_image_validated": True, "bandwidth_live_xml_verified": True, "vendor_default_xml_retained_unchanged_on_resume": True,
+            "real_approved_image_validated": True, "bandwidth_live_xml_verified": True, "guest_reinstall_verified": True, "guest_rescue_verified": True, "guest_console_verified": True, "vendor_default_xml_retained_unchanged_on_resume": True,
             "doctor_protocol": report["protocol"], "doctor_checks": checks, **proof}
 
 

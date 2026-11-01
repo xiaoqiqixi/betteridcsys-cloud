@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guest console · Aster Cloud</title>
+  <link rel="stylesheet" href="/console/console.css">
+  <script type="module" src="/console/console.js"></script>
+</head>
+<body>
+  <header>
+    <div><p class="brand">ASTER CLOUD</p><h1>Guest console</h1></div>
+    <nav aria-label="Console controls">
+      <button id="keys" type="button" disabled>Send Ctrl+Alt+Delete</button>
+      <button id="disconnect" type="button" disabled>Disconnect</button>
+    </nav>
+  </header>
+  <main>
+    <p id="status" role="status">Connecting to your instance…</p>
+    <p id="help">Click the display to send keyboard input. Press Escape three times to return focus to the console controls.</p>
+    <div id="screen" role="region" aria-label="Remote guest display" aria-describedby="help"></div>
+    <noscript>JavaScript is required to use the guest console.</noscript>
+  </main>
+  <footer>Close this tab when you finish. To reconnect, open a new console from your service page.</footer>
+</body>
+</html>

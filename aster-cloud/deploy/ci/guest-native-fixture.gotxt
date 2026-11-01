@@ -1,0 +1,231 @@
+// Compiled only into the disposable signed Ubuntu TCG guest test binary.
+package hypervisor
+
+import (
+	"aster/billing/controllerapi"
+	"aster/billing/serviceapi"
+	"aster/cloud/internal/control"
+	"aster/cloud/internal/nodeproto"
+	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/xml"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+)
+
+type nativeGuestStore struct{ value control.Instance }
+
+func (s *nativeGuestStore) Instance(context.Context, string) (control.Instance, error) {
+	return s.value, nil
+}
+func (*nativeGuestStore) ServiceFlags(context.Context, string) (control.ServiceFlags, error) {
+	return control.ServiceFlags{}, nil
+}
+func (*nativeGuestStore) ServiceCapability(context.Context, control.Config, string, time.Time) (control.Capability, error) {
+	return control.Capability{Actions: []string{"console"}}, nil
+}
+func (*nativeGuestStore) AdmitService(context.Context, control.Config, string, serviceapi.ActionRequest, time.Time) (control.ServiceReceipt, bool, error) {
+	return control.ServiceReceipt{}, false, control.ErrState
+}
+func (*nativeGuestStore) ServiceReceipt(context.Context, string) (control.ServiceReceipt, error) {
+	return control.ServiceReceipt{}, control.ErrState
+}
+func (*nativeGuestStore) Operation(context.Context, string) (control.Operation, error) {
+	return control.Operation{}, control.ErrState
+}
+func (*nativeGuestStore) ServiceSnapshots(context.Context, string, int) (serviceapi.Snapshots, error) {
+	return serviceapi.Snapshots{}, control.ErrState
+}
+
+func TestNativeGuestLifecycleAndConsole(t *testing.T) {
+	if runtime.GOOS != "linux" || os.Geteuid() != 0 {
+		t.Fatal("native Linux root fixture required")
+	}
+	if _, e := os.Stat("/dev/kvm"); !os.IsNotExist(e) {
+		t.Fatal("TCG fixture must have no KVM")
+	}
+	c, e := LoadConfig("/etc/aster-node/node.json")
+	if e != nil {
+		t.Fatal(e)
+	}
+	c.Maintenance = false
+	c.AllowIsolatedNoNIC = true
+	c.AllowDelete = true
+	c.Guest = GuestConfig{Enabled: true, Families: map[string]string{"signed-ubuntu": "linux"}, RescueImages: []string{"signed-ubuntu"}}
+	// Approved read-only base and directory are root-owned, readable by QEMU.
+	for _, path := range []string{c.StorageDirectory, filepath.Dir(c.Images["signed-ubuntu"].Path)} {
+		if e = os.Chmod(path, 0755); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if e = os.Chmod(c.Images["signed-ubuntu"].Path, 0644); e != nil {
+		t.Fatal(e)
+	}
+	l, e := OpenLedger(c.StateDirectory, c.NodeID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	m := &Manager{Config: c, Ledger: l, Runner: OSRunner{}, domainKind: "qemu"}
+	defer func() { m.Shutdown(); m.Ledger.Close() }()
+	id := strings.Repeat("a", 32)
+	domain := "aster-" + id
+	defer func() {
+		exec.Command(Virsh, "--connect", "qemu:///system", "destroy", domain).Run()
+		exec.Command(Virsh, "--connect", "qemu:///system", "undefine", domain).Run()
+	}()
+	task := nodeproto.NodeTask{Protocol: nodeproto.Protocol, OperationID: strings.Repeat("b", 32), InstanceID: id, OwnerRef: strings.Repeat("c", 32), NodeID: c.NodeID, Hostname: "native-guest", Action: "create", Resources: controllerapi.Resources{DatacenterID: c.DatacenterID, ComputeNodeID: c.NodeID, NodeGroupID: c.NodeGroupID, ImageID: "signed-ubuntu", CPUCores: 1, MemoryMiB: 512, SystemDiskGiB: 4, SystemStorageID: "local", NetworkType: "normal", TrafficDirection: "all"}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	submitNative := func(task nodeproto.NodeTask) {
+		t.Helper()
+		raw, _, e := task.BytesAndDigest()
+		if e != nil {
+			t.Fatal(e)
+		}
+		r, e := m.Submit(ctx, task, raw)
+		if e != nil || r.Status != "succeeded" {
+			t.Fatalf("native %s: status=%s code=%s error=%v", task.Action, r.Status, r.Code, e)
+		}
+	}
+	submitNative(task)
+	i, _ := l.Instance(id)
+	original, _ := os.Stat(i.Disk)
+	task = guestTask(m, task, "d", "reinstall", serviceapi.Params{ImageID: "signed-ubuntu", Password: "native-secret-not-persisted"})
+	submitNative(task)
+	i, _ = l.Instance(id)
+	replacement, _ := os.Stat(i.Disk)
+	if original == nil || replacement == nil || os.SameFile(original, replacement) || i.State != "running" {
+		t.Fatal("native replacement not observed")
+	}
+	if _, e = os.Stat(guestBackup(i.Disk, task.OperationID)); !os.IsNotExist(e) {
+		t.Fatal("native successful replacement retained old disk")
+	}
+	assertNoGuestSecret(t, m, "native-secret-not-persisted")
+	task = guestTask(m, task, "e", "rescue_enter", serviceapi.Params{ImageID: "signed-ubuntu"})
+	submitNative(task)
+	i, _ = l.Instance(id)
+	if i.Rescue == nil {
+		t.Fatal("native rescue not persisted")
+	}
+	raw, e := m.virsh(ctx, "dumpxml", domain)
+	var d domainXML
+	if e != nil || xml.Unmarshal(raw, &d) != nil || len(d.Devices.Disks) != 3 || d.Devices.Disks[1].Source.File != i.Disk || d.Devices.Disks[1].ReadOnly == nil {
+		t.Fatal("native original rescue disk not read-only")
+	}
+	m.Shutdown()
+	l.Close()
+	l, e = OpenLedger(c.StateDirectory, c.NodeID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	m = &Manager{Config: c, Ledger: l, Runner: OSRunner{}, domainKind: "qemu"}
+	task = guestTask(m, task, "f", "rescue_exit", serviceapi.Params{})
+	submitNative(task)
+	i, _ = l.Instance(id)
+	if i.Rescue != nil || i.State != "running" {
+		t.Fatal("native rescue exit failed")
+	}
+	nativeConsoleHandshake(t, ctx, m, i)
+	task = next(task, "9", "delete")
+	task.Guest = nodeproto.GuestParams{}
+	submitNative(task)
+}
+
+func nativeConsoleHandshake(t *testing.T, ctx context.Context, m *Manager, i Instance) {
+	t.Helper()
+	node := httptest.NewUnstartedServer(m.Handler())
+	var e error
+	node.TLS, e = ServerTLS(m.Config)
+	if e != nil {
+		t.Fatal(e)
+	}
+	node.StartTLS()
+	defer node.Close()
+	pair, e := tls.LoadX509KeyPair(m.Config.Certificate, m.Config.PrivateKey)
+	if e != nil {
+		t.Fatal(e)
+	}
+	pin := sha256.Sum256(pair.Certificate[0])
+	root := filepath.Dir(m.Config.Certificate)
+	p := control.NodeProfile{ID: m.Config.NodeID, DatacenterID: m.Config.DatacenterID, GroupID: m.Config.NodeGroupID, Endpoint: node.URL, AllowedCIDRs: []string{"127.0.0.1/32"}, CAFile: m.Config.ControllerCA, ClientCertFile: filepath.Join(root, "controller.pem"), ClientKeyFile: filepath.Join(root, "controller.key"), ServerCertificateSHA256: hex.EncodeToString(pin[:])}
+	s := &nativeGuestStore{value: control.Instance{ID: i.ID, OwnerRef: i.OwnerRef, NodeID: m.Config.NodeID, Hostname: i.Hostname, State: "running", Resources: i.Resources}}
+	console, e := control.NewGuestConsole(s, control.Config{Nodes: []control.NodeProfile{p}}, "https://localhost")
+	if e != nil {
+		t.Fatal(e)
+	}
+	controller := httptest.NewTLSServer(console.Handler())
+	defer controller.Close()
+	console.Origin = controller.URL
+	ticket, e := console.Issue(ctx, s.value)
+	if e != nil {
+		t.Fatal(e)
+	}
+	u, _ := url.Parse(ticket.URL)
+	opts := &websocket.DialOptions{HTTPClient: controller.Client(), HTTPHeader: http.Header{"Origin": []string{controller.URL}}, Subprotocols: []string{"binary"}}
+	endpoint := "wss" + strings.TrimPrefix(controller.URL, "https") + "/console/ws?ticket=" + u.Fragment
+	ws, _, e := websocket.Dial(ctx, endpoint, opts)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer ws.CloseNow()
+	stream := websocket.NetConn(ctx, ws, websocket.MessageBinary)
+	defer stream.Close()
+	read := func(size int) []byte {
+		t.Helper()
+		b := make([]byte, size)
+		if _, e := io.ReadFull(stream, b); e != nil {
+			t.Fatal("native console read", e)
+		}
+		return b
+	}
+	write := func(b []byte) {
+		t.Helper()
+		if _, e := stream.Write(b); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if string(read(12)) != "RFB 003.008\n" {
+		t.Fatal("native VNC banner")
+	}
+	write([]byte("RFB 003.008\n"))
+	n := int(read(1)[0])
+	if n < 1 || n > 16 {
+		t.Fatal("native VNC security negotiation")
+	}
+	types := read(n)
+	none := false
+	for _, v := range types {
+		none = none || v == 1
+	}
+	if !none {
+		t.Fatal("local VNC authentication mode")
+	}
+	write([]byte{1})
+	if binary.BigEndian.Uint32(read(4)) != 0 {
+		t.Fatal("native VNC security result")
+	}
+	write([]byte{1})
+	init := read(24)
+	nameLength := binary.BigEndian.Uint32(init[20:24])
+	if nameLength > 4096 || binary.BigEndian.Uint16(init[:2]) == 0 || binary.BigEndian.Uint16(init[2:4]) == 0 {
+		t.Fatal("native VNC framebuffer")
+	}
+	read(int(nameLength))
+	if _, response, e := websocket.Dial(ctx, endpoint, opts); e == nil || response.StatusCode != 404 {
+		t.Fatal("native console ticket replay")
+	}
+}

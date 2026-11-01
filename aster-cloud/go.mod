@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	aster/billing v0.0.0
 	filippo.io/age v1.3.2
+	github.com/coder/websocket v1.8.15
 	github.com/go-sql-driver/mysql v1.9.3
 	golang.org/x/sys v0.49.0
 )

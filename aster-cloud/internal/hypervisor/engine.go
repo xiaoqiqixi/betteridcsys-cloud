@@ -58,6 +58,7 @@ func (OSRunner) Run(ctx context.Context, binary string, args ...string) ([]byte,
 }
 
 type Manager struct {
+	domainKind          string // test-only TCG backend; production always defaults to KVM
 	readOverlaySnapshot func(fabric.OverlayConfig) (overlayproto.Snapshot, string, error)
 	loadOVSConfig       func(string) (fabric.Config, error)  // nil in production
 	ovsFactory          func(fabric.Config) (ovsGate, error) // deterministic test seam
@@ -945,7 +946,7 @@ type domainXML struct {
 
 func (m *Manager) domainXML(i Instance) ([]byte, error) {
 	var d domainXML
-	d.Type = "kvm"
+	d.Type = m.domainType()
 	d.Name = i.Domain
 	d.Memory.Unit = "MiB"
 	d.Memory.Value = i.Resources.MemoryMiB
@@ -988,7 +989,6 @@ func (m *Manager) domainXML(i Instance) ([]byte, error) {
 		original.Target.Dev = "vdb"
 		if !i.Rescue.Writable {
 			original.ReadOnly = &struct{}{}
-			original.Source.SecurityLabel = &diskSecurityLabelXML{Model: "dac", Relabel: "no"}
 		}
 		rescue := i
 		rescue.Disk = rescueDisk(i)
@@ -1074,7 +1074,7 @@ func (m *Manager) assertOwned(ctx context.Context, i Instance) error {
 		return err
 	}
 	var domain domainXML
-	if xml.Unmarshal(raw, &domain) != nil || domain.Type != "kvm" || domain.Name != i.Domain || domain.Metadata.Instance.XMLName.Space != "urn:aster:node:1" || domain.Metadata.Instance.InstanceID != i.ID || domain.Metadata.Instance.OwnerRef != i.OwnerRef || domain.Metadata.Instance.NodeID != m.Config.NodeID {
+	if xml.Unmarshal(raw, &domain) != nil || domain.Type != m.domainType() || domain.Name != i.Domain || domain.Metadata.Instance.XMLName.Space != "urn:aster:node:1" || domain.Metadata.Instance.InstanceID != i.ID || domain.Metadata.Instance.OwnerRef != i.OwnerRef || domain.Metadata.Instance.NodeID != m.Config.NodeID {
 		return ErrOwnership
 	}
 	if len(domain.Devices.Graphics) > 1 {

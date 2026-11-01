@@ -151,7 +151,7 @@ func (m *Manager) guestStop(ctx context.Context, t nodeproto.NodeTask, i Instanc
 		return e
 	}
 	if state == "shut off" {
-		return nil
+		return restoreRescueDiskOwner(i)
 	}
 	if !nodeproto.ValidObservedState(state) {
 		return ErrOwnership
@@ -165,6 +165,9 @@ func (m *Manager) guestStop(ctx context.Context, t nodeproto.NodeTask, i Instanc
 		return e
 	}
 	_, e = m.observePower(ctx, i.Domain, "shut off", 10*time.Second)
+	if e == nil {
+		e = restoreRescueDiskOwner(i)
+	}
 	return e
 }
 func (m *Manager) guestStart(ctx context.Context, t nodeproto.NodeTask, i Instance) error {

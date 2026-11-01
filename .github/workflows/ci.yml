@@ -219,6 +219,7 @@ jobs:
           assert summary['host_process_isolation_verified'] is True and summary['sandbox_selftests_passed'] is True
           assert summary['relay_cleanup_verified'] is True
           assert guest['bandwidth_live_xml_verified'] is True
+          assert all(guest[k] is True for k in ('guest_reinstall_verified', 'guest_rescue_verified', 'guest_console_verified'))
           assert guest['explicit_kvm_denial'] is True and guest['non_kvm_doctor_checks_passed'] is True
           assert guest['default_network_absent'] is True and guest['virbr_absent'] is True
           assert guest['libvirt_no_tcp_listener'] is True and guest['empty_network_mount_verified'] is True

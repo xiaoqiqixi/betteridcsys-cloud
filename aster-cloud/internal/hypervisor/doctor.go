@@ -221,7 +221,7 @@ func (m *Manager) Capabilities(ctx context.Context) nodeproto.Capabilities {
 		c.Maintenance = true
 		c.Limitations = append(c.Limitations, "Host doctor prerequisites are incomplete; no mutation is advertised.")
 	} else if !c.Maintenance {
-		c.Actions = []string{"create", "start", "shutdown", "reboot", "force_off"}
+		c.Actions = []string{"create", "start", "shutdown", "reboot", "force_off", "console", "metrics"}
 		if m.Config.Guest.Enabled {
 			c.Actions = append(c.Actions, "reinstall", "reset_password", "rescue_enter", "rescue_exit", "suspend", "unsuspend", "resize")
 		}

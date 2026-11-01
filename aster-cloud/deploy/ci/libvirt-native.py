@@ -53,7 +53,7 @@ RELAY_PROOF = {}
 SANDBOX_PROOF = {}
 RELAY_EVENTS = {"spawned", "dns-ok", "dns-failed", "dns-nonpublic", "connect-ok", "connect-failed", "guest-first-bytes", "server-first-bytes", "guest-eof", "server-eof", "timeout", "io-failed"}
 BOOT_STAGES = {"bootcmd", "boot-mask:start", "boot-mask:done", "boot-hosts:start", "boot-hosts:done", "runcmd-enter"}
-GUEST_PHASES = {"preflight", "prepare", "inspect", "resume", "image-and-config", "doctor", "controller-install", "target-plan", "target-provision", "target-maintenance", "target-maintenance-root-login", "target-maintenance-nonroot-login", "target-maintenance-confirmation", "target-maintenance-drift", "target-maintenance-nss", "target-credentials", "target-grants", "target-refusals", "target-import", "target-readback", "target-materials", "target-data-refusals", "target-sessions", "target-configuration-plan", "target-configuration-publish"}
+GUEST_PHASES = {"preflight", "prepare", "inspect", "resume", "image-and-config", "doctor", "guest-lifecycle", "controller-install", "target-plan", "target-provision", "target-maintenance", "target-maintenance-root-login", "target-maintenance-nonroot-login", "target-maintenance-confirmation", "target-maintenance-drift", "target-maintenance-nss", "target-credentials", "target-grants", "target-refusals", "target-import", "target-readback", "target-materials", "target-data-refusals", "target-sessions", "target-configuration-plan", "target-configuration-publish"}
 DIAGNOSTIC_COMMANDS = {"apt-update", "apt-simulate", "apt-install", "network-rules-readonly", "other-fixed-command"} | {
     "systemd-" + name for name in ("start", "stop", "enable", "disable", "daemon-reload", "show", "is-active")} | {
     "virsh-" + name for name in ("net-list", "list", "capabilities")}
@@ -86,6 +86,7 @@ APPROVED_IMAGE_BLOCK_DEVICE_REQUIRED APPROVED_IMAGE_FORMAT_REJECTED APPROVED_IMA
 APPROVED_IMAGE_SIZE_REJECTED APPROVED_IMAGE_TRUNCATED DEFAULT_NETWORK_VISIBLE DOCTOR_CHECK_INVENTORY_REJECTED DOCTOR_CHECK_SCHEMA_REJECTED
 DOCTOR_CONFIG_NOT_ACCEPTED DOCTOR_DID_NOT_DENY_KVM DOCTOR_DUPLICATE_CHECK_REJECTED DOCTOR_MISSING_EXPLICIT_KVM_DENIAL
 DOCTOR_OTHER_PREREQUISITE_FAILED EMPTY_NETWORK_MOUNT_NOT_EFFECTIVE EMPTY_NETWORK_MOUNT_NOT_READONLY GUEST_COMMAND_OUTPUT_BOUND
+GUEST_LIFECYCLE_FAILED GUEST_LIFECYCLE_CREATE_FAILED GUEST_LIFECYCLE_REINSTALL_FAILED GUEST_LIFECYCLE_RESCUE_ENTER_FAILED GUEST_LIFECYCLE_RESCUE_EXIT_FAILED GUEST_LIFECYCLE_DELETE_FAILED
 GUEST_FIXED_COMMAND_FAILED GUEST_UBUNTU_MISMATCH LIBVIRT_BRIDGE_CREATED MOUNTED_DEFAULT_NETWORK_XML_VISIBLE NODE_FIXTURE_PATH_ALREADY_EXISTS
 OFFICIAL_GUEST_NOT_FRESH_NO_PURGE_ALLOWED OWNED_DAEMON_PID_REQUIRED OWNED_LIBVIRT_TCP_LISTENER_FOUND OWNED_QEMU_GUEST_REQUIRED
 OWNED_UNIT_NOT_ACTIVE PREPARE_RESUME_CHANGED_PROOF PREPARE_RESUME_FAILED PRIVATE_PREPARE_RECEIPT_REQUIRED REAL_APT_PACKAGE_NOT_INSTALLED
@@ -702,12 +703,16 @@ def make_seed(work, root, source_sha, image_provenance, scenario="libvirt"):
         metadata['node_binary_sha256'] = digest(binary)
         qos_fixture = work / 'bandwidth-fixture.test'
         qos_source = root / 'aster-cloud/internal/hypervisor/native_bandwidth_fixture_test.go'
+        guest_source = root / 'aster-cloud/internal/hypervisor/native_guest_fixture_test.go'
+        require(not guest_source.exists(), 'PROCESS_FIXTURE_SOURCE_COLLISION')
         require(not qos_source.exists(), 'PROCESS_FIXTURE_SOURCE_COLLISION')
         try:
             qos_source.write_bytes((HERE/'bandwidth-native-fixture.gotxt').read_bytes())
+            guest_source.write_bytes((HERE/'guest-native-fixture.gotxt').read_bytes())
             run([go, 'test', '-mod=readonly', '-c', '-ldflags=-s -w', '-o', str(qos_fixture), './internal/hypervisor'], cwd=root/'aster-cloud', env=env, timeout=300)
         finally:
             qos_source.unlink(missing_ok=True)
+            guest_source.unlink(missing_ok=True)
         metadata['bandwidth_fixture_sha256'] = digest(qos_fixture)
         content = {"provision.py": (root / "aster-cloud/deploy/install/provision.py").read_bytes(),
                    "guest.py": (HERE / "libvirt-native-guest.py").read_bytes(), name: binary.read_bytes(), "bandwidth-fixture.test": qos_fixture.read_bytes()}
@@ -855,14 +860,14 @@ def validate_result(result, metadata):
                 'GUEST_PROVISION_ACCEPTANCE_FAILED')
         return
     allowed = {"schema", "passed", "real_apt", "real_systemd", "libvirt_prepared", "kvm_ready", "explicit_kvm_denial",
-               "non_kvm_doctor_checks_passed", "source_sha", "ubuntu", "image_sha256", "real_approved_image_validated", "bandwidth_live_xml_verified",
+               "non_kvm_doctor_checks_passed", "source_sha", "ubuntu", "image_sha256", "real_approved_image_validated", "bandwidth_live_xml_verified", "guest_reinstall_verified", "guest_rescue_verified", "guest_console_verified",
                "doctor_checks", "owned_units_active", "vendor_masks_persistent", "empty_network_mount_verified",
                "unix_libvirt_query_passed", "default_network_absent", "virbr_absent", "libvirt_no_tcp_listener", "vendor_default_xml_retained_unchanged_on_resume", "doctor_protocol"}
     require(isinstance(result, dict) and set(result) <= allowed, "GUEST_RESULT_SCHEMA_REJECTED")
     require(result.get("schema") == 1 and result.get("source_sha") == metadata["source_sha"] and result.get("ubuntu") == metadata["ubuntu"], "GUEST_RESULT_BINDING_MISMATCH")
     require(result.get("image_sha256") == metadata["image_sha256"], "GUEST_IMAGE_BINDING_MISMATCH")
     require(all(result.get(k) is True for k in ("passed", "real_apt", "real_systemd", "libvirt_prepared", "explicit_kvm_denial", "non_kvm_doctor_checks_passed",
-                                               "real_approved_image_validated", "bandwidth_live_xml_verified", "owned_units_active", "vendor_masks_persistent", "empty_network_mount_verified",
+                                               "real_approved_image_validated", "bandwidth_live_xml_verified", "guest_reinstall_verified", "guest_rescue_verified", "guest_console_verified", "owned_units_active", "vendor_masks_persistent", "empty_network_mount_verified",
                                                "unix_libvirt_query_passed", "default_network_absent", "virbr_absent", "libvirt_no_tcp_listener", "vendor_default_xml_retained_unchanged_on_resume")), "GUEST_ACCEPTANCE_FAILED")
     require(result.get("kvm_ready") is False, "GUEST_MUST_NOT_CLAIM_KVM_READY")
     require(result.get("doctor_protocol") == "aster.node/1", "GUEST_DOCTOR_PROTOCOL_REJECTED")

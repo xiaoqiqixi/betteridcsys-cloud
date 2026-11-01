@@ -3,6 +3,7 @@ package hypervisor
 import (
 	"aster/cloud/internal/nodeproto"
 	"context"
+	"encoding/xml"
 	"time"
 )
 
@@ -32,5 +33,8 @@ func (m *Manager) ObserveInstance(ctx context.Context, id string) (nodeproto.Ins
 	if e != nil {
 		return nodeproto.InstanceObservation{}, e
 	}
-	return nodeproto.InstanceObservation{Suspended: i.Suspended, RescueActive: i.Rescue != nil, DirectPublic: i.DirectPublic, DirectPublicDetached: i.DirectPublicDetached, Protocol: nodeproto.InstanceProtocol, NodeID: m.Config.NodeID, InstanceID: id, OwnerRef: i.OwnerRef, Hostname: i.Hostname, State: state, IPv4: i.IPv4, MAC: i.MAC, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), SourceFenced: i.SourceFence != nil, TargetPending: i.TargetBinding != nil && !i.TargetBinding.Activated}, nil
+	raw, e := m.virsh(ctx, "dumpxml", i.Domain)
+	var domain domainXML
+	console := e == nil && xml.Unmarshal(raw, &domain) == nil && len(domain.Devices.Graphics) == 1 && domain.Devices.Graphics[0].Type == "vnc" && domain.Devices.Graphics[0].Listen == "127.0.0.1"
+	return nodeproto.InstanceObservation{ConsoleAvailable: console, Suspended: i.Suspended, RescueActive: i.Rescue != nil, DirectPublic: i.DirectPublic, DirectPublicDetached: i.DirectPublicDetached, Protocol: nodeproto.InstanceProtocol, NodeID: m.Config.NodeID, InstanceID: id, OwnerRef: i.OwnerRef, Hostname: i.Hostname, State: state, IPv4: i.IPv4, MAC: i.MAC, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), SourceFenced: i.SourceFence != nil, TargetPending: i.TargetBinding != nil && !i.TargetBinding.Activated}, nil
 }

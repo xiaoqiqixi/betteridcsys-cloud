@@ -314,7 +314,13 @@ func run(args []string) error {
 				return e
 			}
 			mux := http.NewServeMux()
+			guestConsole, e := control.NewGuestConsole(store, config, *consoleOrigin)
+			if e != nil {
+				return e
+			}
+			services.IssueConsole = guestConsole.Issue
 			mux.Handle("/v1/", app.Handler())
+			mux.Handle("/console/", guestConsole.Handler())
 			mux.Handle("/console/v1/", (control.Console{Store: store, Config: config, Identity: auth, Worker: &worker, Runner: runner, OverlayWorker: &overlayWorker, OverlayRunner: overlayRunner}).Handler())
 			if *uiDirectory != "" {
 				web, e := control.Web(*uiDirectory)

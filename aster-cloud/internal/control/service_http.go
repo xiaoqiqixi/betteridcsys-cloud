@@ -114,9 +114,9 @@ func (s *Services) Handle(w http.ResponseWriter, r *http.Request, now time.Time)
 			return
 		}
 		if reader, ok := s.Store.(interface {
-			ServiceMetrics(context.Context, string, string, time.Time) (serviceapi.Metrics, error)
+			QueryMetrics(context.Context, string, string, time.Time) (serviceapi.Metrics, error)
 		}); ok {
-			v, e := reader.ServiceMetrics(r.Context(), v.ID, q.Get("range"), now)
+			v, e := reader.QueryMetrics(r.Context(), v.ID, q.Get("range"), now)
 			if e != nil {
 				failure(w, 503, "METRICS_UNAVAILABLE")
 				return
@@ -252,6 +252,7 @@ func (s *Services) view(w http.ResponseWriter, r *http.Request, v Instance, now 
 		}
 		result.Traffic = traffic
 	}
+	consoleAvailable := false
 	if observed, e := s.observe(r.Context(), v); e == nil && observed.InstanceID == v.ID && observed.OwnerRef == v.OwnerRef && observed.NodeID == v.NodeID && observed.Hostname == v.Hostname {
 		switch observed.State {
 		case "running":
@@ -261,6 +262,7 @@ func (s *Services) view(w http.ResponseWriter, r *http.Request, v Instance, now 
 		case "in_shutdown":
 			result.Power = "stopping"
 		}
+		consoleAvailable = observed.ConsoleAvailable
 		result.Suspended = observed.Suspended
 		result.RescueActive = observed.RescueActive
 		if observed.IPv4 != "" {
@@ -281,9 +283,9 @@ func (s *Services) view(w http.ResponseWriter, r *http.Request, v Instance, now 
 		}
 	}
 	_, metrics := s.Store.(interface {
-		ServiceMetrics(context.Context, string, string, time.Time) (serviceapi.Metrics, error)
+		QueryMetrics(context.Context, string, string, time.Time) (serviceapi.Metrics, error)
 	})
-	result.Capabilities = serviceapi.Capabilities{Power: contains(caps.Actions, "start") && contains(caps.Actions, "shutdown") && contains(caps.Actions, "force_off"), Reinstall: normal && approved && contains(caps.Actions, "reinstall"), ResetPassword: normal && linux && contains(caps.Actions, "reset_password"), Console: s.IssueConsole != nil && contains(caps.Actions, "console"), Rescue: normal && rescue && contains(caps.Actions, "rescue_enter") && contains(caps.Actions, "rescue_exit"), Snapshots: normal && s.Config.Service.SnapshotLimit > 0 && contains(caps.Actions, "snapshot_create") && contains(caps.Actions, "snapshot_restore") && contains(caps.Actions, "snapshot_delete"), Metrics: metrics && contains(caps.Actions, "metrics"), Upgrade: normal && contains(caps.Actions, "resize")}
+	result.Capabilities = serviceapi.Capabilities{Power: contains(caps.Actions, "start") && contains(caps.Actions, "shutdown") && contains(caps.Actions, "force_off"), Reinstall: normal && approved && contains(caps.Actions, "reinstall"), ResetPassword: normal && linux && contains(caps.Actions, "reset_password"), Console: consoleAvailable && s.IssueConsole != nil && contains(caps.Actions, "console"), Rescue: normal && rescue && contains(caps.Actions, "rescue_enter") && contains(caps.Actions, "rescue_exit"), Snapshots: normal && s.Config.Service.SnapshotLimit > 0 && contains(caps.Actions, "snapshot_create") && contains(caps.Actions, "snapshot_restore") && contains(caps.Actions, "snapshot_delete"), Metrics: metrics && s.Config.Telemetry.Enabled && contains(caps.Actions, "metrics"), Upgrade: normal && contains(caps.Actions, "resize")}
 	if v.State == "deleted" {
 		result.Capabilities = serviceapi.Capabilities{}
 	}

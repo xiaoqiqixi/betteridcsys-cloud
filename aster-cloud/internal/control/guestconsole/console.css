@@ -1,0 +1,19 @@
+:root { color-scheme: dark; font: 16px/1.5 system-ui, sans-serif; color: #e9edf3; background: #11151b; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100dvh; display: flex; flex-direction: column; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.25rem 1.5rem; border-bottom: 1px solid #394453; }
+.brand { margin: 0; font-size: .75rem; letter-spacing: .12em; color: #b3bece; }
+h1 { margin: .25rem 0 0; font-size: 1.25rem; font-weight: 600; }
+nav { display: flex; flex-wrap: wrap; gap: .75rem; }
+button { min-height: 44px; padding: .65rem 1rem; border: 1px solid #6c7b91; border-radius: .35rem; background: #222d3b; color: inherit; font: inherit; cursor: pointer; }
+button:hover:enabled { background: #34445a; }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible, #screen:focus-within { outline: 3px solid #a5cdff; outline-offset: 3px; }
+main { display: flex; flex: 1; min-height: 0; flex-direction: column; padding: 1rem 1.5rem; }
+#status { margin: 0 0 .35rem; font-weight: 600; }
+#help, footer { font-size: .875rem; color: #b3bece; }
+#help { margin: 0 0 1rem; }
+#screen { position: relative; flex: 1; min-height: 50vh; background: #000; overflow: auto; }
+#screen > div { position: absolute; inset: 0; }
+footer { padding: .75rem 1.5rem 1rem; }
+@media (max-width: 640px) { header { align-items: flex-start; flex-direction: column; } header, main, footer { padding-inline: 1rem; } }

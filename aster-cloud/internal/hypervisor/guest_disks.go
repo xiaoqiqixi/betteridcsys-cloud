@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -303,7 +304,37 @@ func (m *Manager) seedGuest(ctx context.Context, t nodeproto.NodeTask, i Instanc
 	if e != nil {
 		return e
 	}
-	return os.Chmod(i.Seed, 0600)
+	return os.Chmod(i.Seed, 0644)
+}
+
+// A private customer disk needs libvirt's DAC relabel while attached read-only.
+// libvirt does not restore read-only source ownership on stop. After the owned
+// domain is observed shut off, return only its exact private, singly-linked
+// system disk to the node user. Base images and seeds are never relabelled.
+func restoreRescueDiskOwner(i Instance) error {
+	if i.Rescue == nil || i.Rescue.Writable {
+		return nil
+	}
+	if i.Disk != filepath.Join(i.Directory, "system.qcow2") || ownedPath(i.Directory, false, true) != nil {
+		return ErrOwnership
+	}
+	f, e := os.OpenFile(i.Disk, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if e != nil {
+		return e
+	}
+	defer f.Close()
+	info, e := f.Stat()
+	if e != nil {
+		return e
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.Mode().IsRegular() || stat.Nlink != 1 || info.Mode().Perm() != 0600 {
+		return ErrOwnership
+	}
+	if e = f.Chown(os.Geteuid(), os.Getegid()); e != nil {
+		return e
+	}
+	return f.Sync()
 }
 func rescueDisk(i Instance) string {
 	return filepath.Join(i.Directory, "rescue-"+i.Rescue.OperationID+".qcow2")

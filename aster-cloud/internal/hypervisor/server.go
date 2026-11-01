@@ -76,6 +76,9 @@ func (m *Manager) Handler() http.Handler {
 		if m.serveOverlay(w, r) {
 			return
 		}
+		if m.serveConsole(w, r) {
+			return
+		}
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/v1/instances/") && strings.HasSuffix(r.URL.Path, "/metrics"):
 			if r.Method != http.MethodGet {
