@@ -6,8 +6,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: checks-${{ github.ref }}
-  cancel-in-progress: true
+  group: checks-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   go-unit:
     name: Linux unit and build (${{ matrix.os }})
