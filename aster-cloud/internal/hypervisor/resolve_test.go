@@ -1,6 +1,7 @@
 package hypervisor
 
 import (
+	"aster/billing/serviceapi"
 	"aster/cloud/internal/nodeproto"
 	"context"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func uncertainReboot(t *testing.T) (*Manager, *fakeRunner, nodeproto.NodeTask) {
@@ -23,6 +25,34 @@ func uncertainReboot(t *testing.T) (*Manager, *fakeRunner, nodeproto.NodeTask) {
 	}
 	f.fail = ""
 	return m, f, task
+}
+
+func TestPowerResolutionCannotClearUnknownGuestMutation(t *testing.T) {
+	m, f, task := guestFixture(t)
+	task = guestTask(m, task, "4", "suspend", serviceapi.Params{})
+	f.fail = "destroy"
+	result := submit(t, m, task)
+	if result.Status != "uncertain" {
+		t.Fatal(result)
+	}
+	f.fail = ""
+	before := len(f.commands)
+	if _, err := m.resolveInstance(context.Background(), task.InstanceID, "Checked guest power state", 0); err == nil {
+		t.Fatal("power observation cleared guest recovery quarantine")
+	}
+	i, _ := m.Ledger.Instance(task.InstanceID)
+	op, _ := m.Ledger.Query(task.OperationID)
+	if i.State != "uncertain" || i.GuestChange == nil || op.Result.Resolved != nil || len(f.commands) != before || m.Ledger.state.Schema != 7 {
+		t.Fatal("failed resolution changed guest recovery intent", i, op)
+	}
+	resolution := nodeproto.InstanceResolution{Who: "uid:0", When: time.Now().UTC().Format(time.RFC3339Nano), ObservedState: "running", Reason: "Checked guest power state"}
+	if _, err := m.Ledger.resolveInstance(i, resolution); err == nil {
+		t.Fatal("journal allowed a power annotation on a guest operation")
+	}
+	result.Resolved = &resolution
+	if result.Matches(task, result.RequestSHA256) {
+		t.Fatal("guest operation accepted a power-only resolution receipt")
+	}
 }
 func TestResolvePreservesUnknownHistoryAndSurvivesRestart(t *testing.T) {
 	for _, state := range []string{"running", "shut off", "paused", "crashed", "pmsuspended", "blocked"} {

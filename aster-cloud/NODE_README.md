@@ -187,7 +187,7 @@ This command verifies the original ownership metadata and managed devices,
 reads the current libvirt state, and atomically saves that state plus a `resolved`
 annotation (effective UID, UTC time, observed state, reason) on each unresolved
 power operation. Original status, request digest and error code remain uncertain.
-It never starts/stops a guest or removes disks. OVS/network recovery, storage
+It never starts/stops a guest or removes disks. Pending guest changes, OVS/network recovery, storage
 operations and migration fences require their own recovery procedures; this
 command cannot bypass them. Missing/unowned domains and failed observations
 retain quarantine. Restarting the service exposes the annotation through GET of
@@ -199,7 +199,8 @@ reconciliation of a resolved operation never overwrites a newer instance state
 or resends the original mutation. Do not edit operation rows to bypass that gate.
 
 Explicit force tasks, resolution annotations and additional observed states use
-journal schema 6. Schemas 1–5 remain readable; older binaries reject schema 6.
+journal schema 6 or newer. Resolution preserves newer schema versions, including
+guest lifecycle schema 7. Schemas 1–5 remain readable; older binaries reject schema 6.
 Back up before upgrading and never downgrade by editing the schema number.
 
 ### Preserve root ownership of immutable disk sources
@@ -223,10 +224,10 @@ independently verified against its approved hash before restoring ownership.
 Verification is based on [libvirt 8 DAC source](https://github.com/libvirt/libvirt/blob/v8.0.0/src/security/security_dac.c)
 and the [disk source XML contract](https://libvirt.org/formatdomain.html#hard-drives-floppy-disks-cdroms),
 plus generated-XML regression tests. DAC changes backing/read-only ownership and
-skips restoring those shared sources. The current native CI checks real libvirt
-daemon preparation in TCG guests, but does not boot managed domains. A real Linux
-guest start/stop test with ownership/hash checks remains necessary; it was not
-reproduced on the macOS development host.
+skips restoring those shared sources. Native CI includes libvirt preparation and
+a TCG live-domain bandwidth fixture, but does not check backing/seed ownership
+across start/stop. That ownership/hash lifecycle test remains necessary; it was
+not reproduced on the macOS development host.
 
 ## Build / regression
 

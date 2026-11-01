@@ -30,8 +30,8 @@ func (m *Manager) resolveInstance(ctx context.Context, id, reason string, uid in
 	if !ok {
 		return nil, ErrNotFound
 	}
-	if !m.Ledger.HasPendingInstance(id, "") || !i.Network.IsZero() || i.SourceFence != nil || i.TargetBinding != nil && !i.TargetBinding.Activated || i.PublicRetired {
-		return nil, errors.New("instance requires its network/storage recovery procedure")
+	if !m.Ledger.HasPendingInstance(id, "") || !i.Network.IsZero() || i.GuestChange != nil || i.SourceFence != nil || i.TargetBinding != nil && !i.TargetBinding.Activated || i.PublicRetired {
+		return nil, errors.New("instance requires its guest/network/storage recovery procedure")
 	}
 	if err := m.assertOwned(ctx, i); err != nil {
 		return nil, err
@@ -64,7 +64,7 @@ func (l *Ledger) resolveInstance(i Instance, resolution nodeproto.InstanceResolu
 			continue
 		}
 		t := op.Task
-		if op.Result.Status != "uncertain" || t.Action == "public_adopt" || t.Action == "public_detach" || t.OwnerRef != i.OwnerRef || t.Resources != i.Resources || t.Hostname != i.Hostname || t.Network != i.Network || !directTaskMatches(i, t) {
+		if op.Result.Status != "uncertain" || nodeproto.GuestAction(t.Action) || t.Action == "public_adopt" || t.Action == "public_detach" || t.OwnerRef != i.OwnerRef || t.Resources != i.Resources || t.Hostname != i.Hostname || t.Network != i.Network || !directTaskMatches(i, t) {
 			return nil, ErrOwnership
 		}
 		ids = append(ids, id)

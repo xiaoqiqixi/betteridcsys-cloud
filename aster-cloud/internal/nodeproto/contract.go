@@ -117,7 +117,7 @@ func (t NodeTask) BytesAndDigest() ([]byte, string, error) {
 	return raw, Digest(raw), nil
 }
 func (r NodeResult) Matches(t NodeTask, requestSHA string) bool {
-	if r.Resolved != nil && (r.Status != "uncertain" || !r.Resolved.Valid() || !t.Network.IsZero() || t.Action == "public_adopt" || t.Action == "public_detach") {
+	if r.Resolved != nil && (r.Status != "uncertain" || !r.Resolved.Valid() || !t.Network.IsZero() || GuestAction(t.Action) || t.Action == "public_adopt" || t.Action == "public_detach") {
 		return false
 	}
 	if !t.Valid() || r.Protocol != t.Protocol || r.OperationID != t.OperationID || r.InstanceID != t.InstanceID || !digest.MatchString(requestSHA) || r.RequestSHA256 != requestSHA {
