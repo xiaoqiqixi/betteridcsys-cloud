@@ -44,6 +44,15 @@ def empty_ipv4_route_snapshot(raw):
     return raw == b'' or raw == header
 
 
+def phase_expiry(version, value):
+    # Use the installed manager's Python 3.10-compatible Go timestamp parser.
+    spec = importlib.util.spec_from_file_location('installed_migration_timestamp',
+        version/'templates/host-management/controller-migration.py')
+    manager = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(manager)
+    return manager.parse_rfc3339(value)
+
+
 def accept_installed_handoff(inputs, operation, module, directory, version, expected_phase, require, progress):
     """Actual installed ELF + original approval + cleanup + private root channel.
 
@@ -497,7 +506,7 @@ def accept(root, inputs, controller, operation, module, directory, ui_directory,
     plan = json.loads((inputs/'plan.json').read_text())
     dbplan = json.loads((inputs/'database-plan.json').read_text())
     phase = json.loads((inputs/'verification-data-approval.json').read_text())
-    original_end = datetime.fromisoformat(phase['expires_at'].replace('Z', '+00:00'))
+    original_end = phase_expiry(ui_directory.parent, phase['expires_at'])
     configuration = json.loads(Path('/etc/aster-controller/config.json').read_text())
     require(configuration['controller_id'] == controller and configuration['listen'] == '127.0.0.1:9555')
     cfg = dict(controller=configuration, operation=operation, origin='https://source.invalid:9555',

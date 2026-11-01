@@ -9,7 +9,7 @@ that a new release has been authenticated.
 import argparse
 import contextlib
 import ctypes
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import fcntl
 import hashlib
 import importlib.util
@@ -53,6 +53,25 @@ def require(ok, code):
 
 def digest(raw):
     return hashlib.sha256(raw).hexdigest()
+
+
+def parse_rfc3339(value):
+    """Parse Go RFC3339Nano on Python 3.10; truncate, never round expiry up."""
+    match = re.fullmatch(
+        r'([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})'
+        r'(?:\.([0-9]{1,9}))?(Z|[+-][0-9]{2}:[0-9]{2})', value) if isinstance(value, str) else None
+    if match is None:
+        raise ValueError('INVALID_RFC3339_TIMESTAMP')
+    year, month, day, hour, minute, second = map(int, match.groups()[:6])
+    fraction, offset = match.groups()[6:]
+    zone = timezone.utc
+    if offset != 'Z':
+        hours, minutes = int(offset[1:3]), int(offset[4:6])
+        if hours > 23 or minutes > 59:
+            raise ValueError('INVALID_RFC3339_TIMESTAMP')
+        zone = timezone((1 if offset[0] == '+' else -1) * timedelta(hours=hours, minutes=minutes))
+    return datetime(year, month, day, hour, minute, second,
+                    int((fraction or '').ljust(6, '0')[:6]), zone)
 
 
 def verification_unit_bytes(operation, version, nonce):
@@ -1212,7 +1231,7 @@ class Target(Host):
         # Go has authenticated this UTC, microsecond-aligned <= 1 hour phase.
         # Retain its remaining duration once; wall-clock rollback cannot extend
         # the root manager, and no retry reconstructs a fresh approval window.
-        expiry = datetime.fromisoformat(proof['phase']['expires_at'].removesuffix('Z')+'+00:00')
+        expiry = parse_rfc3339(proof['phase']['expires_at'])
         remaining = (expiry-datetime.now(timezone.utc)).total_seconds()
         require(0 < remaining <= 3600,code)
         deadline = time.monotonic()+remaining

@@ -121,6 +121,7 @@ jobs:
         run: |
           python3 -B aster-cloud/deploy/ci/test_unified_install.py
           python3 -B aster-cloud/deploy/ci/test_host_migration_entry.py
+          python3 -B aster-cloud/deploy/ci/test_rfc3339.py
           python3 -B aster-cloud/deploy/ci/test_verification_system_identity.py
           python3 -B aster-cloud/deploy/ci/test_verification_systemd.py
           python3 -B aster-cloud/deploy/ci/test_go_race.py
