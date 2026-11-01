@@ -202,7 +202,7 @@ def worker(binary):
         # The explicit development channel is a test trust boundary, not a
         # publisher signature claim. Exercise the real installer, not receipts.
         owned += [state, install_state.parent, install_state, installed.parent, installed]
-        created_units += [unit]
+        created_units += [unit] + templates
         run(['/usr/bin/python3', '-I', HERE.parent / 'install/install.py', 'controller', '--bundle', bundle,
              '--sha256', bundle_sha, '--allow-development', '--approval', case / 'approval.json', '--apply'])
         # Synthetic ownership receipt, paired to an actual native fixture DB.
@@ -240,10 +240,17 @@ def worker(binary):
         cli('migrate')
         cli('bootstrap-admin', '-email', 'migration-admin@example.invalid', '-name', 'Migration Test',
             '-console-origin', origin, '-password-stdin', data=secrets.token_urlsafe(32).encode() + b'\n')
+        install_receipt = json.loads((install_state / 'state.json').read_bytes())
+        require(install_receipt['heartbeat_timers'] == [names[2]], 'INSTALLER_HEARTBEAT_INVENTORY_CHANGED')
         for path in templates:
             raw = (versions / 'templates' / path.name).read_bytes().replace(b'/opt/aster-cloud/bin/aster-controller', os.fsencode(exe))
-            private(path, raw, 0o644)
-            created_units.append(path)
+            # Exercise the installed units, including their approved digests;
+            # the fixture must not supply a missing or different heartbeat.
+            info = path.lstat()
+            require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and
+                    stat.S_IMODE(info.st_mode) == 0o644 and path.read_bytes() == raw and
+                    install_receipt['heartbeat_units_sha256'][path.name] == hashlib.sha256(raw).hexdigest(),
+                    'INSTALLER_HEARTBEAT_TEMPLATE_CHANGED')
         original_inode = unit.stat().st_ino
         context = ssl.create_default_context(cafile=str(config_dir / 'cert.pem'))
         context.minimum_version = ssl.TLSVersion.TLSv1_2
