@@ -66,6 +66,8 @@ VPC重启必须先shutdown再start，主控早期拒绝旧reboot。本切片明�
 
 所有响应no-store。服务直连TLS，Bearer认证；不接受浏览器Origin/CORS，不使用Cookie。三个token须不同：billing只可访问财务桥，admin-read/admin-write仅可只读管理投影。此段只描述机器API；另有显式启用的`/console/v1`管理会话、CSRF与staff RBAC，见后文。节点endpoint/证书/preset信任根仍由root私有配置审批，网页不能任意上传或改写。
 
+`admin_write_token_file` 是为将来经过独立权限设计与审批的机器管理写 API 预留的凭据槽位；当前没有任何写端点绑定它，也没有启用写权限的配置开关。现在它与 admin-read 的权限完全相同：只能 GET 下列五个管理投影，不能调用财务开通、owner 资源视图或替代 Console 会话/CSRF。为兼容现有配置、备份和安装审批，仍要求该文件存在且三个 token 互不相同；新只读集成应使用 admin-read。增加机器写 API 必须另行审核合同，不能因凭据名称含 write 自动授予权限。
+
 - POST `/v1/provisioning`：公开controllerapi.Request，带`Idempotency-Key`=operation_id与`X-Aster-Request-SHA256`=canonical JSON digest。新成功接纳202；完全相同重放409，返回已持久状态；不相同operation/order绑定409 `IDEMPOTENCY_CONFLICT`。全部成功/已绑定业务拒绝均直接controllerapi.Result精确6键，**无data信封**。
 - GET `/v1/provisioning/{operation_id}`：相同billing token、Idempotency-Key与digest header，200当前绑定Result；未知404，不同digest409。
 - 不支持配置可以持久为rejected Result（409）；无健康容量503 `NO_HEALTHY_CAPACITY`，未创建job，不假称已接单。格式错误400、缺认证401、越权403、方法405。错误仅`{error:{code}}`，不回传路径、密钥、节点诊断或SQL。
