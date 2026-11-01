@@ -284,6 +284,35 @@ func TestHTTPAuthAndExactResultBinding(t *testing.T) {
 	}
 }
 
+func TestReservedAdminWriteTokenRemainsReadOnly(t *testing.T) {
+	store := &fakeStore{}
+	app := App{Store: store, Config: testConfig(testProfile()),
+		Secrets: Secrets{strings.Repeat("b", 64), strings.Repeat("r", 64), strings.Repeat("w", 64)}}
+	for _, path := range []string{"/v1/health", "/v1/nodes", "/v1/instances", "/v1/tasks", "/v1/audit"} {
+		for _, token := range []string{app.Secrets.AdminRead, app.Secrets.AdminWrite} {
+			for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"} {
+				want := 405
+				if method == "GET" {
+					want = 200
+				}
+				if w := requestHTTP(app, method, path, token, nil, nil, true); w.Code != want {
+					t.Errorf("%s %s = %d, want %d", method, path, w.Code, want)
+				}
+			}
+		}
+	}
+	for _, path := range []string{"/v1/provisioning", "/v1/resources/" + strings.Repeat("a", 32)} {
+		for _, method := range []string{"GET", "POST"} {
+			if w := requestHTTP(app, method, path, app.Secrets.AdminWrite, nil, nil, true); w.Code != 403 {
+				t.Errorf("reserved token crossed billing boundary: %s %s = %d", method, path, w.Code)
+			}
+		}
+	}
+	if store.admissions != 0 {
+		t.Fatal("reserved credential admitted a mutation")
+	}
+}
+
 type fakeRPC struct {
 	mu          sync.Mutex
 	sends, gets int

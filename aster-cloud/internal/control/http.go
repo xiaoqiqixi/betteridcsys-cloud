@@ -68,6 +68,9 @@ func (a App) Handler() http.Handler {
 		token := strings.TrimPrefix(auth, "Bearer ")
 		billing := tokenEqual(token, a.Secrets.Billing)
 		read := tokenEqual(token, a.Secrets.AdminRead)
+		// Reserved credential slot for a separately reviewed future machine
+		// administration API. Today it grants only the same GET views as read;
+		// its name never authorizes mutations or replaces a Console session.
 		write := tokenEqual(token, a.Secrets.AdminWrite)
 		if !billing && !read && !write {
 			failure(w, 401, "AUTH_REQUIRED")
