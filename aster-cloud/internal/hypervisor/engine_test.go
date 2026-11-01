@@ -18,16 +18,17 @@ import (
 )
 
 type fakeRunner struct {
-	mu        sync.Mutex
-	commands  []string
-	domains   map[string][]byte
-	states    map[string]string
-	autostart map[string]bool
-	filter    []byte
-	fail      string
-	info      string
-	before    func(string)
-	block     <-chan struct{}
+	mu         sync.Mutex
+	commands   []string
+	domains    map[string][]byte
+	states     map[string]string
+	autostart  map[string]bool
+	filter     []byte
+	fail       string
+	info       string
+	strictUUID bool
+	before     func(string)
+	block      <-chan struct{}
 	// Empty blockVerb preserves the all-command gate used by other fixtures.
 	blockVerb string
 	blocked   chan<- struct{}
@@ -111,6 +112,19 @@ func (f *fakeRunner) Run(ctx context.Context, binary string, args ...string) ([]
 		}
 		var d domainXML
 		if e = xml.Unmarshal(raw, &d); e != nil {
+			return nil, e
+		}
+		var prior domainXML
+		if existing := f.domains[d.Name]; existing != nil {
+			if xml.Unmarshal(existing, &prior) != nil || f.strictUUID && (d.UUID == "" || d.UUID != prior.UUID) {
+				return nil, errors.New("domain name already exists with another UUID")
+			}
+		}
+		if d.UUID == "" {
+			d.UUID = "11111111-2222-4333-8444-555555555555"
+		}
+		raw, e = xml.Marshal(d)
+		if e != nil {
 			return nil, e
 		}
 		f.domains[d.Name] = raw

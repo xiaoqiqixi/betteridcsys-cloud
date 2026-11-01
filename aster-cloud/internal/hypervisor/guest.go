@@ -4,12 +4,16 @@ import (
 	"aster/billing/controllerapi"
 	"aster/cloud/internal/nodeproto"
 	"context"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 )
+
+var guestDomainUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 type GuestConfig struct {
 	Enabled        bool              `json:"enabled"`
@@ -212,7 +216,27 @@ func (m *Manager) guestStart(ctx context.Context, t nodeproto.NodeTask, i Instan
 	return e
 }
 func (m *Manager) redefineGuest(ctx context.Context, i Instance) error {
+	// Libvirt generates a new UUID when XML omits it, then refuses to replace
+	// an existing name with that different identity. Preserve the owned domain's
+	// UUID across disk, rescue and resource redefinitions, including rollback.
+	current, e := m.virsh(ctx, "dumpxml", i.Domain)
+	var prior domainXML
+	if e != nil {
+		return e
+	}
+	if xml.Unmarshal(current, &prior) != nil || prior.Type != m.domainType() || prior.Name != i.Domain || !guestDomainUUID.MatchString(prior.UUID) || prior.Metadata.Instance.XMLName.Space != "urn:aster:node:1" || prior.Metadata.Instance.InstanceID != i.ID || prior.Metadata.Instance.OwnerRef != i.OwnerRef || prior.Metadata.Instance.NodeID != m.Config.NodeID {
+		return ErrOwnership
+	}
 	raw, e := m.domainXML(i)
+	if e != nil {
+		return e
+	}
+	var next domainXML
+	if xml.Unmarshal(raw, &next) != nil || next.UUID != "" && next.UUID != prior.UUID {
+		return ErrOwnership
+	}
+	next.UUID = prior.UUID
+	raw, e = xml.MarshalIndent(next, "", "  ")
 	if e != nil {
 		return e
 	}

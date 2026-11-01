@@ -90,6 +90,7 @@ func TestNativeGuestLifecycleAndConsole(t *testing.T) {
 	task := nodeproto.NodeTask{Protocol: nodeproto.Protocol, OperationID: strings.Repeat("b", 32), InstanceID: id, OwnerRef: strings.Repeat("c", 32), NodeID: c.NodeID, Hostname: "native-guest", Action: "create", Resources: controllerapi.Resources{DatacenterID: c.DatacenterID, ComputeNodeID: c.NodeID, NodeGroupID: c.NodeGroupID, ImageID: "signed-ubuntu", CPUCores: 1, MemoryMiB: 512, SystemDiskGiB: 4, SystemStorageID: "local", NetworkType: "normal", TrafficDirection: "all"}}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	domainUUID := ""
 	submitNative := func(task nodeproto.NodeTask) {
 		t.Helper()
 		raw, _, e := task.BytesAndDigest()
@@ -98,7 +99,21 @@ func TestNativeGuestLifecycleAndConsole(t *testing.T) {
 		}
 		r, e := m.Submit(ctx, task, raw)
 		if e != nil || r.Status != "succeeded" {
-			t.Fatalf("native %s: status=%s code=%s error=%v", task.Action, r.Status, r.Code, e)
+			op, _ := m.Ledger.Query(task.OperationID)
+			instance, _ := m.Ledger.Instance(task.InstanceID)
+			phase := "NONE"
+			if instance.GuestChange != nil {
+				phase = instance.GuestChange.Phase
+			}
+			t.Fatalf("native %s: status=%s code=%s phase=%s error=%v", task.Action, r.Status, op.ErrorCode, phase, e)
+		}
+		if task.Action != "delete" {
+			xmlBytes, err := m.virsh(ctx, "dumpxml", domain)
+			var current domainXML
+			if err != nil || xml.Unmarshal(xmlBytes, &current) != nil || current.UUID == "" || domainUUID != "" && current.UUID != domainUUID {
+				t.Fatal("native lifecycle changed domain UUID")
+			}
+			domainUUID = current.UUID
 		}
 	}
 	submitNative(task)

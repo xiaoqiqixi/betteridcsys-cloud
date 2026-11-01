@@ -136,6 +136,7 @@ func (r *guestRunner) RunInput(ctx context.Context, binary string, input []byte,
 }
 func guestFixture(t *testing.T) (*Manager, *guestRunner, nodeproto.NodeTask) {
 	m, f, task := newFixture(t)
+	f.strictUUID = true
 	m.Config.Guest = GuestConfig{Enabled: true, Families: map[string]string{"ubuntu22": "linux"}, RescueImages: []string{"ubuntu22"}}
 	runner := &guestRunner{fakeRunner: f}
 	m.Runner = runner
@@ -143,6 +144,40 @@ func guestFixture(t *testing.T) (*Manager, *guestRunner, nodeproto.NodeTask) {
 		t.Fatal(r)
 	}
 	return m, runner, task
+}
+
+func TestGuestRedefinitionPreservesUUIDAndRefusesUnboundIdentity(t *testing.T) {
+	m, f, task := guestFixture(t)
+	i, _ := m.Ledger.Instance(task.InstanceID)
+	var before domainXML
+	if err := xml.Unmarshal(f.domains[i.Domain], &before); err != nil {
+		t.Fatal(err)
+	}
+	for n, action := range []string{"reinstall", "rescue_enter", "rescue_exit"} {
+		params := serviceapi.Params{}
+		if action != "rescue_exit" {
+			params.ImageID = "ubuntu22"
+		}
+		if action == "reinstall" {
+			params.SSHPublicKey = m.Config.Network.SSHAuthorizedKeys[0]
+		}
+		request := guestTask(m, task, "4", action, params)
+		request.OperationID = fmt.Sprintf("%032x", n+20)
+		if result := submit(t, m, request); result.Status != "succeeded" {
+			t.Fatal(action, result)
+		}
+		var after domainXML
+		if err := xml.Unmarshal(f.domains[i.Domain], &after); err != nil || after.UUID != before.UUID {
+			t.Fatal("domain identity changed", action, err)
+		}
+	}
+	i, _ = m.Ledger.Instance(task.InstanceID)
+	definitions := f.count(" define ")
+	before.UUID = ""
+	f.domains[i.Domain], _ = xml.Marshal(before)
+	if err := m.redefineGuest(context.Background(), i); err == nil || f.count(" define ") != definitions {
+		t.Fatal("missing UUID allowed domain redefinition")
+	}
 }
 func guestTask(m *Manager, t nodeproto.NodeTask, op, action string, p serviceapi.Params) nodeproto.NodeTask {
 	t = next(t, op, action)

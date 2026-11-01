@@ -778,6 +778,11 @@ def guest_deadline_seconds(scenario):
     # prerequisites and reports only the negative cases it executed.
     require(scenario in SCENARIOS,
             'FIXED_GUEST_SCENARIO_REQUIRED')
+    # Run 41304380192 exhausted 30m during libvirt preparation on Ubuntu 24,
+    # before the added libguestfs/lifecycle/VNC checks could execute. Keep the
+    # lifecycle test's own seven-minute bound within a fixed 40m guest budget.
+    if scenario == 'libvirt':
+        return 2400
     return 3600 if scenario in RESTORE_SCENARIOS else 1800
 
 
@@ -895,6 +900,16 @@ def public_result(result, metadata):
     diagnostics = result.get("diagnostics")
     if isinstance(diagnostics, dict):
         safe = {}
+        lifecycle = diagnostics.get('guest_lifecycle')
+        lifecycle_fields = {
+            'action': set('create reinstall rescue_enter rescue_exit delete'.split()),
+            'status': set('accepted rejected uncertain succeeded'.split()),
+            'code': set('UNCLASSIFIED GUEST_OUTCOME_UNCERTAIN GUEST_INTENT_UNCONFIRMED REINSTALL_ROLLED_BACK IMAGE_VERIFICATION_FAILED OWNERSHIP_UNCONFIRMED OWNERSHIP_OR_STATE_REJECTED EXECUTION_UNCERTAIN'.split()),
+            'phase': set('NONE INTENT REPLACE_DISK DEFINE_NEW NEW_RUNNING ROLLBACK RESCUE_DISK RESTORE_ORIGINAL ORIGINAL_RUNNING'.split()),
+        }
+        if (isinstance(lifecycle, dict) and set(lifecycle) == set(lifecycle_fields) and
+                all(isinstance(lifecycle[k], str) and lifecycle[k] in lifecycle_fields[k] for k in lifecycle)):
+            safe['guest_lifecycle'] = dict(lifecycle)
         refusal = diagnostics.get('refusal')
         if (isinstance(refusal, dict) and set(refusal) == {'expected', 'observed', 'exit_kind', 'stdout_empty', 'error_envelope_valid'} and
                 all(isinstance(refusal[k], str) and refusal[k] in GUEST_ERROR_CODES | {'unrecognized'} for k in ('expected', 'observed')) and

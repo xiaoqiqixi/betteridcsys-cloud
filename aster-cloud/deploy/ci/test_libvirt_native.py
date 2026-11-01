@@ -646,6 +646,23 @@ class NativeFixtureContract(unittest.TestCase):
         report["source_sha"] = "b" * 40
         with self.assertRaises(h.Refused): h.public_result(report, self.metadata())
 
+    def test_lifecycle_failure_exports_only_bound_action_phase_and_outcome(self):
+        g = load('native_guest_lifecycle_diagnostics', 'libvirt-native-guest.py')
+        value = g.lifecycle_diagnostic(b'native reinstall: status=uncertain code=GUEST_OUTCOME_UNCERTAIN phase=ROLLBACK error=PRIVATE')
+        self.assertEqual(value, {'action': 'reinstall', 'status': 'uncertain', 'code': 'GUEST_OUTCOME_UNCERTAIN', 'phase': 'ROLLBACK'})
+        report = dict(self.metadata(), schema=1, passed=False, kvm_ready=False,
+                      code='GUEST_LIFECYCLE_REINSTALL_FAILED', phase='guest-lifecycle',
+                      diagnostics={'guest_lifecycle': value, 'stderr': 'PRIVATE'})
+        public = h.public_result(report, self.metadata())
+        self.assertEqual(public['diagnostics'], {'guest_lifecycle': value})
+        self.assertNotIn('PRIVATE', json.dumps(public))
+        for field in value:
+            report['diagnostics']['guest_lifecycle'] = {**value, field: 'PRIVATE'}
+            self.assertNotIn('guest_lifecycle', h.public_result(report, self.metadata())['diagnostics'])
+        self.assertIsNone(g.lifecycle_diagnostic(b'native reinstall: status=uncertain code=PRIVATE phase=PRIVATE error=SECRET'))
+        masked = g.lifecycle_diagnostic(b'native reinstall: status=uncertain code=PRIVATE phase=INTENT error=SECRET')
+        self.assertEqual(masked['code'], 'UNCLASSIFIED')
+
     def test_maintenance_failure_stage_distinguishes_authentication_from_fixture_setup(self):
         report = dict(self.metadata(), schema=1, passed=False, kvm_ready=False,
                       code='TARGET_NATIVE_COMMAND_FAILED', stderr='PRIVATE', argv=['PRIVATE'])
@@ -916,7 +933,7 @@ class NativeFixtureContract(unittest.TestCase):
     def test_guest_budget_is_fixed_per_reviewed_scenario(self):
         # Restore includes source-data readback and material drift cases; the
         # simpler libvirt/provision scenarios retain their existing bounds.
-        self.assertEqual(h.guest_deadline_seconds('libvirt'), 1800)
+        self.assertEqual(h.guest_deadline_seconds('libvirt'), 2400)
         self.assertEqual(h.guest_deadline_seconds('controller-provision'), 1800)
         for phase in ('data', 'sessions', 'configuration'):
             self.assertEqual(h.guest_deadline_seconds('controller-restore-' + phase), 3600)

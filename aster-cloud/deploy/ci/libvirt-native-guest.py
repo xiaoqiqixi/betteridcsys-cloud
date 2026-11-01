@@ -19,6 +19,13 @@ PHASE = "preflight"
 FAILED_COMMANDS = []
 PROGRESS_NONCE = None
 APT_PLAN_DIAGNOSTICS = None
+LIFECYCLE_DIAGNOSTICS = None
+LIFECYCLE_FIELDS = {
+    'action': set('create reinstall rescue_enter rescue_exit delete'.split()),
+    'status': set('accepted rejected uncertain succeeded'.split()),
+    'code': set('UNCLASSIFIED GUEST_OUTCOME_UNCERTAIN GUEST_INTENT_UNCONFIRMED REINSTALL_ROLLED_BACK IMAGE_VERIFICATION_FAILED OWNERSHIP_UNCONFIRMED OWNERSHIP_OR_STATE_REJECTED EXECUTION_UNCERTAIN'.split()),
+    'phase': set('NONE INTENT REPLACE_DISK DEFINE_NEW NEW_RUNNING ROLLBACK RESCUE_DISK RESTORE_ORIGINAL ORIGINAL_RUNNING'.split()),
+}
 APT_CODES = set("APT_DNS_FAILURE APT_TLS_FAILURE APT_SIGNATURE_FAILURE APT_METADATA_FAILURE APT_PACKAGE_UNAVAILABLE APT_DEPENDENCY_CONFLICT APT_LOCKED APT_COMMAND_REJECTED APT_COMMAND_UNAVAILABLE APT_COMMAND_TIMEOUT APT_OUTPUT_OVERSIZED".split())
 APT_PLAN_CATEGORIES = {"remove", "installed-package-version-change", "unapproved-network-daemon"}
 # Fixed public inventory: unknown package tokens are counted, never exported.
@@ -182,6 +189,8 @@ def observe_real_commands(module):
 
 def safe_diagnostics():
     output = {"failed_commands": list(FAILED_COMMANDS)}
+    if LIFECYCLE_DIAGNOSTICS is not None:
+        output['guest_lifecycle'] = LIFECYCLE_DIAGNOSTICS
     if APT_PLAN_DIAGNOSTICS is not None:
         output["apt_plan_rejections"] = APT_PLAN_DIAGNOSTICS
     statuses = {"preparing", "package-transaction-pending", "dependencies-installed", "failed-package-transaction-review-required",
@@ -303,8 +312,18 @@ def inspect_libvirt():
             "libvirt_no_tcp_listener": True}
 
 
+def lifecycle_diagnostic(raw):
+    match = re.search(rb'native (\w+): status=(\w+) code=(\w*) phase=(\w+) ', raw)
+    if match is None:
+        return None
+    values = dict(zip(('action', 'status', 'code', 'phase'), (v.decode('ascii') for v in match.groups())))
+    if values['code'] not in LIFECYCLE_FIELDS['code']:
+        values['code'] = 'UNCLASSIFIED'
+    return values if all(values[k] in LIFECYCLE_FIELDS[k] for k in values) else None
+
+
 def execute(metadata):
-    global PHASE
+    global PHASE, LIFECYCLE_DIAGNOSTICS
     PHASE = "preflight"
     progress(PHASE)
     require(os.geteuid() == 0 and (Path("/proc/1/comm").read_text().strip() == "systemd"), "REAL_GUEST_SYSTEMD_ROOT_REQUIRED")
@@ -356,6 +375,7 @@ def execute(metadata):
     progress(PHASE)
     lifecycle = run([str(ROOT / "bandwidth-fixture.test"), "-test.run=^TestNative(BandwidthLiveXML|GuestLifecycleAndConsole)$", "-test.timeout=7m", "-test.v"], timeout=430, check=False)
     if lifecycle.returncode != 0:
+        LIFECYCLE_DIAGNOSTICS = lifecycle_diagnostic(lifecycle.stdout)
         for action in ("create", "reinstall", "rescue_enter", "rescue_exit", "delete"):
             if ("native " + action + ":").encode() in lifecycle.stdout:
                 raise Refused("GUEST_LIFECYCLE_" + action.upper() + "_FAILED")
