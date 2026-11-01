@@ -254,6 +254,11 @@ func (m *Manager) Submit(ctx context.Context, task nodeproto.NodeTask, raw []byt
 }
 func (m *Manager) execute(ctx context.Context, task nodeproto.NodeTask, result nodeproto.NodeResult, prepared *Instance) (nodeproto.NodeResult, error) {
 	finish := func(status, code string, inst *Instance) (nodeproto.NodeResult, error) {
+		// Admission quarantines existing instances before the worker starts. A
+		// rejection did not mutate the guest; restore its pre-claim reservation.
+		if status == "rejected" && inst == nil {
+			inst = prepared
+		}
 		r, e := m.Ledger.Finish(task.OperationID, status, code, inst)
 		m.logOutcome(task, r, code, e == nil)
 		if e != nil {
