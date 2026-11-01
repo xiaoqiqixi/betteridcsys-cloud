@@ -196,20 +196,27 @@ func ExportSealedSource(ctx context.Context, config control.Config, operation st
 	defer os.RemoveAll(scratch) // exactly the private directory created above
 	left := MaxDataBytes
 	entries := []Entry{}
-	paths := map[string]string{}
+	filesToEncrypt := map[string]*os.File{}
+	defer func() {
+		for _, f := range filesToEncrypt {
+			f.Close()
+		}
+	}()
 	write := func(name string, emit func(io.Writer) error) error {
-		f, e := os.CreateTemp(scratch, "entry-")
+		if len(filesToEncrypt) >= 256 || filesToEncrypt[name] != nil {
+			return ErrInvalid
+		}
+		f, e := plaintextFile(scratch)
 		if e != nil {
 			return ErrInvalid
 		}
-		defer f.Close()
+		filesToEncrypt[name] = f
 		h := sha256.New()
 		before := left
 		if emit(quotaWriter{io.MultiWriter(f, h), &left}) != nil || f.Sync() != nil {
 			return ErrInvalid
 		}
 		entries = append(entries, Entry{Name: name, Size: before - left, SHA256: hex.EncodeToString(h.Sum(nil))})
-		paths[name] = f.Name()
 		return nil
 	}
 	for name, raw := range files {
@@ -252,7 +259,7 @@ func ExportSealedSource(ctx context.Context, config control.Config, operation st
 		return ExportReport{}, ErrInvalid
 	}
 	defer output.Close()
-	if e = encryptContainer(output, recovery, raw, entries, paths); e != nil || output.Sync() != nil {
+	if e = encryptContainer(output, recovery, raw, entries, filesToEncrypt); e != nil || output.Sync() != nil {
 		return ExportReport{}, ErrInvalid
 	}
 	info, e := output.Stat()
@@ -270,8 +277,14 @@ func ExportSealedSource(ctx context.Context, config control.Config, operation st
 		return ExportReport{}, ErrInvalid
 	}
 	// Do not announce success if removing our private plaintext scratch failed.
-	// A crash can still leave this owned directory for explicit recovery; the
-	// durable export-started seal remains in place in that case too.
+	// A crash can leave only an empty directory or encrypted output. Plaintext
+	// has no directory entries; the export-started seal remains in place.
+	for name, f := range filesToEncrypt {
+		if f.Close() != nil {
+			return ExportReport{}, ErrInvalid
+		}
+		delete(filesToEncrypt, name)
+	}
 	if output.Close() != nil || os.RemoveAll(scratch) != nil {
 		return ExportReport{}, ErrInvalid
 	}
@@ -304,7 +317,7 @@ func writePrivateNew(path string, raw []byte) error {
 	return d.Sync()
 }
 
-func encryptContainer(output io.Writer, key string, manifest []byte, entries []Entry, paths map[string]string) error {
+func encryptContainer(output io.Writer, key string, manifest []byte, entries []Entry, files map[string]*os.File) error {
 	writer, e := encryptWriter(output, key)
 	if e != nil {
 		return ErrInvalid
@@ -324,12 +337,11 @@ func encryptContainer(output io.Writer, key string, manifest []byte, entries []E
 		return ErrInvalid
 	}
 	for _, entry := range entries {
-		f, e := os.Open(paths[entry.Name])
-		if e != nil {
+		f := files[entry.Name]
+		if f == nil {
 			return ErrInvalid
 		}
-		e = write(entry.Name, entry.Size, f)
-		f.Close()
+		e = write(entry.Name, entry.Size, io.NewSectionReader(f, 0, entry.Size+1))
 		if e != nil {
 			return ErrInvalid
 		}

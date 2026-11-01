@@ -11,7 +11,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
-	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -32,11 +31,10 @@ func (a *Archive) readSmall(name string, maximum int64) ([]byte, error) {
 	if a == nil || !a.valid {
 		return nil, ErrInvalid
 	}
-	f, e := os.Open(a.files[name])
+	f, e := a.reader(name)
 	if e != nil {
 		return nil, ErrInvalid
 	}
-	defer f.Close()
 	raw, e := io.ReadAll(io.LimitReader(f, maximum+1))
 	if e != nil || int64(len(raw)) > maximum {
 		return nil, ErrInvalid
@@ -91,11 +89,10 @@ func (a *Archive) tableRecords(ctx context.Context, name string, header func(Tab
 	if a == nil || !a.valid {
 		return 0, ErrInvalid
 	}
-	f, e := os.Open(a.files["database/"+name+".jsonl"])
+	f, e := a.reader("database/" + name + ".jsonl")
 	if e != nil {
 		return 0, ErrInvalid
 	}
-	defer f.Close()
 	s := bufio.NewScanner(f)
 	s.Buffer(make([]byte, 65536), 65<<20)
 	s.Split(func(raw []byte, eof bool) (int, []byte, error) {
