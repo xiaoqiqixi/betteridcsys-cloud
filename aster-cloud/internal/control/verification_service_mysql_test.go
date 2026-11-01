@@ -4,6 +4,7 @@ import (
 	"aster/cloud/internal/identity"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -409,11 +410,13 @@ func TestMySQLVerificationServiceStopCancelsRealAuthenticationWait(t *testing.T)
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
-	// Anonymous admission commits the global and peer rate reservations BEFORE
-	// waiting on the identity lock. Cancellation must not refund that attempt.
-	// Require the precise two expected buckets rather than ignoring this table.
+	// Anonymous admission commits the peer-prefix reservation BEFORE waiting
+	// on the identity lock. Cancellation must not refund that attempt. There
+	// must be exactly this bucket, with no global creation counter to lock out
+	// other prefixes. Keep checking the whole table and its exact SQL image.
 	var count, valid int
-	if f.admin.DB.QueryRow("SELECT COUNT(*),SUM(bucket IN (UNHEX('133c37c2afdbce09f06f89cb452e47e0f775399ab8c04b22cbb781fd9534ac30'),UNHEX('71e9fc725378d3ec341a5dbd702c88190b89bef7cb6b3ab6819eddd06c33e4bf')) AND attempts=1 AND window_at>=? AND window_at<=?) FROM controller_console_login_limits", requestAt, time.Now().UTC()).Scan(&count, &valid) != nil || count != 2 || valid != 2 {
+	prefixBucket := sha256.Sum256([]byte("anonymous:ip:127.0.0.1"))
+	if f.admin.DB.QueryRow("SELECT COUNT(*),SUM(bucket=? AND attempts=1 AND window_at>=? AND window_at<=?) FROM controller_console_login_limits", prefixBucket[:], requestAt, time.Now().UTC()).Scan(&count, &valid) != nil || count != 1 || valid != 1 {
 		t.Fatal("authentication did not preserve the exact rate reservation")
 	}
 	waiting := verificationDatabaseImage(t, f.admin)

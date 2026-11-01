@@ -223,7 +223,8 @@ func TestMySQLVerificationLoginWaitsForOrdinaryRevocation(t *testing.T) {
 
 func TestMySQLVerificationAnonymousCapacityAcrossIndependentServices(t *testing.T) {
 	admin := consoleHTTPStore(t)
-	// Seed the last available slot directly at the agreed real SQL boundary.
+	// Seed the last available slot. Two independently limited SQL identities
+	// must serialize admission/eviction and retain the exact global bound.
 	tx, err := admin.DB.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -266,19 +267,43 @@ func TestMySQLVerificationAnonymousCapacityAcrossIndependentServices(t *testing.
 			<-start
 			var raw []byte
 			status, raw = b.request(t, "GET", "/console/v1/auth/csrf", "", consoleHTTPOptions{})
-			if status != 200 && (status != 429 || consoleHTTPError(t, raw) != "RATE_LIMITED") {
+			var challenge struct {
+				CSRF string `json:"csrf_token"`
+			}
+			if status != 200 || json.Unmarshal(raw, &challenge) != nil || len(challenge.CSRF) != 64 {
 				t.Errorf("unexpected capacity response %d", status)
 			}
+			b.csrf = challenge.CSRF
 		}(b)
 	}
 	close(start)
 	a, b := <-done, <-done
-	if !((a == 200 && b == 429) || (b == 200 && a == 429)) {
-		t.Fatalf("last slot not exclusive: %d %d", a, b)
+	if a != 200 || b != 200 {
+		t.Fatalf("global capacity denied new anonymous admission: %d %d", a, b)
 	}
 	var count int
 	if admin.DB.QueryRow("SELECT COUNT(*) FROM controller_console_sessions WHERE user_id IS NULL").Scan(&count) != nil || count != 4096 {
 		t.Fatal("anonymous capacity changed", count)
+	}
+	// Tied creation times are ordered by token hash: exactly the first seeded
+	// session must have been evicted, not either freshly issued challenge.
+	if admin.DB.QueryRow("SELECT COUNT(*) FROM controller_console_sessions WHERE token_hash=?", []byte(fmt.Sprintf("%032x", 0))).Scan(&count) != nil || count != 0 {
+		t.Fatal("oldest anonymous session was not evicted")
+	}
+	if admin.DB.QueryRow("SELECT COUNT(*) FROM controller_console_sessions WHERE token_hash=?", []byte(fmt.Sprintf("%032x", 1))).Scan(&count) != nil || count != 1 {
+		t.Fatal("eviction removed more than the required oldest session")
+	}
+	for _, browser := range browsers {
+		status, raw := browser.request(t, "GET", "/console/v1/auth/csrf", "", consoleHTTPOptions{})
+		var challenge struct {
+			CSRF string `json:"csrf_token"`
+		}
+		if status != 200 || json.Unmarshal(raw, &challenge) != nil || challenge.CSRF != browser.csrf {
+			t.Fatal("fresh challenge could not be reused", status)
+		}
+	}
+	if admin.DB.QueryRow("SELECT COUNT(*) FROM controller_console_sessions WHERE user_id IS NULL").Scan(&count) != nil || count != 4096 {
+		t.Fatal("fresh challenge reuse consumed another slot", count)
 	}
 }
 
