@@ -679,6 +679,65 @@ def unit_bytes(component, version_dir, approval=None):
             "\n[Install]\nWantedBy=multi-user.target\n").encode()
 
 
+def heartbeat_unit_bytes(version_dir):
+    """Fixed commands with the controller sandbox and versioned executable."""
+    service = unit_bytes("controller", version_dir).split(b"\n[Install]\n", 1)[0]
+    service = service.replace(b"Description=Aster Cloud controller (root-reviewed native install)",
+                              b"Description=Aster authenticated capability heartbeat for approved node %i")
+    service = service.replace(b"Type=simple", b"Type=oneshot")
+    service = service.replace(b" serve -config ", b" heartbeat -config ")
+    service = service.replace(os.fsencode(CONFIG_PATHS["controller"])+b"\nRestart=on-failure\nRestartSec=5\n",
+                              os.fsencode(CONFIG_PATHS["controller"])+b" -node %i\nRestart=no\nTimeoutStartSec=30\n")
+    service = service.replace(b"MemoryMax=256M", b"MemoryMax=128M").replace(b"TasksMax=64", b"TasksMax=32")
+    timer = ("[Unit]\nDescription=Observe actual approved Aster node %i capabilities\n\n"
+             "[Timer]\nOnBootSec=30\nOnUnitActiveSec=20\nAccuracySec=1\n"
+             "Unit=controller-heartbeat@%i.service\n\n[Install]\nWantedBy=timers.target\n").encode()
+    return {"controller-heartbeat@.service": service, "controller-heartbeat@.timer": timer}
+
+
+def heartbeat_timers(cfg):
+    nodes = cfg.get("nodes", [])
+    if not isinstance(nodes, list) or len(nodes) > 4096:
+        fail("Approved controller node inventory rejected")
+    ids = [node.get("id") if isinstance(node, dict) else None for node in nodes]
+    if any(not isinstance(node, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", node) for node in ids) or len(ids) != len(set(ids)):
+        fail("Approved heartbeat node IDs rejected")
+    return ["controller-heartbeat@"+node+".timer" for node in sorted(ids)]
+
+
+def check_heartbeat_units(units, timers):
+    # Never overwrite an operator unit, alias, mask or override. Recheck under
+    # the installation lock before writing, including on explicit resume.
+    for name, raw in units.items():
+        path = SYSTEMD_ROOT/name
+        protected_path(str(path), allow_missing=True)
+        if path.exists() and protected_read(str(path), private=False) != raw:
+            fail("Existing heartbeat unit differs; explicit manual service review required")
+    names = list(units) + timers + [name.removesuffix(".timer")+".service" for name in timers]
+    for name in names:
+        for root in (SYSTEMD_ROOT, Path("/run/systemd/system")):
+            for path in (root/(name+".d"), root/name):
+                if root == SYSTEMD_ROOT and name in units and path == root/name:
+                    continue
+                if path.exists() or path.is_symlink():
+                    fail("Existing heartbeat override requires manual review")
+
+
+def stop_heartbeats(timers):
+    """Rollback the exact approved instances, including partial enable/start."""
+    if not timers:
+        return
+    failed = False
+    for argv in ([SYSTEMCTL, "disable", "--now", "--", *timers],
+                 [SYSTEMCTL, "stop", "--", *[name.removesuffix(".timer")+".service" for name in timers]]):
+        try:
+            run_fixed(argv)
+        except InstallerError:
+            failed = True
+    if failed:
+        fail("Heartbeat rollback unconfirmed; review the exact approved units")
+
+
 def strict_health(component, approval, cfg):
     if component != "controller":
         fail("Node mTLS admission must be checked from controller; never import its private identity onto a node")
@@ -937,6 +996,10 @@ def execute(args):
     desired_unit = unit_bytes(args.component, version_dir, anticipated_approval)
     if unit_path.exists() and protected_read(str(unit_path), private=False) != desired_unit:
         fail("Existing systemd unit differs; explicit manual service review required")
+    heartbeat_units = heartbeat_unit_bytes(version_dir) if args.component == "controller" else {}
+    timers = heartbeat_timers(cfg) if approval and args.component == "controller" else []
+    if heartbeat_units:
+        check_heartbeat_units(heartbeat_units, timers)
     state_dir = ensure_dir(STATE_ROOT / args.component)
     lock = state_dir / "install.lock"
     protected_path(str(lock), private=True, allow_missing=True)
@@ -949,6 +1012,8 @@ def execute(args):
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             fail("Another installation is active")
+        if heartbeat_units:
+            check_heartbeat_units(heartbeat_units, timers)
         state_path = state_dir / "state.json"
         recover_pending_state(state_path, args)
         if state_path.exists():
@@ -1029,6 +1094,15 @@ def execute(args):
                         for path in ("/var/lib/aster-artifacts", "/var/lib/aster-inbox"):
                             ensure_dir(Path(path))
                 step("configuration-approved", configure)
+                if heartbeat_units:
+                    timers = heartbeat_timers(cfg)
+                    check_heartbeat_units(heartbeat_units, timers)
+                    state["heartbeat_timers"] = timers
+                    state["heartbeat_units_sha256"] = {name: hashlib.sha256(raw).hexdigest() for name, raw in heartbeat_units.items()}
+                    def install_heartbeats():
+                        for name, raw in heartbeat_units.items():
+                            write_new(SYSTEMD_ROOT/name, raw, 0o644)
+                    step("inactive-heartbeat-units", install_heartbeats)
             # Without approval install an inert review template, NOT a live unit:
             # adding console flags later must not require replacing a live unit.
             if approval:
@@ -1089,22 +1163,34 @@ def execute(args):
                     step("strict-tls-health", wait_health)
                 else:
                     step("local-listener-only", lambda: node_listener_check(cfg))
-                step("service-enable", lambda: run_fixed([SYSTEMCTL, "enable", unit_path.name]))
                 if args.component == "controller":
+                    if timers:
+                        step("heartbeat-enable", lambda: run_fixed([SYSTEMCTL, "enable", "--now", "--", *timers]))
+                        for timer in timers:
+                            step("heartbeat-active:"+timer, lambda timer=timer: run_fixed([SYSTEMCTL, "is-active", "--quiet", timer]))
                     state["status"], state["configuration"], state["service"] = "service-ready", "approved", "ready"
                 else:
                     state["status"], state["configuration"], state["service"] = "node_started_pending_controller", "approved", "active-unadmitted"
                     state["controller_admission"] = "pending-real-controller-mTLS-heartbeat"
+                step("service-enable", lambda: run_fixed([SYSTEMCTL, "enable", unit_path.name]))
             state["current_step"] = None
             atomic_state(state_path, state)
         except Exception:
             state["status"] = "failed"
+            if "heartbeat-enable" in state["steps"] or state.get("current_step") == "heartbeat-enable":
+                try:
+                    stop_heartbeats(timers)
+                    state["heartbeat_cleanup"] = "approved-timers-disabled-and-services-stopped"
+                except InstallerError:
+                    state["heartbeat_cleanup"] = "unconfirmed"
             start_uncertain = "service-start" in state["steps"] or state.get("current_step") == "service-start"
             state["service"] = "unconfirmed" if start_uncertain else "not-started"
             if start_uncertain:
                 # This exact dedicated unit was installed by this operation. Do
                 # not leave a newly started, unverified API running after failure.
                 try:
+                    if "service-enable" in state["steps"] or state.get("current_step") == "service-enable":
+                        run_fixed([SYSTEMCTL, "disable", unit_path.name])
                     run_fixed([SYSTEMCTL, "stop", unit_path.name])
                     state["failure_cleanup"] = "own-service-stopped"
                 except InstallerError:

@@ -1,21 +1,40 @@
 [Unit]
 Description=Aster authenticated capability heartbeat for approved node %i
 After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
 User=root
 Group=root
-StateDirectory=aster-controller
-StateDirectoryMode=0700
 ExecStart=/opt/aster-cloud/bin/aster-controller heartbeat -config /etc/aster-controller/config.json -node %i
+Restart=no
+TimeoutStartSec=30
 UMask=0077
 NoNewPrivileges=true
-CapabilityBoundingSet=
 PrivateTmp=true
-PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+SystemCallArchitectures=native
+LimitNOFILE=1024
+TimeoutStopSec=45
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=1000
+PrivateDevices=true
+CapabilityBoundingSet=
+AmbientCapabilities=
 MemoryMax=128M
 TasksMax=32
+StateDirectory=aster-controller
+StateDirectoryMode=0700
+RestartPreventExitStatus=78

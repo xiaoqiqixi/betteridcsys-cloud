@@ -1027,6 +1027,90 @@ class InstallerContract(unittest.TestCase):
             self.assertTrue(any("check" in argv for argv in calls))
             self.assertFalse(any("migrate" in argv for argv in calls), "a current schema needs no DDL identity")
 
+    def test_approved_controller_installs_enables_only_approved_heartbeat_instances(self):
+        with self.isolated_host(), self.synthetic_certificate_acceptance():
+            approval, _, cfg, config = self.approval_input()
+            cfg['nodes'] = [{'id': 'node-b'}, {'id': 'node-a'}]
+            config.write_text(json.dumps(cfg))
+            args = self.args(extra=('--apply', '--approval', str(approval), '--start'))
+            events = []
+            def command(argv, **kwargs):
+                events.append(argv)
+                return b''
+            with mock.patch.object(installer, 'run_fixed', side_effect=command), \
+                    mock.patch.object(installer, 'strict_health', side_effect=lambda *args: events.append('health')):
+                installer.execute(args)
+            timers = ['controller-heartbeat@node-a.timer', 'controller-heartbeat@node-b.timer']
+            enable = [installer.SYSTEMCTL, 'enable', '--now', '--', *timers]
+            self.assertIn(enable, events)
+            self.assertLess(events.index('health'), events.index(enable))
+            self.assertLess(events.index([installer.SYSTEMCTL, 'daemon-reload']), events.index(enable))
+            for timer in timers:
+                self.assertIn([installer.SYSTEMCTL, 'is-active', '--quiet', timer], events)
+            version = installer.INSTALL_ROOT/'controller/versions'/('0.1.0-dev-'+args.sha256[:16])
+            for name, raw in installer.heartbeat_unit_bytes(version).items():
+                path = installer.SYSTEMD_ROOT/name
+                self.assertEqual(path.read_bytes(), raw)
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+            receipt = json.loads((installer.STATE_ROOT/'controller/state.json').read_text())
+            self.assertEqual(receipt['heartbeat_timers'], timers)
+            self.assertEqual(receipt['heartbeat_units_sha256'],
+                             {name: sha256(raw) for name, raw in installer.heartbeat_unit_bytes(version).items()})
+            # Same approved resume is idempotent and rechecks effective state.
+            args.resume = True
+            with mock.patch.object(installer, 'run_fixed', side_effect=command), mock.patch.object(installer, 'strict_health'):
+                self.assertEqual(installer.execute(args)['service'], 'ready')
+
+    def test_heartbeat_partial_enable_is_rolled_back_and_exact_resume_recovers(self):
+        with self.isolated_host(), self.synthetic_certificate_acceptance():
+            approval, _, cfg, config = self.approval_input()
+            cfg['nodes'] = [{'id': 'node-a'}, {'id': 'node-b'}]
+            config.write_text(json.dumps(cfg))
+            args = self.args(extra=('--apply', '--approval', str(approval), '--start'))
+            timers = ['controller-heartbeat@node-a.timer', 'controller-heartbeat@node-b.timer']
+            def partial_start(argv, **kwargs):
+                if argv[:3] == [installer.SYSTEMCTL, 'enable', '--now']:
+                    raise installer.InstallerError('synthetic partial enable failure')
+                return b''
+            with mock.patch.object(installer, 'run_fixed', side_effect=partial_start) as run, \
+                    mock.patch.object(installer, 'strict_health'), self.assertRaises(installer.InstallerError):
+                installer.execute(args)
+            calls = [call.args[0] for call in run.call_args_list]
+            self.assertIn([installer.SYSTEMCTL, 'disable', '--now', '--', *timers], calls)
+            self.assertIn([installer.SYSTEMCTL, 'stop', '--', 'controller-heartbeat@node-a.service', 'controller-heartbeat@node-b.service'], calls)
+            self.assertIn([installer.SYSTEMCTL, 'stop', 'aster-controller.service'], calls)
+            receipt = json.loads((installer.STATE_ROOT/'controller/state.json').read_text())
+            self.assertEqual(receipt['heartbeat_cleanup'], 'approved-timers-disabled-and-services-stopped')
+            self.assertEqual(receipt['status'], 'failed')
+            args.resume = True
+            with mock.patch.object(installer, 'run_fixed', return_value=b''), mock.patch.object(installer, 'strict_health'):
+                self.assertEqual(installer.execute(args)['service'], 'ready')
+
+    def test_approved_software_only_install_keeps_heartbeats_inactive(self):
+        with self.isolated_host(), self.synthetic_certificate_acceptance():
+            approval, _, cfg, config = self.approval_input()
+            cfg['nodes'] = [{'id': 'node-a'}]
+            config.write_text(json.dumps(cfg))
+            args = self.args(extra=('--apply', '--approval', str(approval)))
+            with mock.patch.object(installer, 'run_fixed') as run:
+                installer.execute(args)
+            run.assert_not_called()
+            self.assertTrue((installer.SYSTEMD_ROOT/'controller-heartbeat@.timer').is_file())
+
+    def test_foreign_heartbeat_template_and_instance_override_refused_before_commands(self):
+        for name in ('controller-heartbeat@.timer', 'controller-heartbeat@node-a.service', 'controller-heartbeat@.service.d'):
+            with self.subTest(name=name), self.isolated_host(), self.synthetic_certificate_acceptance():
+                approval, _, cfg, config = self.approval_input()
+                cfg['nodes'] = [{'id': 'node-a'}]
+                config.write_text(json.dumps(cfg))
+                path = self.private_file('units/'+name, b'foreign policy\n', 0o644)
+                args = self.args(extra=('--apply', '--approval', str(approval), '--start'))
+                with mock.patch.object(installer, 'run_fixed') as run, self.assertRaises(installer.InstallerError):
+                    installer.execute(args)
+                run.assert_not_called()
+                self.assertEqual(path.read_bytes(), b'foreign policy\n')
+                path.unlink()
+
     def test_fresh_controller_schema_without_migration_identity_never_starts(self):
         with self.isolated_host(), self.synthetic_certificate_acceptance():
             approval, _, _, _ = self.approval_input()
