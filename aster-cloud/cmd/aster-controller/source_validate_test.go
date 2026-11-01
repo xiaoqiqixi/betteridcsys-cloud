@@ -215,6 +215,29 @@ func TestControllerSourceValidation(t *testing.T) {
 		defer func() { expectedSource = strings.Repeat("b", 40) }()
 		refused(t, files)
 	})
+	t.Run("managed heartbeat installation receipt", func(t *testing.T) {
+		candidate := sourceFixture(t)
+		var installed map[string]any
+		if err := json.Unmarshal(candidate["source/installation.json"], &installed); err != nil {
+			t.Fatal(err)
+		}
+		installed["heartbeat_timers"] = []string{}
+		installed["heartbeat_units_sha256"] = map[string]string{
+			"controller-heartbeat@.service": strings.Repeat("1", 64),
+			"controller-heartbeat@.timer":   strings.Repeat("2", 64),
+		}
+		installed["steps"] = append(installed["steps"].([]any), "inactive-heartbeat-units")
+		candidate["source/installation.json"] = sourceJSON(installed)
+		sourceRebind(t, candidate)
+		if err := os.WriteFile(archive, sourceArchive(t, candidate, key), 0600); err != nil {
+			t.Fatal(err)
+		}
+		out, diag, err := invoke()
+		var proof map[string]any
+		if err != nil || len(diag) != 0 || json.Unmarshal(out, &proof) != nil || proof["source_bindings_verified"] != true || proof["migration_ready"] != false {
+			t.Fatalf("managed heartbeat receipt rejected or overclaimed: %v %s %s", err, out, diag)
+		}
+	})
 	t.Run("authenticated managed console entrypoint", func(t *testing.T) {
 		unit, err := os.ReadFile("testdata/source-controller.service")
 		if err != nil {

@@ -110,7 +110,8 @@ func planTargetArchiveMode(operation string, configuration bool, action func(Tar
 	if e != nil || !exactSourceRecord(stateRaw, &state) || state.Schema != 1 || state.Component != "controller" || state.Status != "software-installed" ||
 		state.Configuration != "waiting-approval" || state.Service != "not-started" || state.CurrentStep != nil || state.SourceCommit != request.SourceCommit ||
 		!shaPattern.MatchString(state.BundleSHA256) || !regexp.MustCompile(`^0\.[0-9]+\.[0-9]+-(dev(\.[0-9]+)?|rc\.[0-9]+)$`).MatchString(state.Version) ||
-		state.ApprovalSHA256 != "" || state.WizardRequestSHA256 != "" {
+		state.ApprovalSHA256 != "" || state.WizardRequestSHA256 != "" || state.HeartbeatTimers != nil ||
+		state.HeartbeatUnitsSHA256 != nil || state.HeartbeatCleanup != "" || state.FailureCleanup != "" {
 		return fail()
 	}
 	steps := map[string]bool{}
