@@ -21,6 +21,8 @@ import subprocess
 import time
 import xml.etree.ElementTree as ET
 
+RESTORED_CONTROLLER_TABLES = 40  # All controller tables plus the installer ownership marker.
+
 APT_GET = "/usr/bin/apt-get"
 MYSQL = "/usr/bin/mysql"
 SYSTEMCTL = "/usr/bin/systemctl"
@@ -1103,7 +1105,7 @@ def _verify_restore_mysql(operation, charset, collation, *, restored=False, veri
         "'events',(SELECT COUNT(*) FROM information_schema.EVENTS WHERE EVENT_SCHEMA='" + database + "'),"
         "'triggers',(SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='" + database + "')) "
         "FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='" + database + "';\n")
-    if type(restored) is not bool or info != {'charset': charset, 'collation': collation, 'tables': 35 if restored else 1, 'marker': 1, 'routines': 0, 'events': 0, 'triggers': 0}:
+    if type(restored) is not bool or info != {'charset': charset, 'collation': collation, 'tables': RESTORED_CONTROLLER_TABLES if restored else 1, 'marker': 1, 'routines': 0, 'events': 0, 'triggers': 0}:
         fail("Restore target object inventory or source encoding changed")
     owner = _json(read_private(str(state_dir / 'mysql-provision.json')))
     if not isinstance(owner.get('nonce'), str) or not re.fullmatch(r'[a-f0-9]{64}', owner['nonce']):

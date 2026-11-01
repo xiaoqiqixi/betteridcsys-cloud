@@ -24,6 +24,14 @@ p = i.provisioning_module()
 
 
 class InstallerUnits(unittest.TestCase):
+    def test_restored_inventory_includes_every_controller_migration(self):
+        migrations = Path(__file__).resolve().parents[2] / 'migrations'
+        tables = set()
+        for path in migrations.glob('*.sql'):
+            tables.update(re.findall(r'CREATE TABLE (?:IF NOT EXISTS )?(controller_[a-z0-9_]+)\s*\(', path.read_text()))
+        self.assertGreater(len(tables), 30)
+        self.assertEqual(p.RESTORED_CONTROLLER_TABLES, len(tables) + 1)
+
     def test_apply_target_rejects_26_unknown_and_other_platforms_before_host_access(self):
         base = {"system": "Linux", "architecture": "x86_64", "distribution": "ubuntu", "version": "24.04"}
         for change in ({"version": "26.04"}, {"version": "unknown"}, {"version": "24.10"},
