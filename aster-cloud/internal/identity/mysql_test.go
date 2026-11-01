@@ -380,8 +380,11 @@ func TestMySQLConsoleIdentity(t *testing.T) {
 			t.Fatal("parallel account limit not atomic", good.Load(), limited.Load())
 		}
 		reopened, _ := New(db, Config{Origin: s.origin})
-		if err := reopened.reserveLogin(context.Background(), "limited@example.invalid", "192.0.2.21:2222"); !errors.Is(err, ErrRateLimited) {
+		if err := reopened.reserveLogin(context.Background(), "limited@example.invalid", "192.0.2.20:2222"); !errors.Is(err, ErrRateLimited) {
 			t.Fatal("rate counter lost on restart")
+		}
+		if err := reopened.reserveLogin(context.Background(), "limited@example.invalid", "192.0.2.21:2222"); err != nil {
+			t.Fatal("another peer locked out this account", err)
 		}
 		for i := range 41 {
 			err := s.reserveLogin(context.Background(), strings.Repeat("x", i+1)+"@example.invalid", "192.0.2.30:1234")
@@ -474,18 +477,19 @@ func TestMySQLConsoleIdentity(t *testing.T) {
 		if _, err := reopened.anonymousSession(context.Background(), "192.0.2.50:9999"); !errors.Is(err, ErrRateLimited) {
 			t.Fatal("anonymous ceiling lost on restart")
 		}
+		// A legacy global creation bucket must not deny a new peer after upgrade.
 		global := tokenHash("anonymous:global")
-		if _, err := db.Exec("UPDATE controller_console_login_limits SET attempts=4096 WHERE bucket=?", global[:]); err != nil {
+		if _, err := db.Exec("INSERT INTO controller_console_login_limits(bucket,window_at,attempts) VALUES(?,?,4096)", global[:], now); err != nil {
 			t.Fatal(err)
 		}
 		var before, after int
 		db.QueryRow("SELECT COUNT(*) FROM controller_console_sessions").Scan(&before)
-		if _, err := s.anonymousSession(context.Background(), "198.51.100.88:1234"); !errors.Is(err, ErrRateLimited) {
-			t.Fatal("global anonymous creation ceiling missing", err)
+		if _, err := s.anonymousSession(context.Background(), "198.51.100.88:1234"); err != nil {
+			t.Fatal("legacy global creation ceiling blocked new peer", err)
 		}
 		db.QueryRow("SELECT COUNT(*) FROM controller_console_sessions").Scan(&after)
-		if before != after {
-			t.Fatal("throttled anonymous request inserted a session")
+		if after != before+1 {
+			t.Fatal("new peer did not get its anonymous session")
 		}
 		later := *s
 		later.nowFn = func() time.Time { return now.Add(16 * time.Minute) }
