@@ -10,6 +10,7 @@ import argparse
 import base64
 import gzip
 import hashlib
+import http.client
 import ipaddress
 import json
 import os
@@ -20,12 +21,14 @@ import selectors
 import shutil
 import signal
 import socket
+import ssl
 import stat
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
+import urllib.error
 from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
@@ -101,6 +104,7 @@ class Refused(Exception):
 
 GUEST_ERROR_CODES |= set("TARGET_NATIVE_COMMAND_FAILED TARGET_NATIVE_OUTPUT_BOUND TARGET_NATIVE_ASSERTION_FAILED TARGET_NATIVE_REFUSAL_UNCONFIRMED TARGET_PROVISION_UNCONFIRMED TARGET_COMMAND_REJECTED TARGET_DATABASE_PLAN_CHANGED TARGET_DATABASE_INVENTORY_CHANGED TARGET_PROVISION_MODULE_MISSING TARGET_DEPENDENCIES_UNCONFIRMED TARGET_MYSQL_START_UNCONFIRMED TARGET_DATABASE_CREATE_UNCONFIRMED TARGET_DATABASE_INVENTORY_UNCONFIRMED TARGET_RESTORE_SERVER_INVENTORY_REJECTED TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED TARGET_MATERIALS_UNCONFIRMED TARGET_SESSIONS_UNCONFIRMED".split())
 GUEST_ERROR_CODES |= set('VERIFICATION_HOST_GUARD VERIFICATION_HOST_EXECUTABLE VERIFICATION_LISTENER VERIFICATION_SPAWN VERIFICATION_HANDSHAKE VERIFICATION_EARLY_EXIT VERIFICATION_CHILD_AUTHORITY VERIFICATION_CHILD_IDENTITY VERIFICATION_CHILD_GUARD VERIFICATION_CHILD_BOOTSTRAP VERIFICATION_CHILD_LISTENER VERIFICATION_CHILD_SQL VERIFICATION_CHILD_RECHECK VERIFICATION_CHILD_SERVICE'.split())
+GUEST_ERROR_CODES |= {"VERIFICATION_PROCESS_" + suffix for suffix in ("CHILD_SET", "NAMESPACE", "COMMAND", "ENVIRONMENT", "NETWORK_ROUTES", "THREAD_PRIVILEGES", "THREAD_CAPABILITIES", "THREAD_CREDENTIALS", "THREADS_MISSING", "GUARD_COUNT", "GUARD_LOCK", "TARGET_SEAL")}
 GUEST_PHASES |= set('target-verification-process-identity target-verification-process-write-denied target-verification-process-stop-drain target-verification-process-expiry-drain target-verification-process-parent-death-drain'.split())
 GUEST_PHASES |= set('target-verification-isolated-process target-verification-process-bad-credential target-verification-process-stop target-verification-process-expiry target-verification-process-parent-death target-verification-data-phase target-verification-data-drift target-verification-account target-verification-create-and-authenticate target-verification-readonly-reentry target-verification-grant-drift target-verification-credential-drift target-verification-revoke-plan target-verification-revoke-pending-auth target-verification-revoke-active-session target-verification-revoke-readonly-recovery target-verification-revoke-drift'.split())
 GUEST_ERROR_CODES |= set('TARGET_VERIFICATION_DATA_ALREADY_STARTED TARGET_VERIFICATION_DATA_NOT_STARTED TARGET_VERIFICATION_DATA_APPROVAL_REQUIRED TARGET_VERIFICATION_DATA_APPROVAL_CHANGED TARGET_VERIFICATION_DATA_UNCONFIRMED TARGET_VERIFICATION_IDENTITY_REJECTED TARGET_VERIFICATION_GRANTS_REJECTED TARGET_VERIFICATION_BINDING_REJECTED TARGET_VERIFICATION_CREDENTIAL_REJECTED TARGET_VERIFICATION_CREATE_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_UNCONFIRMED TARGET_VERIFICATION_APPROVAL_REQUIRED TARGET_VERIFICATION_APPROVAL_CHANGED TARGET_VERIFICATION_CREDENTIAL_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_CHANGED TARGET_VERIFICATION_REVOCATION_STARTED TARGET_VERIFICATION_REVOCATION_BINDING_REJECTED TARGET_VERIFICATION_REVOCATION_UNCONFIRMED TARGET_VERIFICATION_REVOCATION_NOT_STARTED TARGET_VERIFICATION_CONNECTION_INVENTORY_UNCONFIRMED TARGET_VERIFICATION_SESSIONS_ACTIVE TARGET_VERIFICATION_REVOCATION_APPROVAL_REQUIRED TARGET_VERIFICATION_REVOCATION_APPROVAL_CHANGED'.split())
@@ -168,15 +172,38 @@ def download(url, path, maximum):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), HTTPSOnly())
     total = 0
     deadline = time.monotonic() + 300
-    with opener.open(url, timeout=30) as response, Path(path).open("xb") as stream:
-        while True:
-            block = response.read(1024 * 1024)
-            if not block:
-                break
-            total += len(block)
-            require(total <= maximum and time.monotonic() < deadline, "IMAGE_DOWNLOAD_BOUND_EXCEEDED")
-            stream.write(block)
-    Path(path).chmod(0o600)
+    try:
+        with opener.open(url, timeout=30) as response, Path(path).open("xb") as stream:
+            while True:
+                block = response.read(1024 * 1024)
+                if not block:
+                    break
+                total += len(block)
+                require(total <= maximum and time.monotonic() < deadline, "IMAGE_DOWNLOAD_BOUND_EXCEEDED")
+                stream.write(block)
+        Path(path).chmod(0o600)
+    except urllib.error.HTTPError as error:
+        code = {404: "IMAGE_HTTP_NOT_FOUND", 429: "IMAGE_HTTP_RATE_LIMITED"}.get(error.code)
+        if code is None:
+            code = "IMAGE_HTTP_SERVER_FAILURE" if 500 <= error.code <= 599 else "IMAGE_HTTP_REJECTED"
+        raise Refused(code) from None
+    except (urllib.error.URLError, ssl.SSLError, socket.gaierror, TimeoutError, ConnectionError, http.client.HTTPException) as error:
+        reason = error.reason if isinstance(error, urllib.error.URLError) else error
+        # The exception's text, URL, response and partial body stay private.
+        # A transport failure still aborts this run; no retry or weaker TLS.
+        if isinstance(reason, ssl.SSLError):
+            code = "IMAGE_TLS_FAILURE"
+        elif isinstance(reason, socket.gaierror):
+            code = "IMAGE_DNS_FAILURE"
+        elif isinstance(reason, TimeoutError):
+            code = "IMAGE_TRANSPORT_TIMEOUT"
+        elif isinstance(reason, ConnectionError):
+            code = "IMAGE_CONNECTION_FAILURE"
+        elif isinstance(reason, http.client.IncompleteRead):
+            code = "IMAGE_RESPONSE_INCOMPLETE"
+        else:
+            code = "IMAGE_TRANSPORT_FAILURE"
+        raise Refused(code) from None
 
 
 def verify_signature(status):

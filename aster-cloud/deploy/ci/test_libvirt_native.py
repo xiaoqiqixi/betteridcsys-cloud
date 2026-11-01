@@ -8,6 +8,9 @@ import hashlib
 import importlib.util
 import json
 import io
+import http.client
+import ssl
+import urllib.error
 import socket
 import threading
 import os
@@ -135,6 +138,17 @@ class NativeFixtureContract(unittest.TestCase):
         self.assertEqual(public['code'],'GUEST_REPORTED_FAILURE')
         self.assertEqual(public['phase'],'unrecognized')
         self.assertNotIn('PRIVATE',json.dumps(public))
+
+    def test_isolated_process_observation_failures_keep_only_fixed_boundaries(self):
+        codes = ("CHILD_SET", "NAMESPACE", "COMMAND", "ENVIRONMENT", "NETWORK_ROUTES", "THREAD_PRIVILEGES", "THREAD_CAPABILITIES", "THREAD_CREDENTIALS", "THREADS_MISSING", "GUARD_COUNT", "GUARD_LOCK", "TARGET_SEAL")
+        for suffix in codes:
+            code = "VERIFICATION_PROCESS_" + suffix
+            with self.subTest(code=code):
+                raw = {**self.metadata(), "schema": 1, "passed": False, "kvm_ready": False, "code": code, "phase": "target-verification-process-identity", "private": "MUST_NOT_EXPORT"}
+                public = h.public_result(raw, self.metadata())
+                self.assertEqual(public["code"], code)
+                self.assertNotIn("private", public)
+                self.assertNotIn("MUST_NOT_EXPORT", json.dumps(public))
 
     def test_only_fixed_signed_dated_official_images(self):
         self.assertEqual(set(h.IMAGES), {"22.04", "24.04"})
@@ -299,6 +313,49 @@ class NativeFixtureContract(unittest.TestCase):
         for url in ("http://cloud-images.ubuntu.com/image", "https://evil.invalid/image", "https://user@cloud-images.ubuntu.com/image"):
             with self.subTest(url=url), self.assertRaises(h.Refused):
                 h.HTTPSOnly().redirect_request(None, None, 302, "", {}, url)
+
+    def test_image_download_failure_classifies_transport_without_exporting_private_details(self):
+        url = "https://cloud-images.ubuntu.com/releases/noble/release-20261017/SHA256SUMS"
+        secret = "DO_NOT_EXPORT_PRIVATE_TRANSPORT_DETAIL"
+        cases = [
+            (urllib.error.HTTPError(url, 404, secret, {}, None), "IMAGE_HTTP_NOT_FOUND"),
+            (urllib.error.HTTPError(url, 429, secret, {}, None), "IMAGE_HTTP_RATE_LIMITED"),
+            (urllib.error.HTTPError(url, 503, secret, {}, None), "IMAGE_HTTP_SERVER_FAILURE"),
+            (urllib.error.HTTPError(url, 403, secret, {}, None), "IMAGE_HTTP_REJECTED"),
+            (urllib.error.URLError(socket.gaierror(-2, secret)), "IMAGE_DNS_FAILURE"),
+            (urllib.error.URLError(ssl.SSLCertVerificationError(secret)), "IMAGE_TLS_FAILURE"),
+            (urllib.error.URLError(TimeoutError(secret)), "IMAGE_TRANSPORT_TIMEOUT"),
+            (TimeoutError(secret), "IMAGE_TRANSPORT_TIMEOUT"),
+            (ConnectionResetError(secret), "IMAGE_CONNECTION_FAILURE"),
+            (http.client.IncompleteRead(b"private-response", 100), "IMAGE_RESPONSE_INCOMPLETE"),
+            (urllib.error.URLError(secret), "IMAGE_TRANSPORT_FAILURE"),
+        ]
+        for error, expected in cases:
+            with self.subTest(code=expected), tempfile.TemporaryDirectory() as directory:
+                target = Path(directory) / "manifest"
+                with mock.patch.object(h.urllib.request.OpenerDirector, "open", side_effect=error) as opened:
+                    with self.assertRaises(h.Refused) as caught:
+                        h.download(url, target, 65536)
+                    self.assertEqual(str(caught.exception), expected)
+                    self.assertEqual(opened.call_count, 1, "a failed image download must not silently retry")
+                    self.assertFalse(target.exists())
+
+    def test_image_download_classifies_mid_body_disconnect_and_keeps_refusals(self):
+        url = "https://cloud-images.ubuntu.com/releases/noble/release-20261017/SHA256SUMS"
+        class Disconnected(io.BytesIO):
+            def read(self, _size):
+                raise http.client.IncompleteRead(b"private-partial-body", 100)
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "manifest"
+            with mock.patch.object(h.urllib.request.OpenerDirector, "open", return_value=Disconnected()) as opened:
+                with self.assertRaises(h.Refused) as caught:
+                    h.download(url, target, 65536)
+                self.assertEqual(str(caught.exception), "IMAGE_RESPONSE_INCOMPLETE")
+                self.assertEqual(opened.call_count, 1)
+            with mock.patch.object(h.urllib.request.OpenerDirector, "open", return_value=io.BytesIO(b"oversized")):
+                with self.assertRaises(h.Refused) as caught:
+                    h.download(url, Path(directory) / "bounded", 2)
+                self.assertEqual(str(caught.exception), "IMAGE_DOWNLOAD_BOUND_EXCEEDED")
 
     def test_network_downloader_has_no_inherited_proxy(self):
         source = (HERE / "libvirt-native.py").read_text()

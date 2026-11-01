@@ -59,10 +59,10 @@ def accept(root, inputs, controller, operation, module, directory, require, prog
                 drained = True
             except BlockingIOError:
                 drained = False
-            require(drained == expected)
+            require(drained == expected, "VERIFICATION_PROCESS_GUARD_LOCK")
         finally:
             os.close(fd)
-        require((state/'target-restore.json').read_bytes() == original_seal)
+        require((state/'target-restore.json').read_bytes() == original_seal, 'VERIFICATION_PROCESS_TARGET_SEAL')
 
     def request(method, path):
         with socket.create_connection(('127.0.0.1', 9555), timeout=2) as raw:
@@ -81,18 +81,18 @@ def accept(root, inputs, controller, operation, module, directory, require, prog
                 children.update(map(int, (task/'children').read_text().split()))
             except FileNotFoundError:
                 pass
-        require(len(children) == 1)
+        require(len(children) == 1, "VERIFICATION_PROCESS_CHILD_SET")
         child = children.pop()
-        require(child > 1)
+        require(child > 1, "VERIFICATION_PROCESS_CHILD_SET")
         return child
 
     def restricted(child, parent):
         p = Path('/proc')/str(child)
-        require((p/'ns/net').stat().st_ino != (Path('/proc')/str(parent.pid)/'ns/net').stat().st_ino)
-        require((p/'cmdline').read_bytes().split(b'\0') == [str(binary).encode(), b'migration-verification-child', b''])
-        require(set((p/'environ').read_bytes().split(b'\0')) == {b'PATH=/usr/bin:/bin', b'LANG=C', b''})
+        require((p/'ns/net').stat().st_ino != (Path('/proc')/str(parent.pid)/'ns/net').stat().st_ino, 'VERIFICATION_PROCESS_NAMESPACE')
+        require((p/'cmdline').read_bytes().split(b'\0') == [str(binary).encode(), b'migration-verification-child', b''], 'VERIFICATION_PROCESS_COMMAND')
+        require(set((p/'environ').read_bytes().split(b'\0')) == {b'PATH=/usr/bin:/bin', b'LANG=C', b''}, 'VERIFICATION_PROCESS_ENVIRONMENT')
         rows = (p/'net/route').read_text().splitlines()
-        require(len(rows) == 1)  # no routes, while the inherited TLS socket works
+        require(len(rows) == 1, "VERIFICATION_PROCESS_NETWORK_ROUTES")  # no routes, while the inherited TLS socket works
         seen = 0
         for task in (p/'task').iterdir():
             try:
@@ -100,12 +100,12 @@ def accept(root, inputs, controller, operation, module, directory, require, prog
             except FileNotFoundError:
                 continue
             seen += 1
-            require(fields['NoNewPrivs'].strip() == '1' and not fields['Groups'].strip())
+            require(fields['NoNewPrivs'].strip() == '1' and not fields['Groups'].strip(), 'VERIFICATION_PROCESS_THREAD_PRIVILEGES')
             for key in ('CapInh', 'CapPrm', 'CapEff', 'CapAmb'):
-                require(fields[key].strip() == '0000000000000000')
+                require(fields[key].strip() == '0000000000000000', 'VERIFICATION_PROCESS_THREAD_CAPABILITIES')
             for key in ('Uid', 'Gid'):
-                require(fields[key].split() == ['65532']*4)
-        require(seen > 0)
+                require(fields[key].split() == ['65532']*4, 'VERIFICATION_PROCESS_THREAD_CREDENTIALS')
+        require(seen > 0, "VERIFICATION_PROCESS_THREADS_MISSING")
         inode = (state/'runtime.lock').stat().st_ino
         inherited = 0
         for descriptor in (p/'fd').iterdir():
@@ -113,7 +113,7 @@ def accept(root, inputs, controller, operation, module, directory, require, prog
                 inherited += descriptor.stat().st_ino == inode and descriptor.stat().st_dev == (state/'runtime.lock').stat().st_dev
             except FileNotFoundError:
                 pass
-        require(inherited == 1)
+        require(inherited == 1, "VERIFICATION_PROCESS_GUARD_COUNT")
 
     def sql_drained():
         deadline = time.monotonic()+10
