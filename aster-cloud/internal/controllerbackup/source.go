@@ -10,6 +10,7 @@ import (
 	"io"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -59,19 +60,23 @@ type sourcePlan struct {
 	Units    []sourceUnit   `json:"units"`
 }
 type sourceInstallation struct {
-	Schema              int      `json:"schema"`
-	Component           string   `json:"component"`
-	Version             string   `json:"version"`
-	BundleSHA256        string   `json:"bundle_sha256"`
-	SourceCommit        string   `json:"source_commit"`
-	Steps               []string `json:"steps"`
-	Status              string   `json:"status"`
-	Configuration       string   `json:"configuration"`
-	Service             string   `json:"service"`
-	CurrentStep         *string  `json:"current_step"`
-	ApprovalSHA256      string   `json:"approval_sha256,omitempty"`
-	WizardRequestSHA256 string   `json:"wizard_request_sha256,omitempty"`
-	NativeOptions       *struct {
+	Schema               int                     `json:"schema"`
+	Component            string                  `json:"component"`
+	Version              string                  `json:"version"`
+	BundleSHA256         string                  `json:"bundle_sha256"`
+	SourceCommit         string                  `json:"source_commit"`
+	Steps                []string                `json:"steps"`
+	Status               string                  `json:"status"`
+	Configuration        string                  `json:"configuration"`
+	Service              string                  `json:"service"`
+	CurrentStep          *string                 `json:"current_step"`
+	ApprovalSHA256       string                  `json:"approval_sha256,omitempty"`
+	WizardRequestSHA256  string                  `json:"wizard_request_sha256,omitempty"`
+	HeartbeatTimers      []string                `json:"heartbeat_timers,omitempty"`
+	HeartbeatUnitsSHA256 *sourceHeartbeatDigests `json:"heartbeat_units_sha256,omitempty"`
+	HeartbeatCleanup     string                  `json:"heartbeat_cleanup,omitempty"`
+	FailureCleanup       string                  `json:"failure_cleanup,omitempty"`
+	NativeOptions        *struct {
 		InstallDependencies bool   `json:"install_dependencies"`
 		ProvisionMySQL      bool   `json:"provision_mysql"`
 		PrepareLibvirt      bool   `json:"prepare_libvirt,omitempty"`
@@ -79,6 +84,47 @@ type sourceInstallation struct {
 		RuntimeUser         string `json:"runtime_user,omitempty"`
 		MigrationUser       string `json:"migration_user,omitempty"`
 	} `json:"native_options,omitempty"`
+}
+
+type sourceHeartbeatDigests struct {
+	Service string `json:"controller-heartbeat@.service"`
+	Timer   string `json:"controller-heartbeat@.timer"`
+}
+
+// New managed receipts bind exactly the configured node inventory and the
+// templates observed by the isolation plan. Legacy receipts remain readable;
+// these historical fields never authorize installing or enabling target units.
+func validSourceHeartbeats(installed sourceInstallation, config control.Config, units []sourceUnit) bool {
+	if installed.FailureCleanup != "" && installed.FailureCleanup != "own-service-stopped" && installed.FailureCleanup != "own-service-stop-unconfirmed" {
+		return false
+	}
+	digests := installed.HeartbeatUnitsSHA256
+	if digests == nil {
+		return installed.HeartbeatTimers == nil && installed.HeartbeatCleanup == ""
+	}
+	if installed.HeartbeatTimers == nil || len(installed.HeartbeatTimers) != len(config.Nodes) ||
+		!shaPattern.MatchString(digests.Service) || !shaPattern.MatchString(digests.Timer) ||
+		!slices.Contains(installed.Steps, "inactive-heartbeat-units") ||
+		(installed.HeartbeatCleanup != "" && installed.HeartbeatCleanup != "approved-timers-disabled-and-services-stopped" && installed.HeartbeatCleanup != "unconfirmed") {
+		return false
+	}
+	nodes := make([]string, 0, len(config.Nodes))
+	for _, node := range config.Nodes {
+		nodes = append(nodes, node.ID)
+	}
+	slices.Sort(nodes)
+	observed := make(map[string]string, len(units))
+	for _, unit := range units {
+		observed[unit.Name] = unit.SHA256
+	}
+	for index, node := range nodes {
+		prefix := "controller-heartbeat@" + node
+		if installed.HeartbeatTimers[index] != prefix+".timer" ||
+			observed[prefix+".service"] != digests.Service || observed[prefix+".timer"] != digests.Timer {
+			return false
+		}
+	}
+	return true
 }
 
 // Exact keys, no duplicate aliases, null only for nullable fields; accepting
@@ -226,7 +272,7 @@ func (a *Archive) ValidateSource(expectedCommit string) (SourceReport, error) {
 			return fail()
 		}
 	}
-	if !validSourceUnits(plan.Units, config) {
+	if !validSourceUnits(plan.Units, config) || !validSourceHeartbeats(installed, config, plan.Units) {
 		return fail()
 	}
 	console, e := a.sourceConsole(installed, plan.Units)

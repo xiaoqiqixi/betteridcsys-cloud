@@ -150,7 +150,7 @@ func exportSourceConsole(planRaw, installationRaw []byte, config control.Config,
 	var installed sourceInstallation
 	if !operationID.MatchString(operation) || !exactSourceRecord(planRaw, &plan) || plan.Schema != 1 || !validSourceUnits(plan.Units, config) ||
 		!exactSourceRecord(installationRaw, &installed) || installed.Component != "controller" || installed.Schema != 1 ||
-		plan.Identity.InstallationSHA256 != digestBytes(installationRaw) {
+		plan.Identity.InstallationSHA256 != digestBytes(installationRaw) || !validSourceHeartbeats(installed, config, plan.Units) {
 		return nil, ErrInvalid
 	}
 	for _, unit := range plan.Units {
