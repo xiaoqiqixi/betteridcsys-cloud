@@ -452,7 +452,7 @@ func (s *SQLStore) Claim(ctx context.Context, op, profile string, now time.Time,
 	if occupied != 0 {
 		return Job{}, ErrState
 	}
-	if e = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM controller_operations WHERE node_id=? AND CAST(state AS BINARY) NOT IN ('accepted','succeeded','rejected')", j.NodeID).Scan(&occupied); e != nil {
+	if e = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM controller_operations WHERE node_id=? AND CAST(state AS BINARY) NOT IN ('accepted','succeeded','rejected','resolved')", j.NodeID).Scan(&occupied); e != nil {
 		return Job{}, e
 	}
 	if occupied != 0 {

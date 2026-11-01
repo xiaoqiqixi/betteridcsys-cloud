@@ -1,6 +1,7 @@
 package control
 
 import (
+	"aster/cloud/internal/nodeproto"
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -223,5 +224,51 @@ func TestBillingPermanentMismatchPersistsWhileShortagesRemainRetryable(t *testin
 				t.Fatal("replay changed intent", err)
 			}
 		})
+	}
+}
+
+func TestResolvedOperationTransactionUnblocksWithoutReplayingMutation(t *testing.T) {
+	now := time.Now().UTC()
+	p := testProfile()
+	c := testConfig(p)
+	v := Instance{ID: id(), NodeID: p.ID, OwnerRef: id(), Hostname: "guest", Resources: testResources(p), State: "running", CreatedAt: now, UpdatedAt: now}
+	task := nodeproto.NodeTask{Protocol: nodeproto.Protocol, OperationID: id(), NodeID: p.ID, InstanceID: v.ID, OwnerRef: v.OwnerRef, Hostname: v.Hostname, Resources: v.Resources, Action: "reboot"}
+	raw, sha, _ := task.BytesAndDigest()
+	op := Operation{ID: task.OperationID, ActorID: id(), InstanceID: v.ID, NodeID: p.ID, ProfileSHA: p.Digest(), Action: "reboot", Protocol: task.Protocol, Request: raw, RequestSHA: sha, State: "uncertain", CreatedAt: now, UpdatedAt: now}
+	f := &stateMachineFixture{op: op, instance: v, now: now, nodes: map[string]stateMachineNode{p.ID: {profile: p, seen: now}}}
+	s := stateMachineStore(t, f)
+	result := nodeproto.NodeResult{Protocol: task.Protocol, OperationID: task.OperationID, RequestSHA256: sha, InstanceID: v.ID, Status: "uncertain", Resolved: &nodeproto.InstanceResolution{Who: "uid:0", When: now.Format(time.RFC3339Nano), ObservedState: "shut off", Reason: "Checked console"}}
+	if _, _, err := s.CreateOperation(context.Background(), c, op.ActorID, v.ID, id(), OperationInput{Action: "start"}, now); !errors.Is(err, ErrState) {
+		t.Fatal("uncertain operation did not block", err)
+	}
+	out, err := s.CompleteResolvedOperation(context.Background(), c, op.ID, result, now)
+	if err != nil || out.State != "resolved" || f.instance.State != "shutoff" {
+		t.Fatal(out, err, f.instance)
+	}
+	writes := f.writes
+	f.instance.State = "running"
+	if _, err = s.CompleteResolvedOperation(context.Background(), c, op.ID, result, now); err != nil || f.writes != writes || f.instance.State != "running" {
+		t.Fatal("replay reverted a later observation", err)
+	}
+	if _, _, err = s.CreateOperation(context.Background(), c, op.ActorID, v.ID, id(), OperationInput{Action: "start"}, now); err != nil {
+		t.Fatal("resolution still blocked next action", err)
+	}
+	bad := result
+	bad.RequestSHA256 = strings.Repeat("0", 64)
+	if _, err = s.CompleteResolvedOperation(context.Background(), c, op.ID, bad, now); !errors.Is(err, ErrState) {
+		t.Fatal("unbound resolution accepted", err)
+	}
+}
+
+func TestConsoleForceOnlyAppliesToConfirmedReboot(t *testing.T) {
+	instance := id()
+	for _, action := range []string{"start", "shutdown", "force_off", "delete", "reboot"} {
+		input := OperationInput{Action: action, Confirmation: instance, Force: true}
+		if input.valid(instance) != (action == "reboot") {
+			t.Fatal("unexpected force policy", action)
+		}
+	}
+	if (OperationInput{Action: "reboot", Force: true}).valid(instance) {
+		t.Fatal("force bypassed confirmation")
 	}
 }
