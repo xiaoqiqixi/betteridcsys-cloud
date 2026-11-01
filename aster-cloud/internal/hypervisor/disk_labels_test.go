@@ -1,10 +1,12 @@
 package hypervisor
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/xml"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -13,6 +15,31 @@ func withBacking(raw []byte, path string) []byte {
 	binary.BigEndian.PutUint32(raw[16:20], uint32(len(path)))
 	copy(raw[256:], path)
 	return raw
+}
+
+func TestGuestDirectoriesRemainTraversableUnderNodeUmask(t *testing.T) {
+	// Match aster-node's private umask. This test must remain non-parallel.
+	previous := syscall.Umask(0077)
+	defer syscall.Umask(previous)
+	source, _, task, export, receipt := exportFixture(t)
+	check := func(m *Manager) {
+		t.Helper()
+		i, _ := m.Ledger.Instance(task.InstanceID)
+		for path, mode := range map[string]os.FileMode{i.Directory: 0755, i.Disk: 0600, i.Seed: 0644, m.Config.StateDirectory: 0700} {
+			info, err := os.Stat(path)
+			if err != nil || info.Mode().Perm() != mode {
+				t.Fatalf("incorrect mode for %s: want %o, got %v (%v)", path, mode, info, err)
+			}
+		}
+	}
+	check(source)
+	target, _, _ := newStorageFixture(t, "node-b")
+	imp := handoffFixture(t, source, target, export, receipt)
+	if err := target.approveInbox(context.Background(), imp.ArtifactID, imp.FenceToken); err != nil {
+		t.Fatal(err)
+	}
+	assertStorageStatus(t, target, imp, "succeeded")
+	check(target)
 }
 func TestDiskDACLabelsProtectOnlyReadOnlySources(t *testing.T) {
 	m, _, task := newFixture(t)

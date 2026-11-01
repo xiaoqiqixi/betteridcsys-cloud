@@ -213,7 +213,8 @@ uncertainty. The node does not change the host's global `dynamic_ownership` poli
 
 Approved bases must remain root-owned, hash-approved and not writable by QEMU.
 Provide QEMU read access (for example root-owned 0644 bases) and traversal through
-the approved directories. Generated seeds are root-owned 0644 and contain only
+the approved directories. Newly created/imported guest directories explicitly
+retain mode 0755 under the daemon's private umask. Generated seeds are root-owned 0644 and contain only
 public SSH keys and guest metadata; configuration, keys and journals stay 0600.
 Existing domains are not silently rewritten at service startup: review their
 backing/seed labels offline before reuse. A previously chowned base must be

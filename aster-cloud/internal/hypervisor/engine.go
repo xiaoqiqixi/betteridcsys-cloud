@@ -667,6 +667,10 @@ func (m *Manager) create(ctx context.Context, i Instance, task nodeproto.NodeTas
 	if err = os.Mkdir(i.Directory, 0755); err != nil {
 		return err
 	}
+	// The daemon's 0077 umask must not block QEMU from reaching its disks.
+	if err = os.Chmod(i.Directory, 0755); err != nil {
+		return err
+	}
 	disk, err := os.OpenFile(i.Disk, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return err

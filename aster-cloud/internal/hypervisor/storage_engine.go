@@ -669,6 +669,9 @@ func (m *Manager) importOwned(ctx context.Context, i Instance, manifest nodeprot
 	if e = os.Mkdir(i.Directory, 0755); e != nil {
 		return e
 	}
+	if e = os.Chmod(i.Directory, 0755); e != nil {
+		return e
+	}
 	if e = m.copyExact(ctx, filepath.Join(inbox, "disk.qcow2"), i.Disk, manifest); e != nil {
 		return e
 	}
