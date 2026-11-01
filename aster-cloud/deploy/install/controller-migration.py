@@ -29,6 +29,7 @@ RESTORE_ERRORS = set('TARGET_RESTORE_SERVER_INVENTORY_REJECTED TARGET_RESTORE_MA
 VERIFICATION_ERRORS = set('TARGET_VERIFICATION_IDENTITY_REJECTED TARGET_VERIFICATION_GRANTS_REJECTED TARGET_VERIFICATION_BINDING_REJECTED TARGET_VERIFICATION_CREDENTIAL_REJECTED TARGET_VERIFICATION_CREATE_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_UNCONFIRMED TARGET_VERIFICATION_REVOCATION_STARTED TARGET_VERIFICATION_REVOCATION_BINDING_REJECTED TARGET_VERIFICATION_REVOCATION_UNCONFIRMED TARGET_VERIFICATION_REVOCATION_NOT_STARTED TARGET_VERIFICATION_CONNECTION_INVENTORY_UNCONFIRMED TARGET_VERIFICATION_SESSIONS_ACTIVE'.split())
 VERIFICATION_SYSTEM_ACTIONS = ('target-verification-system-prepare','target-verification-system-status')
 VERIFICATION_SERVICE_ACTIONS = ('target-verification-serve',)
+VERIFICATION_SYSTEMD_ACTIONS = ('target-verification-start','target-verification-service-status','target-verification-stop')
 SYSTEMD = Path('/etc/systemd/system')
 CONFIG = Path('/etc/aster-controller/config.json')
 INSTALL_STATE = Path('/var/lib/aster-cloud-installer/controller/state.json')
@@ -52,6 +53,41 @@ def require(ok, code):
 
 def digest(raw):
     return hashlib.sha256(raw).hexdigest()
+
+
+def verification_unit_bytes(operation, version, nonce):
+    """Fixed single-operation systemd protocol, never a user command template."""
+    require(isinstance(operation,str) and OP.fullmatch(operation) and
+            isinstance(nonce,str) and SHA.fullmatch(nonce) and
+            re.fullmatch(r'/opt/aster-cloud/controller/versions/0\.[0-9]+\.[0-9]+-(?:dev(?:\.[0-9]+)?|rc\.[0-9]+)-[0-9a-f]{16}',str(version)),
+            'TARGET_VERIFICATION_UNIT_INPUT_REJECTED')
+    return ('[Unit]\nDescription=Aster target verification '+operation+' '+nonce+'\n'
+            'After=network.target mysql.service\n\n[Service]\nType=exec\nUser=root\nGroup=root\n'
+            'ExecStart=/usr/bin/python3 -I '+str(version)+'/templates/host-management/controller-migration.py '
+            'target-verification-serve --operation '+operation+'\n'
+            'Restart=no\nKillMode=mixed\nSendSIGKILL=yes\nTimeoutStopSec=120\nRuntimeMaxSec=3700\n'
+            'NoNewPrivileges=yes\nUMask=0077\nWorkingDirectory=/\n'
+            'StandardInput=null\nStandardOutput=null\nStandardError=journal\n').encode()
+
+
+def verification_unit_properties(value, name, fragment):
+    """Validate effective systemd output; not proof that a process is ready."""
+    expected = {'Id':name,'FragmentPath':fragment,'LoadState':'loaded','NeedDaemonReload':'no',
+                'User':'root','Group':'root','Type':'exec','KillMode':'mixed','Restart':'no',
+                'SendSIGKILL':'yes','NoNewPrivileges':'yes','Transient':'no','WorkingDirectory':'/',
+                'UnitFileState':'static'}
+    require(all(value.get(key)==item for key,item in expected.items()) and
+            value.get('Names','').split()==[name] and
+            all(value.get(key)=='' for key in ('DropInPaths','ExecStop','ExecStopPost','ExecStartPre',
+                'ExecStartPost','ExecCondition','ExecReload','EnvironmentFiles','SupplementaryGroups',
+                'RootDirectory','RootImage')) and value.get('ControlPID')=='0',
+            'TARGET_VERIFICATION_UNIT_SETTINGS_CHANGED')
+    require(value.get('ActiveState') in ('active','activating','deactivating','inactive','failed') and
+            re.fullmatch(r'0|[1-9][0-9]{0,9}',value.get('MainPID','')),
+            'TARGET_VERIFICATION_UNIT_STATE_UNCONFIRMED')
+    pid = int(value['MainPID'])
+    require(pid>0 or value['ActiveState']!='active','TARGET_VERIFICATION_UNIT_PROCESS_UNCONFIRMED')
+    return pid
 
 
 def system_identity_from_records(operation, nonce, records):
@@ -394,15 +430,15 @@ class Host:
             argv += ['-operation', operation]
         return self.i.strict_json(run(argv, 45))
 
-    def show(self, names):
-        raw = run(['/usr/bin/systemctl', 'show', '--no-pager', '--property=' + PROPS, '--', *names], 30).decode()
+    def show(self, names, properties=PROPS):
+        raw = run(['/usr/bin/systemctl', 'show', '--no-pager', '--property=' + properties, '--', *names], 30).decode()
         result = {}
         for block in raw.strip().split('\n\n'):
             item = {}
             for line in block.splitlines():
                 require('=' in line, 'SYSTEMD_PROPERTIES_INVALID')
                 key, value = line.split('=', 1)
-                require(key not in item and key in PROPS.split(','), 'SYSTEMD_PROPERTIES_INVALID')
+                require(key not in item and key in properties.split(','), 'SYSTEMD_PROPERTIES_INVALID')
                 item[key] = value
             name = item.get('Id')
             require(name in names and name not in result, 'SYSTEMD_UNIT_IDENTITY_INVALID')
@@ -812,12 +848,14 @@ class Target(Host):
     def unused_host(self, configuration=False, verification=False):
         extra = {'verification-approval.json','verification-revoke-approval.json',
                  'verification-data-approval.json','verification-data-started.json',
-                 'verification-system-started.json','verification-system-account.json'} if verification else set()
+                 'verification-system-started.json','verification-system-account.json',
+                 'verification-service.lock'} if verification else set()
         require(set(p.name for p in self.root.iterdir()) <=
                 {'request.json', 'backup.age', 'recovery.key', 'plan.json', 'target.lock', 'database-plan.json', 'database',
                  'materials-started.json', 'runtime', 'sessions-started.json', 'configuration-request.json',
                  'configuration-tls.crt', 'configuration-tls.key', 'configuration-approval.json',
                  'configuration-started.json'} | extra, 'TARGET_INPUT_INVENTORY_CHANGED')
+        self.verification_service_inventory(allow_owned=verification)
         # A killed verification may leave private plaintext. Never silently
         # discard/reuse it, or turn an unreviewed partial run into success.
         if configuration and CONFIG.parent.exists():
@@ -860,6 +898,204 @@ class Target(Host):
         return self.i.strict_json(run([str(self.binary), 'migration-target-' + action,
                                        '-operation', self.operation], 1860, confirmed_errors=True))
 
+    def verification_service_paths(self):
+        name = 'aster-target-verification-'+self.operation+'.service'
+        return name,Path('/run/systemd/system')/name,Path('/run/aster-target-verification')/self.operation
+
+    def verification_service_command(self, action):
+        name,unit,_ = self.verification_service_paths()
+        commands = {
+            'verify':(['/usr/bin/systemd-analyze','verify',str(unit)],30,'TARGET_VERIFICATION_UNIT_VERIFY_UNCONFIRMED'),
+            'reload':(['/usr/bin/systemctl','daemon-reload'],30,'TARGET_VERIFICATION_UNIT_RELOAD_UNCONFIRMED'),
+            'start':(['/usr/bin/systemctl','start','--',name],30,'TARGET_VERIFICATION_UNIT_START_UNCONFIRMED'),
+            'stop':(['/usr/bin/systemctl','stop','--',name],150,'TARGET_VERIFICATION_UNIT_STOP_UNCONFIRMED'),
+        }
+        require(action in commands,'TARGET_VERIFICATION_UNIT_INPUT_REJECTED')
+        argv,timeout,code = commands[action]
+        try:
+            return run(argv,timeout)
+        except Refused:
+            # Fixed phase only; private command output never reaches the API.
+            raise Refused(code) from None
+
+    def verification_service_receipt(self):
+        name,unit,directory = self.verification_service_paths()
+        if not directory.exists() and not directory.is_symlink():
+            return None
+        for path in (directory.parent,directory):
+            self.i.protected_path(str(path),private=True,directory=True)
+            require(stat.S_IMODE(path.stat().st_mode)==0o700,'TARGET_VERIFICATION_UNIT_STATE_UNSAFE')
+        require({p.name for p in directory.iterdir()}=={'unit.json'},'TARGET_VERIFICATION_UNIT_STATE_UNCONFIRMED')
+        value = self.read(directory/'unit.json')
+        fields = {'schema','operation_id','boot_id','nonce','version_directory','manifest_sha256',
+                  'target_plan_sha256','system_account_receipt_sha256','phase','unit_sha256'}
+        require(isinstance(value,dict) and set(value)==fields and type(value['schema']) is int and
+                value['schema']==1 and value['operation_id']==self.operation and
+                value['version_directory']==str(self.version_dir) and
+                value['boot_id']==Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+                'TARGET_VERIFICATION_UNIT_BINDING_CHANGED')
+        for key,path,limit in (('manifest_sha256',self.version_dir/'manifest.json',4*1024*1024),
+                               ('target_plan_sha256',self.root/'plan.json',8192),
+                               ('system_account_receipt_sha256',self.root/'verification-system-account.json',8192)):
+            require(value[key]==digest(self.i.protected_read(str(path),limit,key!='manifest_sha256')),
+                    'TARGET_VERIFICATION_UNIT_BINDING_CHANGED')
+        raw = verification_unit_bytes(self.operation,self.version_dir,value['nonce'])
+        require(value['unit_sha256']==digest(raw),'TARGET_VERIFICATION_UNIT_BINDING_CHANGED')
+        self.verify_verification_data(value['phase'],self.read(self.root/'plan.json'),
+                                      self.read(self.root/'database-plan.json'),readonly=True)
+        return value
+
+    def verification_service_properties(self, *, allow_absent=False, observe_exit=True):
+        name,unit,_ = self.verification_service_paths()
+        receipt = self.verification_service_receipt()
+        require(receipt is not None,'TARGET_VERIFICATION_UNIT_NOT_OWNED')
+        properties = PROPS+',Restart,SendSIGKILL,NoNewPrivileges,Transient,ExecStartPre,ExecStartPost,ExecCondition,ExecReload,EnvironmentFiles,SupplementaryGroups,RootDirectory,RootImage,WorkingDirectory,Result,ExecMainCode,ExecMainStatus'
+        value = self.show([name],properties)[name]
+        if not unit.exists() and not unit.is_symlink():
+            require(allow_absent and value.get('LoadState')=='not-found' and
+                    value.get('ActiveState')=='inactive' and value.get('MainPID')=='0' and
+                    value.get('ControlPID')=='0','TARGET_VERIFICATION_UNIT_MISSING')
+            return value
+        require(self.i.protected_read(str(unit),16384,False)==
+                verification_unit_bytes(self.operation,self.version_dir,receipt['nonce']) and
+                stat.S_IMODE(unit.stat().st_mode)==0o644,'TARGET_VERIFICATION_UNIT_BYTES_CHANGED')
+        pid = verification_unit_properties(value,name,str(unit))
+        if pid:
+            try:
+                process = Path('/proc')/str(pid)
+                expected_exe,actual_exe = Path('/usr/bin/python3').stat(),(process/'exe').stat()
+                command = ['/usr/bin/python3','-I',str(self.version_dir/'templates/host-management/controller-migration.py'),
+                           'target-verification-serve','--operation',self.operation]
+                require((expected_exe.st_dev,expected_exe.st_ino)==(actual_exe.st_dev,actual_exe.st_ino) and
+                        (process/'cmdline').read_bytes()==b'\x00'.join(os.fsencode(x) for x in command)+b'\x00' and
+                        value.get('ControlGroup')=='/system.slice/'+name and
+                        (process/'cgroup').read_text()=='0::/system.slice/'+name+'\n',
+                        'TARGET_VERIFICATION_UNIT_PROCESS_UNCONFIRMED')
+                identity = dict(line.split(':',1) for line in (process/'status').read_text().splitlines() if ':' in line)
+                require(identity['Uid'].split()==['0']*4 and identity['Gid'].split()==['0']*4 and
+                        identity['NoNewPrivs'].strip()=='1',
+                        'TARGET_VERIFICATION_UNIT_PROCESS_UNCONFIRMED')
+            except (FileNotFoundError,ProcessLookupError):
+                # A process can exit between systemd's snapshot and /proc read.
+                # Reobserve once; never treat missing /proc as a verified PID.
+                require(observe_exit,'TARGET_VERIFICATION_UNIT_PROCESS_UNCONFIRMED')
+                return self.verification_service_properties(allow_absent=allow_absent,observe_exit=False)
+        return value
+
+    def verification_service_inventory(self, *, allow_owned):
+        name,unit,_ = self.verification_service_paths()
+        paths = []
+        for directory in ('/etc/systemd/system','/run/systemd/system','/usr/lib/systemd/system','/lib/systemd/system'):
+            paths += list(Path(directory).glob('aster-target-verification*'))
+        names = [line.split()[0] for line in run(['/usr/bin/systemctl','list-units','--all','--plain',
+                 '--no-pager','--no-legend','aster-target-verification*'],30).decode().splitlines() if line.strip()]
+        if not paths and not names:
+            return
+        require(allow_owned and set(paths)<={unit} and set(names)<={name},'TARGET_VERIFICATION_UNIT_FOREIGN')
+        self.verification_service_properties()
+
+    def verification_service_stopped(self, receipt):
+        # Called only AFTER stopping this owned unit, while holding the original
+        # installation and target locks. Do not attempt a new runtime login when
+        # the original phase is expired or the minimum account is now locked.
+        self.unused_host(configuration=True,verification=True)
+        phase = self.target_command('verification-data-status')
+        plan,dbplan = self.read(self.root/'plan.json'),self.read(self.root/'database-plan.json')
+        self.verify_verification_data(phase,plan,dbplan,readonly=True)
+        for key in ('operation_id','plan','plan_sha256','account_receipt_sha256','started_at','expires_at'):
+            require(phase[key]==receipt['phase'][key],'TARGET_VERIFICATION_UNIT_BINDING_CHANGED')
+        module = self.i.provisioning_module()
+        args = (self.operation,phase['plan_sha256'],dbplan['data']['charset'],dbplan['data']['collation'])
+        module.verification_revocation_plan(*args)  # full root account/object inventory, supports locked account
+        deadline = time.monotonic()+10
+        while True:
+            connections = module.verification_connection_inventory(self.root/'database','aster_v_'+self.operation[:23])
+            if connections['active']==connections['pending']==0:
+                break
+            require(time.monotonic()<deadline,'TARGET_VERIFICATION_SERVICE_CONNECTIONS_NOT_DRAINED')
+            time.sleep(.1)
+        # Check OS binding against the freshly authenticated stopped data phase,
+        # without inventing a current credential-login claim after expiration.
+        self._system_identity_phase(phase,readonly=True)
+        return {'schema':1,'operation_id':self.operation,'unit_stopped':True,'processes_drained':True,
+                'sql_connections_drained':True,'original_data_phase_verified':True,
+                'root_inventory_verified':True,'target_remains_sealed':True,'migration_ready':False}
+
+    def verification_service_action(self, action):
+        require(action in VERIFICATION_SYSTEMD_ACTIONS,'INVALID_MIGRATION_ARGUMENTS')
+        name,unit,directory = self.verification_service_paths()
+        with self.lock('verification-service.lock'):
+            receipt = self.verification_service_receipt()
+            if action=='target-verification-start':
+                # Releases installation/target locks BEFORE systemctl executes
+                # the worker, which independently acquires them and rechecks all
+                # original inputs. The private service lock serializes operators.
+                self.prepare('target-verification-system-status')
+                with self.installation_lock(),self.lock('target.lock'):
+                    verify_installation(self,self.i,target=True)
+                    proof = self.target_command('verification-runtime-check')
+                    identity = self.system_identity(proof,readonly=True)
+                    self.unused_host(configuration=True,verification=True)
+                    if receipt is None:
+                        require(not directory.exists() and not directory.is_symlink() and
+                                not unit.exists() and not unit.is_symlink(),'TARGET_VERIFICATION_UNIT_FOREIGN')
+                        base = self.i.ensure_dir(directory.parent,0o700)
+                        require(stat.S_IMODE(base.stat().st_mode)==0o700,'TARGET_VERIFICATION_UNIT_STATE_UNSAFE')
+                        directory.mkdir(mode=0o700)
+                        nonce = os.urandom(32).hex()
+                        raw = verification_unit_bytes(self.operation,self.version_dir,nonce)
+                        receipt = {'schema':1,'operation_id':self.operation,
+                            'boot_id':Path('/proc/sys/kernel/random/boot_id').read_text().strip(),'nonce':nonce,
+                            'version_directory':str(self.version_dir),
+                            'manifest_sha256':digest(self.i.protected_read(str(self.version_dir/'manifest.json'),4*1024*1024,False)),
+                            'target_plan_sha256':digest(self.i.protected_read(str(self.root/'plan.json'),8192)),
+                            'system_account_receipt_sha256':identity['receipt_sha256'],'phase':proof['phase'],
+                            'unit_sha256':digest(raw)}
+                        self.write(directory/'unit.json',receipt)
+                        sync_directory(directory.parent)
+                    else:
+                        require(receipt['system_account_receipt_sha256']==identity['receipt_sha256'],
+                                'TARGET_VERIFICATION_UNIT_BINDING_CHANGED')
+                        value = self.verification_service_properties(allow_absent=True)
+                        require(value['ActiveState']=='inactive','TARGET_VERIFICATION_UNIT_ALREADY_ACTIVE')
+                    self.i.protected_path(str(unit.parent),directory=True)
+                    self.i.write_new(unit,verification_unit_bytes(self.operation,self.version_dir,receipt['nonce']),0o644)
+                    sync_directory(unit.parent)
+                    self.verification_service_command('verify')
+                    self.verification_service_command('reload')
+                    require(self.verification_service_properties()['ActiveState']=='inactive',
+                            'TARGET_VERIFICATION_UNIT_ALREADY_ACTIVE')
+                self.verification_service_command('start')
+                value = self.verification_service_properties()
+                require(value['ActiveState'] in ('active','activating'),'TARGET_VERIFICATION_SERVICE_UNCONFIRMED')
+                return {'schema':1,'operation_id':self.operation,'unit':name,'start_requested':True,
+                        'unit_state':value['ActiveState'],'http_readiness_verified':False,'migration_ready':False}
+            require(receipt is not None,'TARGET_VERIFICATION_UNIT_NOT_OWNED')
+            self.verification_service_inventory(allow_owned=True)
+            value = self.verification_service_properties(allow_absent=True)
+            if action=='target-verification-service-status':
+                return {'schema':1,'operation_id':self.operation,'unit':name,
+                        'unit_state':value['ActiveState'],'main_pid':int(value['MainPID']),
+                        'readonly':True,'http_readiness_verified':False,'migration_ready':False}
+            if value['LoadState']!='not-found':
+                # The exact root-owned fragment, no drop-ins/stop programs,
+                # actual root manager command and cgroup were checked above.
+                # Never signal a PID from a receipt or stop an arbitrary unit.
+                self.verification_service_command('stop')
+                value = self.verification_service_properties()
+            require(value['ActiveState'] in ('inactive','failed') and value['MainPID']=='0' and
+                    value['ControlPID']=='0','TARGET_VERIFICATION_SERVICE_UNCONFIRMED')
+            group = Path('/sys/fs/cgroup/system.slice')/name
+            try:
+                events = dict(line.split() for line in (group/'cgroup.events').read_text().splitlines())
+            except FileNotFoundError:
+                require(not group.exists(),'TARGET_VERIFICATION_UNIT_CGROUP_UNCONFIRMED')
+            else:
+                require(events.get('populated')=='0','TARGET_VERIFICATION_UNIT_CGROUP_UNCONFIRMED')
+            with self.installation_lock(),self.lock('target.lock'):
+                verify_installation(self,self.i,target=True)
+                return self.verification_service_stopped(receipt)
+
     def system_identity(self, proof, *, readonly):
         # Called with installation/target locks after the original runtime/data
         # and root SQL inventory checks. No UID, username or path is an input.
@@ -868,6 +1104,14 @@ class Target(Host):
                 proof.get('credential_verified') is True and proof.get('sql_identity_verified') is True and
                 proof.get('service_started') is False and proof.get('migration_ready') is False,
                 'TARGET_VERIFICATION_SYSTEM_APPROVAL_REQUIRED')
+        return self._system_identity_phase(proof['phase'],readonly=readonly)
+
+    def _system_identity_phase(self, phase, *, readonly):
+        # Internal stopped-state OS receipt check. Callers have just verified the
+        # original data phase and full root SQL inventory, not a cached ticket.
+        self.i.check_target()
+        require(phase.get('operation_id')==self.operation and phase.get('service_started') is False and
+                phase.get('migration_ready') is False,'TARGET_VERIFICATION_SYSTEM_APPROVAL_REQUIRED')
         local_system_identity_sources(self.i.protected_read('/etc/nsswitch.conf',1024*1024,False).decode('utf-8'))
         for executable in ('/usr/bin/getent','/usr/bin/id','/usr/sbin/useradd','/usr/sbin/nologin'):
             self.i.protected_path(executable)
@@ -876,9 +1120,9 @@ class Target(Host):
         name = 'asterv-'+self.operation[:24]
         intent_path, receipt_path = self.root/'verification-system-started.json', self.root/'verification-system-account.json'
         binding = {'schema':1,'operation_id':self.operation,'name':name,
-                   'verification_plan_sha256':proof['phase']['plan_sha256'],
-                   'verification_data_intent_sha256':proof['phase']['data']['phase_intent_sha256'],
-                   'target_plan_sha256':proof['phase']['plan']['target_plan_sha256']}
+                   'verification_plan_sha256':phase['plan_sha256'],
+                   'verification_data_intent_sha256':phase['data']['phase_intent_sha256'],
+                   'target_plan_sha256':phase['plan']['target_plan_sha256']}
         present = intent_path.exists() or intent_path.is_symlink()
         completed = receipt_path.exists() or receipt_path.is_symlink()
         if present:
@@ -1516,17 +1760,20 @@ class Arguments(argparse.ArgumentParser):
 
 def main():
     parser = Arguments(description=__doc__)
-    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS, *VERIFICATION_SERVICE_ACTIONS))
+    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS, *VERIFICATION_SERVICE_ACTIONS, *VERIFICATION_SYSTEMD_ACTIONS))
     parser.add_argument('--operation')
     args = parser.parse_args()
     require((args.action in ('capabilities', 'plan') and args.operation is None) or
             (args.action not in ('capabilities', 'plan') and isinstance(args.operation, str) and OP.fullmatch(args.operation)),
             'EXACT_OPERATION_ID_REQUIRED')
     if args.action == 'capabilities':
-        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS, *VERIFICATION_SERVICE_ACTIONS],
+        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS, *VERIFICATION_SERVICE_ACTIONS, *VERIFICATION_SYSTEMD_ACTIONS],
                 'export_restore': False, 'migration_ready': False}
     if args.action.startswith('target-'):
-        return Target(install_module(), args.operation).prepare(args.action)
+        target = Target(install_module(),args.operation)
+        if args.action in VERIFICATION_SYSTEMD_ACTIONS:
+            return target.verification_service_action(args.action)
+        return target.prepare(args.action)
     host = Host(install_module())
     if args.action == 'plan':
         plan = host.plan()

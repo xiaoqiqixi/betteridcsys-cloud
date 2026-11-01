@@ -6,8 +6,8 @@
 它不是普通主控启动器，不创建 `App`、资源执行器、心跳或节点连接，也不解除目标封存。
 
 当前为实现中的内部调用链：已接控制器私有子进程入口、原安装归档批准、专用系统账号和
-受管安装中的固定 root 运行入口；已添加 Ubuntu22/24 真实已安装 ELF/管理器场景，新增链路仍待原生验收。
-**快捷安装器的用户引导、专用系统账号与 root 运行入口的原生验收、systemd 管理、原恢复账户的浏览器登录、
+受管安装中的固定 root 运行入口和 systemd 启动/状态/停止；已添加 Ubuntu22/24 真实已安装 ELF/管理器场景，新增链路仍待原生验收。
+**快捷安装器的用户引导、专用系统账号/root/systemd 链路的原生验收、原恢复账户的浏览器登录、
 停止后的完整数据阶段与账号撤销串联仍待接入。** 不提供可绕过这些前置条件的用户启动命令。
 `8fa0566` 的 Ubuntu22/24 配置恢复场景已通过：严格 TLS、受保护静态页、非 root 线程、
 隔离网络空间全部 IPv4 路由表为空，以及停止、到期、父死亡后的真实进程和 SQL 排空。
@@ -90,10 +90,39 @@
 此部分不由 fixture 代发批准消息；新增必需证据 `verification_installed_root_manager`。
 本机 CLI、语法和报告门禁通过，不等于该 Linux/root 正例已通过；不在开发 Mac 上启动此入口。
 
-后续 systemd 接线须固定程序及原操作、`Restart=no`、受管身份与 cgroup 停止确认，不把
-`Type=exec` 或启动 job 成功误写成 HTTPS/浏览器就绪。
-参照 Ubuntu22 的 [systemd-run](https://manpages.ubuntu.com/manpages/jammy/man1/systemd-run.1.html)
-和 [执行环境](https://manpages.ubuntu.com/manpages/jammy/man5/systemd.exec.5.html)，仍须独立验证 Ubuntu22/24。
+## systemd 生命周期
+
+同一安装入口新增三个只接受原操作 ID 的动作：
+
+| 动作 | 行为 | 不代表 |
+| --- | --- | --- |
+| `target-verification-start` | 重做完整启动前核验，准备该操作的运行期 unit，然后请求启动固定 root 入口 | HTTP 就绪、账户登录成功或迁移完成 |
+| `target-verification-service-status` | 只读核对 unit 字节、有效设置、实际进程和 cgroup，报告 systemd 状态 | 当前业务数据完整核验或浏览器验收 |
+| `target-verification-stop` | 只停止核实属于该操作的 unit，再查 cgroup、原阶段、系统身份和完整 SQL 连接清单 | 撤销账户、目标激活或源主机恢复 |
+
+unit 固定为 `/run/systemd/system/aster-target-verification-<操作>.service`，只执行当前安装的 Python
+管理器；不接收 unit 名称、PID、程序、凭据或强制开关。它没有 `[Install]`，不启用开机启动，
+`Restart=no`，`KillMode=mixed`，`NoNewPrivileges=yes`。TERM 先让管理器关闭私有通道并等待；
+主进程已退出仍有后代，或停止达到 120 秒时，由 systemd 对剩余 cgroup 进程收尾。
+3700 秒运行上限只是兜底，不能延长父子独立执行的原批准期限。
+`Type=exec` 仅确认启动了程序；返回保持 `http_readiness_verified=false`、`migration_ready=false`。
+
+运行期私有回执绑定 boot ID、原操作/阶段、安装 manifest、专用账号回执和带随机标记的 unit 字节。
+外来同名文件、其他验证 unit、drop-in、重启/停止程序/权限改写、未知 PID 或 cgroup 均拒绝，
+不覆盖、不接管、不用 PID 文件杀进程。`systemd-analyze verify` 先解析 unit，才重载并请求启动。
+安装/目标锁在启动请求前释放，真正服务重新取得锁并重新批准；独立操作锁串行化 start/status/stop，
+避免管理器等待自己仍持有的锁。停止后的只读数据核对支持原期限已到达，不伪造新的凭据认证。
+
+原生场景增加外来 unit 拒绝、实际 systemd 严格 TLS、停止与连接排空、状态只读、已停止 unit 漂移拒绝
+且不修复、显式同操作重新核验后启动，以及杀死自己启动的管理器后不自动重启。
+`verification_systemd_lifecycle` 是必需证据。**新增场景尚未取得自身源码 Ubuntu22/24 原生结果**；
+本机只执行 CLI、unit 格式/有效属性及报告门禁，未在 Mac 创建服务。
+运行期回执和已停止 unit 暂时保留；完整迁移后的 unit/系统身份退役与账户撤销仍需串联验收。
+
+设计参照 Ubuntu22 的 [systemd-run](https://manpages.ubuntu.com/manpages/jammy/man1/systemd-run.1.html)
+中对 exec 就绪边界的说明和 [执行环境](https://manpages.ubuntu.com/manpages/jammy/man5/systemd.exec.5.html)，
+以及 [停止过程](https://manpages.ubuntu.com/manpages/jammy/man5/systemd.kill.5.html)。
+实现使用固定运行期 unit，而不是接收自由命令的通用执行器。
 
 ## 父进程职责
 
@@ -170,7 +199,7 @@ Linux 启动边界测试也先创建独立临时网络空间，实际执行内�
    新原生场景仍待执行，不能使用无检查的成功回应。
 3. **清理成功后才启动**：核心接线已实现，仍需新源码的原生证据。准备失败即退出专用
    协调进程，不能在长寿命进程里遗留原始 guard 后继续接纳另一操作。
-4. **受管生命周期**：systemd 记录固定单次操作，不能自动重启延长期限。先实际验证 TLS 与原账户
+4. **受管生命周期**：systemd 启动/状态/停止已接入固定操作、无自动重启，新增原生证据仍待取得。先实际验证 TLS 与原账户
    新会话、手机/桌面页面，再观察显式停止、原到期、父死亡及重复启动拒绝。`verified` 私有确认
    仅说明 SQL 身份已核验，不等于页面或服务就绪。
 5. **停止后闭合**：确认父子真实退出、监听关闭、独立 guard 排空和 MySQL 无活跃/未认证连接；

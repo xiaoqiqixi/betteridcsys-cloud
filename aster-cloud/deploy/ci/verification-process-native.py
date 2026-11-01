@@ -2,7 +2,7 @@
 """Disposable Linux root/non-root HTTPS + real minimum-SQL process acceptance.
 
 Only called inside the owned TCG restore guest. These scenarios exercise the
-installed root launcher; systemd management, source-host export, successful
+installed root launcher and systemd management; source-host export, successful
 staff login and browser/UI are NOT certified by these process checks.
 """
 import base64
@@ -26,6 +26,10 @@ import time
 
 FAILURE_CODES = set('VERIFICATION_HOST_GUARD VERIFICATION_HOST_EXECUTABLE VERIFICATION_LISTENER VERIFICATION_SPAWN VERIFICATION_HANDSHAKE VERIFICATION_EARLY_EXIT VERIFICATION_CHILD_AUTHORITY VERIFICATION_CHILD_IDENTITY VERIFICATION_CHILD_GUARD VERIFICATION_CHILD_BOOTSTRAP VERIFICATION_CHILD_LISTENER VERIFICATION_CHILD_SQL VERIFICATION_CHILD_RECHECK VERIFICATION_CHILD_SERVICE'.split())
 SYSTEM_IDENTITY_FAILURES = set('TARGET_VERIFICATION_SYSTEM_APPROVAL_REQUIRED TARGET_VERIFICATION_SYSTEM_CREATE_UNCONFIRMED TARGET_VERIFICATION_SYSTEM_FOREIGN_IDENTITY TARGET_VERIFICATION_SYSTEM_HOME_PRESENT TARGET_VERIFICATION_SYSTEM_IDENTITY_BUSY TARGET_VERIFICATION_SYSTEM_IDENTITY_CHANGED TARGET_VERIFICATION_SYSTEM_IDENTITY_REJECTED TARGET_VERIFICATION_SYSTEM_INTENT_CHANGED TARGET_VERIFICATION_SYSTEM_LOOKUP_REJECTED TARGET_VERIFICATION_SYSTEM_LOOKUP_UNCONFIRMED TARGET_VERIFICATION_SYSTEM_NOT_PREPARED TARGET_VERIFICATION_SYSTEM_NSS_REJECTED TARGET_VERIFICATION_SYSTEM_PARTIAL_IDENTITY TARGET_VERIFICATION_SYSTEM_PHASE_CHANGED TARGET_VERIFICATION_SYSTEM_PROCESS_UNCONFIRMED'.split())
+
+UNIT_FAILURES = set('TARGET_VERIFICATION_SERVICE_CONNECTIONS_NOT_DRAINED TARGET_VERIFICATION_SERVICE_UNCONFIRMED TARGET_VERIFICATION_UNIT_ALREADY_ACTIVE TARGET_VERIFICATION_UNIT_BINDING_CHANGED TARGET_VERIFICATION_UNIT_BYTES_CHANGED TARGET_VERIFICATION_UNIT_CGROUP_UNCONFIRMED TARGET_VERIFICATION_UNIT_FOREIGN TARGET_VERIFICATION_UNIT_INPUT_REJECTED TARGET_VERIFICATION_UNIT_MISSING TARGET_VERIFICATION_UNIT_NOT_OWNED TARGET_VERIFICATION_UNIT_PROCESS_UNCONFIRMED TARGET_VERIFICATION_UNIT_SETTINGS_CHANGED TARGET_VERIFICATION_UNIT_STATE_UNCONFIRMED TARGET_VERIFICATION_UNIT_STATE_UNSAFE'.split())
+
+UNIT_FAILURES |= set('TARGET_VERIFICATION_UNIT_VERIFY_UNCONFIRMED TARGET_VERIFICATION_UNIT_RELOAD_UNCONFIRMED TARGET_VERIFICATION_UNIT_START_UNCONFIRMED TARGET_VERIFICATION_UNIT_STOP_UNCONFIRMED'.split())
 
 def fixture_failure(raw):
     code = raw.decode('ascii', errors='replace').removesuffix('\n')
@@ -385,6 +389,101 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=10)
+
+    progress('target-verification-systemd-lifecycle')
+    def unit_command(action):
+        result = subprocess.run(['/usr/bin/python3','-I',str(entry),action,'--operation',operation],
+            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+            cwd='/',env=manager.ENV,timeout=360)
+        if result.returncode:
+            # Never export private raw stderr. Only our fixed product errors
+            # may leave this isolated guest for diagnosis.
+            try:
+                failure = json.loads(result.stderr)
+                selected = failure.get('error') if isinstance(failure,dict) and set(failure)=={'error'} else ''
+            except (ValueError,UnicodeError):
+                selected = ''
+            require(False,selected if selected in UNIT_FAILURES else code)
+        require(not result.stderr and len(result.stdout)<=8192,code)
+        return json.loads(result.stdout)
+    name,unit,unit_state = target.verification_service_paths()
+    require(not unit.exists() and not unit_state.exists(),code)
+    foreign_unit = b'[Unit]\nDescription=Fixture owned foreign verification unit\n[Service]\nExecStart=/bin/false\n'
+    target.i.write_new(unit,foreign_unit,0o644)
+    try:
+        result = subprocess.run(['/usr/bin/python3','-I',str(entry),'target-verification-start','--operation',operation],
+            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+            cwd='/',env=manager.ENV,timeout=180)
+        require(result.returncode==1 and not result.stdout and
+            json.loads(result.stderr)=={'error':'TARGET_VERIFICATION_UNIT_NOT_OWNED'} and
+            unit.read_bytes()==foreign_unit and not unit_state.exists(),code)
+    finally:
+        if unit.read_bytes()==foreign_unit:
+            unit.unlink()
+            manager.run(['/usr/bin/systemctl','daemon-reload'])
+    def wait_unit_http():
+        deadline = time.monotonic()+240
+        while True:
+            state = unit_command('target-verification-service-status')
+            require(state['unit_state'] in ('active','activating') and time.monotonic()<deadline,code)
+            try:
+                status,body = request('/')
+                require(status==200 and body==(version/'ui/index.html').read_bytes(),code)
+                require(request('/console/v1/auth/me')[0]==401,code)
+                return state
+            except (ConnectionRefusedError,TimeoutError):
+                time.sleep(.2)
+    try:
+        start = unit_command('target-verification-start')
+        require(start=={'schema':1,'operation_id':operation,'unit':name,'start_requested':True,
+            'unit_state':start['unit_state'],'http_readiness_verified':False,'migration_ready':False},code)
+        state = wait_unit_http()
+        require(state['main_pid']>0 and state['readonly'] is True and
+            state['http_readiness_verified'] is False and state['migration_ready'] is False,code)
+        original_unit,original_receipt = unit.read_bytes(),(unit_state/'unit.json').read_bytes()
+        stopped_report = unit_command('target-verification-stop')
+        expected_stopped = {'schema':1,'operation_id':operation,'unit_stopped':True,'processes_drained':True,
+            'sql_connections_drained':True,'original_data_phase_verified':True,'root_inventory_verified':True,
+            'target_remains_sealed':True,'migration_ready':False}
+        require(stopped_report==expected_stopped,code)
+        stopped()
+        require(unit_command('target-verification-service-status')['unit_state']=='inactive' and
+            unit.read_bytes()==original_unit and (unit_state/'unit.json').read_bytes()==original_receipt,code)
+        # Owned stopped fixture only: status must reject drift without repairing
+        # or running the changed unit. Restore exact bytes before any new start.
+        changed = original_unit.replace(b'Restart=no\n',b'Restart=always\n')
+        unit.write_bytes(changed)
+        try:
+            result = subprocess.run(['/usr/bin/python3','-I',str(entry),'target-verification-service-status',
+                '--operation',operation],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                cwd='/',env=manager.ENV,timeout=60)
+            require(result.returncode==1 and not result.stdout and
+                json.loads(result.stderr)=={'error':'TARGET_VERIFICATION_UNIT_BYTES_CHANGED'} and
+                unit.read_bytes()==changed and (unit_state/'unit.json').read_bytes()==original_receipt,code)
+        finally:
+            unit.write_bytes(original_unit)
+            manager.run(['/usr/bin/systemctl','daemon-reload'])
+        # An explicit same-operation start reauthenticates all inputs, retaining
+        # the original deadline and runtime receipt. No restart policy is used.
+        require(unit_command('target-verification-start')['start_requested'] is True,code)
+        wait_unit_http()
+        manager.run(['/usr/bin/systemctl','kill','--kill-who=main','--signal=KILL','--',name])
+        deadline = time.monotonic()+30
+        while True:
+            state = unit_command('target-verification-service-status')
+            if state['main_pid']==0 and state['unit_state']=='failed':
+                break
+            require(time.monotonic()<deadline,code)
+            time.sleep(.2)
+        stopped()
+        require((unit_state/'unit.json').read_bytes()==original_receipt and
+            unit_command('target-verification-stop')==expected_stopped,code)
+        require(target.prepare('target-verification-runtime-check')=={**expected,'root_inventory_verified':True},code)
+    finally:
+        # Clean up only through the product ownership/identity checks. Unknown
+        # unit drift is a hard failure, never a license to stop another service.
+        if unit_state.exists():
+            unit_command('target-verification-stop')
 
 def accept(root, inputs, controller, operation, module, directory, ui_directory, require, progress):
     require(os.geteuid() == 0)
