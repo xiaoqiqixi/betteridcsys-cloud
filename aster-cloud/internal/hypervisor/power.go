@@ -43,6 +43,12 @@ func (m *Manager) observePower(ctx context.Context, domain, desired string, time
 		}
 		state, err := m.state(wait, domain)
 		if err != nil {
+			// The local observation budget may expire between the check above
+			// and virsh returning. Use the same bounded final read as the timer
+			// branch; this never repeats shutdown/destroy/start.
+			if wait.Err() != nil && ctx.Err() == nil {
+				return finalRead()
+			}
 			return "", err
 		}
 		if state == desired {
