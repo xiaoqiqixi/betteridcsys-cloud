@@ -100,3 +100,40 @@ func TestApprovedStaticIPv4CapabilityFixture(t *testing.T) {
 		t.Fatal(c)
 	}
 }
+
+func TestResolvedAnnotationNeverClaimsOriginalSuccess(t *testing.T) {
+	task := fixture()
+	task.Action = "reboot"
+	_, sha, _ := task.BytesAndDigest()
+	resolution := InstanceResolution{Who: "uid:0", When: "2026-11-01T10:00:00Z", ObservedState: "running", Reason: "Reviewed guest console"}
+	result := NodeResult{Protocol: task.Protocol, OperationID: task.OperationID, InstanceID: task.InstanceID, RequestSHA256: sha, Status: "uncertain", Resolved: &resolution}
+	if !result.Matches(task, sha) {
+		t.Fatal("valid resolution rejected")
+	}
+	for _, status := range []string{"accepted", "succeeded", "rejected", "resolved"} {
+		bad := result
+		bad.Status = status
+		if bad.Matches(task, sha) {
+			t.Fatal("resolution rewrote unknown outcome", status)
+		}
+	}
+	for _, badResolution := range []InstanceResolution{
+		{Who: "uid:1000", When: resolution.When, ObservedState: "running", Reason: resolution.Reason},
+		{Who: "uid:0", When: "bad-time", ObservedState: "running", Reason: resolution.Reason},
+		{Who: "uid:0", When: resolution.When, ObservedState: "deleted", Reason: resolution.Reason},
+		{Who: "uid:0", When: resolution.When, ObservedState: "running", Reason: ""},
+		{Who: "uid:0", When: resolution.When, ObservedState: "running", Reason: "line\nbreak"},
+	} {
+		bad := result
+		bad.Resolved = &badResolution
+		if bad.Matches(task, sha) {
+			t.Fatal("malformed resolution accepted", bad)
+		}
+	}
+	raw, _, _ := task.BytesAndDigest()
+	for _, suffix := range []string{`,"force":null}`, `,"Force":true}`, `,"force":true,"force":false}`} {
+		if _, err := DecodeTask(append(raw[:len(raw)-1], []byte(suffix)...)); err == nil {
+			t.Fatal("ambiguous force accepted", suffix)
+		}
+	}
+}

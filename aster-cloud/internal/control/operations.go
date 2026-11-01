@@ -12,6 +12,7 @@ import (
 )
 
 type OperationInput struct {
+	Force        bool   `json:"force,omitempty"`
 	Action       string `json:"action"`
 	Confirmation string `json:"confirmation"`
 	ArtifactID   string `json:"artifact_id,omitempty"`
@@ -92,6 +93,9 @@ func dangerous(action string) bool {
 	return false
 }
 func (in OperationInput) valid(instance string) bool {
+	if in.Force && in.Action != "reboot" {
+		return false
+	}
 	if publicIPBindingAction(in.Action) || OperationPermission(in.Action) == "" || (in.Confirmation != "" && in.Confirmation != instance) || dangerous(in.Action) && in.Confirmation != instance {
 		return false
 	}
@@ -192,10 +196,10 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 	if e != nil {
 		return Operation{}, false, e
 	}
-	if v.State != "created" && v.State != "running" && v.State != "shutoff" {
+	if v.State != "created" && v.State != "shutoff" && !nodeproto.ValidObservedState(v.State) {
 		return Operation{}, false, ErrState
 	}
-	if e = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM controller_operations WHERE instance_id=? AND CAST(state AS BINARY) NOT IN ('succeeded','rejected')", instance).Scan(&used); e != nil {
+	if e = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM controller_operations WHERE instance_id=? AND CAST(state AS BINARY) NOT IN ('succeeded','rejected','resolved')", instance).Scan(&used); e != nil {
 		return Operation{}, false, e
 	}
 	if used != 0 {
@@ -250,6 +254,7 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 	switch in.Action {
 	case "start", "shutdown", "reboot", "force_off", "delete":
 		t := nodeproto.NodeTask{Protocol: nodeproto.Protocol, OperationID: op, NodeID: v.NodeID, Action: in.Action, InstanceID: v.ID, OwnerRef: v.OwnerRef, Hostname: v.Hostname, Resources: v.Resources}
+		t.Force = in.Force
 		if !network.IsZero() {
 			t.Protocol, t.Network = nodeproto.NetworkProtocol, network
 		}
@@ -489,7 +494,7 @@ func (s *SQLStore) ClaimOperation(ctx context.Context, op string, c Config, now 
 		}
 	}
 	var occupied int
-	for _, q := range []string{"SELECT COUNT(*) FROM controller_jobs WHERE node_id=? AND CAST(state AS BINARY) NOT IN ('accepted','succeeded','rejected')", "SELECT COUNT(*) FROM controller_operations WHERE node_id=? AND CAST(state AS BINARY) NOT IN ('accepted','succeeded','rejected')"} {
+	for _, q := range []string{"SELECT COUNT(*) FROM controller_jobs WHERE node_id=? AND CAST(state AS BINARY) NOT IN ('accepted','succeeded','rejected')", "SELECT COUNT(*) FROM controller_operations WHERE node_id=? AND CAST(state AS BINARY) NOT IN ('accepted','succeeded','rejected','resolved')"} {
 		if e = tx.QueryRowContext(ctx, q, o.NodeID).Scan(&occupied); e != nil {
 			return Operation{}, e
 		}
@@ -521,7 +526,7 @@ func (s *SQLStore) ClaimOperation(ctx context.Context, op string, c Config, now 
 		if sourceMaintenance || !sourceSeen.Valid || sourceProfile != intent.SourceProfileSHA || !heartbeatFresh(&sourceSeen.Time, now, time.Duration(c.HeartbeatTTLSeconds)*time.Second) {
 			return Operation{}, ErrCapacity
 		}
-		for _, q := range []string{"SELECT COUNT(*) FROM controller_jobs WHERE node_id=? AND CAST(state AS BINARY) NOT IN ('accepted','succeeded','rejected')", "SELECT COUNT(*) FROM controller_operations WHERE node_id=? AND CAST(state AS BINARY) NOT IN ('accepted','succeeded','rejected')"} {
+		for _, q := range []string{"SELECT COUNT(*) FROM controller_jobs WHERE node_id=? AND CAST(state AS BINARY) NOT IN ('accepted','succeeded','rejected')", "SELECT COUNT(*) FROM controller_operations WHERE node_id=? AND CAST(state AS BINARY) NOT IN ('accepted','succeeded','rejected','resolved')"} {
 			if e = tx.QueryRowContext(ctx, q, source.ID).Scan(&occupied); e != nil {
 				return Operation{}, e
 			}
@@ -707,4 +712,61 @@ func mustJSON(v any) []byte {
 
 func transferOccupancy(ctx context.Context, tx *sql.Tx, node string) *sql.Row {
 	return tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM controller_operations o JOIN controller_migrations m ON o.artifact_id=m.id WHERE o.action='migrate_transfer' AND CAST(o.state AS BINARY) NOT IN ('accepted','succeeded','rejected') AND (m.source_node_id=? OR m.target_node_id=?)", node, node)
+}
+
+// CompleteResolvedOperation records a root resolution of quarantine, never a
+// successful replay of the unknown mutation. Node history retains the complete
+// annotation; the controller audit pins its digest to the original operation.
+func (s *SQLStore) CompleteResolvedOperation(ctx context.Context, c Config, op string, result nodeproto.NodeResult, now time.Time) (Operation, error) {
+	tx, err := s.locked(ctx)
+	if err != nil {
+		return Operation{}, err
+	}
+	defer tx.Rollback()
+	o, err := scanOperation(tx.QueryRowContext(ctx, "SELECT "+operationColumns+" FROM controller_operations WHERE id=?", op))
+	if err != nil {
+		return Operation{}, err
+	}
+	task, err := nodeproto.DecodeTask(o.Request)
+	p, ok := c.Node(o.NodeID)
+	if err != nil || !ok || p.Digest() != o.ProfileSHA || nodeproto.Digest(o.Request) != o.RequestSHA || task.OperationID != o.ID || task.InstanceID != o.InstanceID || task.NodeID != o.NodeID || task.Action != o.Action || task.Protocol != o.Protocol || !result.Matches(task, o.RequestSHA) || result.Resolved == nil {
+		return Operation{}, ErrState
+	}
+	// A replay after another operation must never restore the older observation.
+	if o.State == "resolved" {
+		return o, tx.Commit()
+	}
+	if o.State != "sending" && o.State != "dispatched" && o.State != "uncertain" {
+		return Operation{}, ErrState
+	}
+	v, err := scanInstance(tx.QueryRowContext(ctx, "SELECT id,owner_ref,node_id,hostname,state,resources,created_at,updated_at FROM controller_instances WHERE id=?", o.InstanceID))
+	if err != nil {
+		return Operation{}, err
+	}
+	if v.NodeID != o.NodeID || v.OwnerRef != task.OwnerRef || v.Resources != task.Resources || v.Hostname != task.Hostname {
+		return Operation{}, ErrState
+	}
+	observed := result.Resolved.ObservedState
+	if observed == "shut off" {
+		observed = "shutoff"
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE controller_instances SET state=?,updated_at=? WHERE id=?", observed, now, o.InstanceID); err != nil {
+		return Operation{}, err
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE controller_operations SET state='resolved',updated_at=? WHERE id=?", now, o.ID); err != nil {
+		return Operation{}, err
+	}
+	if o.State != "uncertain" {
+		if err = audit(ctx, tx, "node:"+o.NodeID, "operation.uncertain", o.ID, now); err != nil {
+			return Operation{}, err
+		}
+	}
+	if err = audit(ctx, tx, "node:"+o.NodeID, "operation.resolved", o.ID, now); err != nil {
+		return Operation{}, err
+	}
+	if err = audit(ctx, tx, "node:"+o.NodeID, "operation.resolution_receipt", o.ID+":"+nodeproto.Digest(mustJSON(result)), now); err != nil {
+		return Operation{}, err
+	}
+	o.State, o.UpdatedAt = "resolved", now
+	return o, tx.Commit()
 }
