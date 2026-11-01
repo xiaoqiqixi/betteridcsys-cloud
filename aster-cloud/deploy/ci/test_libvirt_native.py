@@ -77,7 +77,7 @@ class NativeFixtureContract(unittest.TestCase):
 
     def result(self):
         value = {k: True for k in ("passed", "real_apt", "real_systemd", "libvirt_prepared", "explicit_kvm_denial",
-                                  "non_kvm_doctor_checks_passed", "real_approved_image_validated", "owned_units_active",
+                                  "non_kvm_doctor_checks_passed", "real_approved_image_validated", "bandwidth_live_xml_verified", "owned_units_active",
                                   "vendor_masks_persistent", "empty_network_mount_verified", "unix_libvirt_query_passed",
                                   "default_network_absent", "virbr_absent", "libvirt_no_tcp_listener", "vendor_default_xml_retained_unchanged_on_resume")}
         value.update(schema=1, kvm_ready=False, source_sha="a" * 40, ubuntu="22.04", image_sha256=h.IMAGES["22.04"][2], doctor_checks=self.checks(), doctor_protocol=g.DOCTOR_PROTOCOL)

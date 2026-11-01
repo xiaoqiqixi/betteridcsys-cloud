@@ -170,7 +170,7 @@ func (m *Manager) Capabilities(ctx context.Context) nodeproto.Capabilities {
 	} else {
 		capacity.MemoryAvailableMiB = 0
 	}
-	c := nodeproto.Capabilities{Protocol: nodeproto.Protocol, NodeID: m.Config.NodeID, Hypervisor: "libvirt-kvm", Maintenance: m.Config.Maintenance, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Actions: []string{}, ImageIDs: []string{}, StorageIDs: []string{m.Config.StorageID}, NetworkProfiles: []string{}, IPv4Counts: []int{}, IPv6Counts: []int{0}, BandwidthMbps: []int{0}, TransferGiB: []int{0}, Capacity: capacity, Limitations: []string{"OVS requires an explicit pinned profile and node/2 immutable IPAM binding. Cross-node/gateway forwarding requires a separate root-approved overlay contract and all-node epoch barrier. No IPv6, data disks, traffic accounting or queue shaping.", "Zero bandwidth/transfer means the explicitly root-approved unmetered default, not an enforced numeric quota.", "Static IPv4 requires operator-preconfigured dedicated routed bridge and pinned anti-spoof/default-deny nwfilter; not a tenant security group or complete host network isolation.", "Succeeded create confirms libvirt domain running, not guest boot, SSH, network connectivity or billing service activation.", "Reboot completion cannot be proved without guest lifecycle evidence and is retained uncertain after the command acknowledgement."}}
+	c := nodeproto.Capabilities{Protocol: nodeproto.Protocol, NodeID: m.Config.NodeID, Hypervisor: "libvirt-kvm", Maintenance: m.Config.Maintenance, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Actions: []string{}, ImageIDs: []string{}, StorageIDs: []string{m.Config.StorageID}, NetworkProfiles: []string{}, IPv4Counts: []int{}, IPv6Counts: []int{0}, BandwidthMbps: []int{0}, TransferGiB: []int{0}, Capacity: capacity, Limitations: []string{"OVS requires an explicit pinned profile and node/2 immutable IPAM binding. Cross-node/gateway forwarding requires a separate root-approved overlay contract and all-node epoch barrier. No IPv6 or data disks. Normal NIC limits require allow_bandwidth_limits; OVS uses its pinned fabric meters.", "Zero bandwidth/transfer means the explicitly root-approved unmetered default, not an enforced numeric quota.", "Static IPv4 requires operator-preconfigured dedicated routed bridge and pinned anti-spoof/default-deny nwfilter; not a tenant security group or complete host network isolation.", "Succeeded create confirms libvirt domain running, not guest boot, SSH, network connectivity or billing service activation.", "Reboot completion cannot be proved without guest lifecycle evidence and is retained uncertain after the command acknowledgement."}}
 	for id := range m.Config.Images {
 		c.ImageIDs = append(c.ImageIDs, id)
 	}
@@ -181,6 +181,9 @@ func (m *Manager) Capabilities(ctx context.Context) nodeproto.Capabilities {
 	}
 	if m.Config.Network.Enabled {
 		c.NetworkProfiles = append(c.NetworkProfiles, "normal-static-ipv4-dedicated-bridge")
+		if m.Config.AllowBandwidthLimits {
+			c.NetworkProfiles = append(c.NetworkProfiles, nodeproto.BandwidthCapability)
+		}
 		c.IPv4Counts = append(c.IPv4Counts, 1)
 	}
 	if len(m.Config.OVSProfiles) > 0 {

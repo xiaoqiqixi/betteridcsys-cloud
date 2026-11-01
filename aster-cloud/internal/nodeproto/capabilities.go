@@ -1,5 +1,7 @@
 package nodeproto
 
+const BandwidthCapability = "libvirt-interface-bandwidth"
+
 type Capacity struct {
 	CPUCoresTotal       int   `json:"cpu_cores_total"`
 	CPUCoresAllocated   int   `json:"cpu_cores_allocated"`

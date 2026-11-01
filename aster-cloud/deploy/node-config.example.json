@@ -19,6 +19,7 @@
   },
   "allow_isolated_no_nic": false,
   "allow_unmetered_default": true,
+  "allow_bandwidth_limits": false,
   "allow_delete": false,
   "maintenance": true,
   "cpu_allocation_limit": 4,

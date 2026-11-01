@@ -218,3 +218,24 @@ transaction for both billing and console creates.
 and incoming migrations without blocking accepted work or existing-instance
 operations. Maintenance remains a separate, stricter control. Both policy
 changes and allocation changes are audited. GETs never trigger placement.
+
+### Per-instance bandwidth
+
+Enable `allow_bandwidth_limits` in the root-owned node configuration to advertise
+`libvirt-interface-bandwidth`. Normal bridge products/presets can then set
+`inbound_bandwidth_mbps` (guest receive) and `bandwidth_mbps` (guest transmit).
+Zero leaves that direction unlimited and requires `allow_unmetered_default`.
+Unsupported nodes reject admission; they never silently discard a requested rate.
+OVS bindings continue using the fabric's existing per-IP ingress/egress meters.
+OVS guest resize is explicitly unsupported until its bound lifecycle supports it.
+
+Libvirt describes its average as **KiB/s**, historically spelled KB/s. Decimal
+Mbps converts to kbit/s by multiplying by 1000, then to KiB/s with
+`floor(kbit/s * 1000 / 8 / 1024)`. For example, 100 Mbps becomes 12,207 KiB/s,
+not 12,500 KiB/s. See [libvirt QoS units](https://libvirt.org/formatnetwork.html#quality-of-service).
+Create and stopped-guest resize use the same `<interface><bandwidth>` generator;
+ownership checks detect drift. Size-only resize preserves both rates. Explicit
+resize parameters `set_bandwidth: true`, `bandwidth_mbps`, and
+`inbound_bandwidth_mbps` replace both rates (0 clears one). Journal schema 8 keeps
+older nodes from opening shaped instances. Native Ubuntu TCG CI creates a live
+domain with this production XML and verifies both limits after libvirt starts it.

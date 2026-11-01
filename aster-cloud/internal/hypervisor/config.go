@@ -59,6 +59,7 @@ type StorageConfig struct {
 type Config struct {
 	Guest                               GuestConfig           `json:"guest,omitzero"`
 	ShutdownTimeoutSeconds              int                   `json:"shutdown_timeout_seconds"`
+	AllowBandwidthLimits                bool                  `json:"allow_bandwidth_limits,omitempty"`
 	OVSProfiles                         map[string]OVSProfile `json:"ovs_profiles,omitempty"`
 	Storage                             StorageConfig         `json:"storage"`
 	NodeID                              string                `json:"node_id"`

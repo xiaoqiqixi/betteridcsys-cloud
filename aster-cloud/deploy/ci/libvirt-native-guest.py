@@ -351,10 +351,13 @@ def execute(metadata):
     except (ValueError, UnicodeError):
         raise Refused("DOCTOR_CONFIG_NOT_ACCEPTED")
     checks = doctor_evidence(doctor.returncode, report)
+    require(sha(ROOT / "bandwidth-fixture.test") == metadata["bandwidth_fixture_sha256"], "REAL_NODE_BINARY_HASH_MISMATCH")
+    run([str(ROOT / "bandwidth-fixture.test"), "-test.run=^TestNativeBandwidthLiveXML$", "-test.timeout=90s"], timeout=100)
+    require(inspect_libvirt() == proof, "PREPARE_RESUME_CHANGED_PROOF")
     return {"schema": 1, "passed": True, "real_apt": True, "real_systemd": True, "libvirt_prepared": True,
             "kvm_ready": False, "explicit_kvm_denial": True, "non_kvm_doctor_checks_passed": True,
             "source_sha": metadata["source_sha"], "ubuntu": metadata["ubuntu"], "image_sha256": metadata["image_sha256"],
-            "real_approved_image_validated": True, "vendor_default_xml_retained_unchanged_on_resume": True,
+            "real_approved_image_validated": True, "bandwidth_live_xml_verified": True, "vendor_default_xml_retained_unchanged_on_resume": True,
             "doctor_protocol": report["protocol"], "doctor_checks": checks, **proof}
 
 

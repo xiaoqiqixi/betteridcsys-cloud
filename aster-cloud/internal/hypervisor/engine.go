@@ -527,7 +527,7 @@ func (m *Manager) prepareWithRetired(t nodeproto.NodeTask, allowRetired bool) (I
 			return Instance{}, ErrUnsupported
 		}
 	} else {
-		if r.NetworkType != "normal" || r.BandwidthMbps != 0 || r.InboundBandwidthMbps != 0 || !c.AllowUnmeteredDefault || r.IPv4Count != 0 && r.IPv4Count != 1 || r.IPv4Count == 0 && !c.AllowIsolatedNoNIC || r.IPv4Count == 1 && !c.Network.Enabled {
+		if r.NetworkType != "normal" || !c.allowsBandwidth(r) || r.IPv4Count != 0 && r.IPv4Count != 1 || r.IPv4Count == 0 && !c.AllowIsolatedNoNIC || r.IPv4Count == 1 && !c.Network.Enabled {
 			return Instance{}, ErrUnsupported
 		}
 	}
@@ -858,7 +858,8 @@ type nicLinkXML struct {
 	State string `xml:"state,attr"`
 }
 type interfaceXML struct {
-	MTU *struct {
+	Bandwidth *bandwidthXML `xml:"bandwidth,omitempty"`
+	MTU       *struct {
 		Size int `xml:"size,attr"`
 	} `xml:"mtu,omitempty"`
 	Type string `xml:"type,attr"`
@@ -1001,6 +1002,7 @@ func (m *Manager) domainXML(i Instance) ([]byte, error) {
 		nic.Source.Bridge = m.Config.Network.Bridge
 		nic.Model.Type = "virtio"
 		if i.Network.IsZero() {
+			nic.Bandwidth = bandwidthFor(i.Resources)
 			if !i.DirectPublic.IsZero() {
 				nic.Link = &nicLinkXML{State: "up"}
 				if i.DirectPublicDetached || i.SourceFence != nil {
@@ -1138,6 +1140,9 @@ func (m *Manager) assertOwned(ctx context.Context, i Instance) error {
 			return ErrOwnership
 		}
 		nic := domain.Devices.Interfaces[0]
+		if !bandwidthMatches(nic.Bandwidth, bandwidthFor(i.Resources)) {
+			return ErrOwnership
+		}
 		if nic.Type != "bridge" || nic.MAC.Address != i.MAC || nic.Source.Bridge != m.Config.Network.Bridge || nic.Port == nil || nic.Filter == nil || nic.VirtualPort != nil || nic.Port.Isolated != "yes" || nic.Model.Type != "virtio" || nic.Filter.Filter != m.Config.Network.Filter {
 			return ErrOwnership
 		}

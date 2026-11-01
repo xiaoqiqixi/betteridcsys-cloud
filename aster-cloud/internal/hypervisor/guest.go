@@ -112,6 +112,14 @@ func (m *Manager) guestAdmission(t nodeproto.NodeTask, i Instance) string {
 	}
 	if t.Action == "resize" {
 		p := t.Guest.Params
+		proposed := i.Resources
+		if p.SetBandwidth {
+			proposed.BandwidthMbps = p.BandwidthMbps
+			proposed.InboundBandwidthMbps = p.InboundBandwidthMbps
+		}
+		if !m.Config.allowsBandwidth(proposed) {
+			return "UNSUPPORTED_BANDWIDTH"
+		}
 		if p.DiskGB < i.Resources.SystemDiskGiB {
 			return "DISK_SHRINK_FORBIDDEN"
 		}
@@ -260,6 +268,10 @@ func (m *Manager) executeGuest(ctx context.Context, t nodeproto.NodeTask, i Inst
 			i.Resources.CPUCores = p.CPUCores
 			i.Resources.MemoryMiB = p.MemoryMB
 			i.Resources.SystemDiskGiB = p.DiskGB
+			if p.SetBandwidth {
+				i.Resources.BandwidthMbps = p.BandwidthMbps
+				i.Resources.InboundBandwidthMbps = p.InboundBandwidthMbps
+			}
 			e = m.guestCheckpoint(t, i, "RESIZED")
 		}
 		if e == nil {

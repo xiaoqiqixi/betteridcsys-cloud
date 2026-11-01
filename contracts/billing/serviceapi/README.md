@@ -17,7 +17,10 @@ unique 32-hex identifiers. Receipts are immutable, including rejections.
 and exactly one of `password` or `ssh_public_key`; rescue_enter requires an
 approved rescue `image_id`. Terminate requires `confirmation = resource_id`.
 Resize specifies all three final sizes; memory_mb/disk_gb use MiB/GiB, consistent
-with provisioning. Snapshot create's operation ID becomes its snapshot ID;
+with provisioning. Optional `set_bandwidth: true` replaces both directional
+limits using `bandwidth_mbps` (guest transmit) and `inbound_bandwidth_mbps`
+(guest receive), 0–100000 Mbps; zero clears that direction. Omitting the flag
+preserves existing limits. Snapshot create's operation ID becomes its snapshot ID;
 restore/delete take `snapshot_id`. Unsuspend starts only with `start_after`.
 
 Passwords live only in memory. Never persist/log/serialize an action request

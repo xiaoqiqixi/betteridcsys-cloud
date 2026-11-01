@@ -42,7 +42,7 @@ func (c Capability) SupportsNetwork(r controllerapi.Resources, node NodeProfile,
 	if profileID != "" {
 		return vpcResources(r) && contains(c.NetworkProfiles, nodeproto.OVSNetworkCapability) && contains(c.OVSNetworkProfiles, profileID) && containsInt(c.IPv4Counts, 1) && containsInt(c.IPv6Counts, 0)
 	}
-	return r.NetworkType == "normal" && r.IPv4Count == 1 && r.IPv6Count == 0 && contains(c.NetworkProfiles, "normal-static-ipv4-dedicated-bridge") && r.BandwidthMbps == 0 && r.InboundBandwidthMbps == 0 && r.TransferGiB == 0 &&
+	return r.NetworkType == "normal" && r.IPv4Count == 1 && r.IPv6Count == 0 && contains(c.NetworkProfiles, "normal-static-ipv4-dedicated-bridge") && supportsNormalBandwidth(c, r) && r.TransferGiB == 0 &&
 		r.TrafficDirection == "all" && containsInt(c.IPv4Counts, r.IPv4Count) && containsInt(c.IPv6Counts, r.IPv6Count) &&
 		containsInt(c.BandwidthMbps, 0) && containsInt(c.TransferGiB, 0) && contains(c.Actions, "create")
 }

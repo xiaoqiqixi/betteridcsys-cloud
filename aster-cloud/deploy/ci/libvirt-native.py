@@ -700,8 +700,17 @@ def make_seed(work, root, source_sha, image_provenance, scenario="libvirt"):
     metadata = {"schema": 1, "nonce": nonce, "source_sha": source_sha, **image_provenance}
     if scenario == 'libvirt':
         metadata['node_binary_sha256'] = digest(binary)
+        qos_fixture = work / 'bandwidth-fixture.test'
+        qos_source = root / 'aster-cloud/internal/hypervisor/native_bandwidth_fixture_test.go'
+        require(not qos_source.exists(), 'PROCESS_FIXTURE_SOURCE_COLLISION')
+        try:
+            qos_source.write_bytes((HERE/'bandwidth-native-fixture.gotxt').read_bytes())
+            run([go, 'test', '-mod=readonly', '-c', '-ldflags=-s -w', '-o', str(qos_fixture), './internal/hypervisor'], cwd=root/'aster-cloud', env=env, timeout=300)
+        finally:
+            qos_source.unlink(missing_ok=True)
+        metadata['bandwidth_fixture_sha256'] = digest(qos_fixture)
         content = {"provision.py": (root / "aster-cloud/deploy/install/provision.py").read_bytes(),
-                   "guest.py": (HERE / "libvirt-native-guest.py").read_bytes(), name: binary.read_bytes()}
+                   "guest.py": (HERE / "libvirt-native-guest.py").read_bytes(), name: binary.read_bytes(), "bandwidth-fixture.test": qos_fixture.read_bytes()}
     else:
         fixture = work / 'controller-fixture.test'
         run([go, 'test', '-mod=readonly', '-c', '-ldflags=-s -w', '-o', str(fixture), './cmd/aster-controller'], cwd=root / 'aster-cloud', env=env, timeout=300)
@@ -744,7 +753,7 @@ def make_seed(work, root, source_sha, image_provenance, scenario="libvirt"):
         for filename in ('install.py', 'controller-migration.py', 'provision.py'):
             content[filename] = (root / 'aster-cloud/deploy/install' / filename).read_bytes()
     content['metadata.json'] = json.dumps(metadata).encode()
-    files = [{"path": "/root/aster-native/" + name, "owner": "root:root", "permissions": "0700" if name in ("aster-node", "aster-controller", "controller-fixture.test") else "0600",
+    files = [{"path": "/root/aster-native/" + name, "owner": "root:root", "permissions": "0700" if name in ("aster-node", "aster-controller", "controller-fixture.test", "bandwidth-fixture.test") else "0600",
               "encoding": "gz+b64", "content": base64.b64encode(gzip.compress(raw, mtime=0)).decode()} for name, raw in content.items()]
     config = {"users": [], "disable_root": True, "ssh_pwauth": False, "manage_etc_hosts": False, "write_files": files,
               "package_update": False, "package_upgrade": False,
@@ -846,14 +855,14 @@ def validate_result(result, metadata):
                 'GUEST_PROVISION_ACCEPTANCE_FAILED')
         return
     allowed = {"schema", "passed", "real_apt", "real_systemd", "libvirt_prepared", "kvm_ready", "explicit_kvm_denial",
-               "non_kvm_doctor_checks_passed", "source_sha", "ubuntu", "image_sha256", "real_approved_image_validated",
+               "non_kvm_doctor_checks_passed", "source_sha", "ubuntu", "image_sha256", "real_approved_image_validated", "bandwidth_live_xml_verified",
                "doctor_checks", "owned_units_active", "vendor_masks_persistent", "empty_network_mount_verified",
                "unix_libvirt_query_passed", "default_network_absent", "virbr_absent", "libvirt_no_tcp_listener", "vendor_default_xml_retained_unchanged_on_resume", "doctor_protocol"}
     require(isinstance(result, dict) and set(result) <= allowed, "GUEST_RESULT_SCHEMA_REJECTED")
     require(result.get("schema") == 1 and result.get("source_sha") == metadata["source_sha"] and result.get("ubuntu") == metadata["ubuntu"], "GUEST_RESULT_BINDING_MISMATCH")
     require(result.get("image_sha256") == metadata["image_sha256"], "GUEST_IMAGE_BINDING_MISMATCH")
     require(all(result.get(k) is True for k in ("passed", "real_apt", "real_systemd", "libvirt_prepared", "explicit_kvm_denial", "non_kvm_doctor_checks_passed",
-                                               "real_approved_image_validated", "owned_units_active", "vendor_masks_persistent", "empty_network_mount_verified",
+                                               "real_approved_image_validated", "bandwidth_live_xml_verified", "owned_units_active", "vendor_masks_persistent", "empty_network_mount_verified",
                                                "unix_libvirt_query_passed", "default_network_absent", "virbr_absent", "libvirt_no_tcp_listener", "vendor_default_xml_retained_unchanged_on_resume")), "GUEST_ACCEPTANCE_FAILED")
     require(result.get("kvm_ready") is False, "GUEST_MUST_NOT_CLAIM_KVM_READY")
     require(result.get("doctor_protocol") == "aster.node/1", "GUEST_DOCTOR_PROTOCOL_REJECTED")

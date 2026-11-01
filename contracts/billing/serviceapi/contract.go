@@ -27,16 +27,19 @@ func ValidID(id string) bool { return idPattern.MatchString(id) }
 // canonical JSON; unrelated nonzero fields are rejected. Sizes are MiB/GiB,
 // matching controller provisioning resources despite the historical mb/gb keys.
 type Params struct {
-	ImageID      string `json:"image_id,omitempty"`
-	Password     string `json:"password,omitempty"`
-	SSHPublicKey string `json:"ssh_public_key,omitempty"`
-	StartAfter   bool   `json:"start_after,omitempty"`
-	Confirmation string `json:"confirmation,omitempty"`
-	SnapshotID   string `json:"snapshot_id,omitempty"`
-	Name         string `json:"name,omitempty"`
-	CPUCores     int    `json:"cpu_cores,omitempty"`
-	MemoryMB     int    `json:"memory_mb,omitempty"`
-	DiskGB       int    `json:"disk_gb,omitempty"`
+	SetBandwidth         bool   `json:"set_bandwidth,omitempty"`
+	BandwidthMbps        int    `json:"bandwidth_mbps,omitempty"`
+	InboundBandwidthMbps int    `json:"inbound_bandwidth_mbps,omitempty"`
+	ImageID              string `json:"image_id,omitempty"`
+	Password             string `json:"password,omitempty"`
+	SSHPublicKey         string `json:"ssh_public_key,omitempty"`
+	StartAfter           bool   `json:"start_after,omitempty"`
+	Confirmation         string `json:"confirmation,omitempty"`
+	SnapshotID           string `json:"snapshot_id,omitempty"`
+	Name                 string `json:"name,omitempty"`
+	CPUCores             int    `json:"cpu_cores,omitempty"`
+	MemoryMB             int    `json:"memory_mb,omitempty"`
+	DiskGB               int    `json:"disk_gb,omitempty"`
 }
 
 func (p Params) Redacted() Params { p.Password = ""; return p }
@@ -83,6 +86,14 @@ func (p Params) Valid(action string) bool {
 		}
 		rest.SnapshotID = ""
 	case "resize":
+		if p.SetBandwidth {
+			if p.BandwidthMbps < 0 || p.BandwidthMbps > 100000 || p.InboundBandwidthMbps < 0 || p.InboundBandwidthMbps > 100000 {
+				return false
+			}
+			rest.SetBandwidth = false
+			rest.BandwidthMbps = 0
+			rest.InboundBandwidthMbps = 0
+		}
 		if p.CPUCores < 1 || p.CPUCores > 4096 || p.MemoryMB < 128 || p.MemoryMB > 1073741824 || p.MemoryMB%128 != 0 || p.DiskGB < 1 || p.DiskGB > 16777216 {
 			return false
 		}

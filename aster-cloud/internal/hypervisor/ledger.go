@@ -119,7 +119,7 @@ func OpenLedger(directory, nodeID string) (*Ledger, error) {
 			l.Close()
 			return nil, e
 		}
-		if len(raw) > maxJournalBytes || json.Unmarshal(raw, &l.state) != nil || (l.state.Schema != 1 && l.state.Schema != 2 && l.state.Schema != 3 && l.state.Schema != 4 && l.state.Schema != 5 && l.state.Schema != 6 && l.state.Schema != 7) || l.state.NodeID != nodeID || l.state.Operations == nil || l.state.Instances == nil {
+		if len(raw) > maxJournalBytes || json.Unmarshal(raw, &l.state) != nil || (l.state.Schema < 1 || l.state.Schema > bandwidthJournalSchema) || l.state.NodeID != nodeID || l.state.Operations == nil || l.state.Instances == nil {
 			l.Close()
 			return nil, errors.New("invalid journal")
 		}
@@ -255,6 +255,9 @@ func (l *Ledger) Claim(task nodeproto.NodeTask, sha string) (nodeproto.NodeResul
 		}
 		return cloneNodeResult(op.Result), false, nil
 	}
+	if (task.Network.IsZero() && hasBandwidth(task.Resources) || task.Guest.Params.SetBandwidth) && l.state.Schema < bandwidthJournalSchema {
+		l.state.Schema = bandwidthJournalSchema
+	}
 	result := nodeproto.NodeResult{Protocol: task.Protocol, OperationID: task.OperationID, RequestSHA256: sha, InstanceID: task.InstanceID, Status: "accepted"}
 	if task.Force && l.state.Schema < 6 {
 		l.state.Schema = 6
@@ -278,6 +281,9 @@ func (l *Ledger) Reserve(instance Instance) error {
 	defer l.mu.Unlock()
 	if old, ok := l.state.Instances[instance.ID]; ok && (!old.PublicRetired || old.State != "retired" || instance.TargetBinding == nil || instance.DirectPublic.IsZero() || instance.DirectPublic.Generation <= old.DirectPublic.Generation) {
 		return ErrConflict
+	}
+	if instance.Network.IsZero() && hasBandwidth(instance.Resources) && l.state.Schema < bandwidthJournalSchema {
+		l.state.Schema = bandwidthJournalSchema
 	}
 	if !instance.Network.IsZero() {
 		if !instance.Network.ValidFor(nodeproto.NodeTask{NodeID: l.state.NodeID, InstanceID: instance.ID, OwnerRef: instance.OwnerRef, Resources: instance.Resources}) {
@@ -372,6 +378,9 @@ func (l *Ledger) validateLoaded() error {
 		if op.Task.Guest.Params.Password != "" || nodeproto.GuestAction(op.Task.Action) && l.state.Schema < 7 {
 			return errors.New("invalid guest journal")
 		}
+		if (op.Task.Network.IsZero() && hasBandwidth(op.Task.Resources) || op.Task.Guest.Params.SetBandwidth) && l.state.Schema < bandwidthJournalSchema {
+			return errors.New("bandwidth task needs journal 8")
+		}
 		if id != op.Task.OperationID || !op.Result.Matches(op.Task, op.Result.RequestSHA256) || op.Task.NodeID != l.state.NodeID {
 			return errors.New("invalid journal operation identity")
 		}
@@ -391,6 +400,9 @@ func (l *Ledger) validateLoaded() error {
 	for id, i := range l.state.Instances {
 		if err := validateGuestInstance(i, l.state.Schema); err != nil {
 			return err
+		}
+		if i.Network.IsZero() && hasBandwidth(i.Resources) && l.state.Schema < bandwidthJournalSchema {
+			return errors.New("bandwidth instance needs journal 8")
 		}
 		if !nodeproto.ValidID(id) || i.ID != id || !nodeproto.ValidID(i.OwnerRef) || i.Domain != "aster-"+id || filepath.Base(i.Directory) != i.Domain || !filepath.IsAbs(i.Directory) || i.Disk != filepath.Join(i.Directory, "system.qcow2") || (i.Seed != "" && i.Seed != filepath.Join(i.Directory, "seed.iso")) {
 			return errors.New("invalid journal instance identity")
