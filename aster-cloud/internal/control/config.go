@@ -22,6 +22,7 @@ import (
 )
 
 type Config struct {
+	Telemetry            TelemetryConfig       `json:"telemetry,omitzero"`
 	PlacementRegions     []string              `json:"placement_regions,omitempty"`
 	Dispatcher           DispatcherConfig      `json:"dispatcher,omitzero"`
 	Schema               int                   `json:"schema"`

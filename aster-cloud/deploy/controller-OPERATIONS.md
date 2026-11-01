@@ -239,3 +239,21 @@ resize parameters `set_bandwidth: true`, `bandwidth_mbps`, and
 `inbound_bandwidth_mbps` replace both rates (0 clears one). Journal schema 8 keeps
 older nodes from opening shaped instances. Native Ubuntu TCG CI creates a live
 domain with this production XML and verifies both limits after libvirt starts it.
+
+### Metrics history
+
+Set `telemetry: {"enabled": true}` in the root-owned controller configuration
+and restart `aster-controller`. The default is disabled. The daemon polls the
+approved pinned node metrics endpoint once per minute, independently of HTTP
+reads, and stops with the controller migration fence. Collection traverses the
+whole fleet using keyset pages; a failed node does not abort the other nodes.
+
+`SQLStore.RecordMetrics` checks the current placement and owner inside
+`controller_lock`. Replayed/older samples do not add observations twice.
+Five-minute `controller_metrics` buckets hold duration-weighted rates: CPU as a
+percentage of allocated vCPUs; network and disk as bytes/second. Missing counters,
+counter resets and gaps over ten minutes remain null. Collection deletes buckets
+and cursors older than 30 days, including those for deleted instances.
+`SQLStore.QueryMetrics(ctx, instanceID, range, now)` is read-only and returns the
+`aster.service/1` model for `1h`, `24h`, `7d` or `30d` with explicit null gaps.
+The existing live console metrics GET continues to perform no database writes.

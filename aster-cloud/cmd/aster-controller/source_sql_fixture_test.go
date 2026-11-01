@@ -87,7 +87,7 @@ func realSourceDatabaseFixture(t *testing.T) map[string][]byte {
 		files[name] = bytes.Clone(data.Bytes())
 		return nil
 	})
-	if e != nil || len(files) != 38 || count != 20 {
+	if e != nil || len(files) != 40 || count != 21 {
 		t.Fatal("real SQL snapshot inventory failed")
 	}
 	return files

@@ -294,6 +294,12 @@ func run(args []string) error {
 			control.NewDispatcher(store, config).Run(overlayContext)
 		}()
 		defer func() { stopOverlay(); <-dispatcherDone }()
+		telemetryDone := make(chan struct{})
+		go func() {
+			defer close(telemetryDone)
+			(control.TelemetryCollector{Store: store, Config: config}).Run(overlayContext)
+		}()
+		defer func() { stopOverlay(); <-telemetryDone }()
 		var handler http.Handler = app.Handler()
 		if *consoleOrigin != "" {
 			auth, e := identity.New(store.DB, identity.Config{Origin: *consoleOrigin})
