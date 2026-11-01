@@ -132,7 +132,7 @@ def system_identity_from_records(operation, nonce, records):
             records['groups']==str(gid)+'\n', code)
     shadow, gshadow = rows('shadow',9), rows('gshadow',4)
     require(len(shadow)==1 and shadow[0][0:2]==[name,'!'] and
-            shadow[0][6:]==['','1',''] and
+            shadow[0][6:]==['','',''] and
             all(value=='' or re.fullmatch(r'0|[1-9][0-9]{0,9}',value) for value in shadow[0][2:6]) and
             gshadow==[[name,'!','','']], code)
     result = {'name':name,'uid':uid,'gid':gid}
@@ -207,6 +207,40 @@ def system_identity_idle(uid, gid):
                 'TARGET_VERIFICATION_SYSTEM_PROCESS_UNCONFIRMED')
         require(str(uid).encode() not in fields[b'Uid'] and str(gid).encode() not in fields[b'Gid']+fields[b'Groups'],
                 'TARGET_VERIFICATION_SYSTEM_IDENTITY_BUSY')
+
+
+def create_system_identity(operation, nonce):
+    """One fixed OS creation, called after the original private intent exists."""
+    require(sys.platform=='linux' and os.getuid()==os.geteuid()==0 and
+            isinstance(operation,str) and OP.fullmatch(operation) and
+            isinstance(nonce,str) and SHA.fullmatch(nonce),'TARGET_VERIFICATION_SYSTEM_APPROVAL_REQUIRED')
+    name = 'asterv-'+operation[:24]
+    for database in ('passwd','group','shadow','gshadow'):
+        require(system_account_lookup(database,name,missing=True) is None,'TARGET_VERIFICATION_SYSTEM_FOREIGN_IDENTITY')
+    try:
+        result = run(['/usr/sbin/useradd','--system','--user-group','--no-create-home','--no-log-init',
+            '--home-dir','/nonexistent','--shell','/usr/sbin/nologin',
+            '--comment','Aster verification '+operation+' '+nonce,
+            '-K','SYS_UID_MIN=100','-K','SYS_UID_MAX=999','-K','SYS_GID_MIN=100','-K','SYS_GID_MAX=999',name],60)
+    except Refused:
+        raise Refused('TARGET_VERIFICATION_SYSTEM_CREATE_UNCONFIRMED') from None
+    require(result==b'','TARGET_VERIFICATION_SYSTEM_CREATE_UNCONFIRMED')
+
+
+def inspect_system_identity(operation, nonce):
+    require(isinstance(operation,str) and OP.fullmatch(operation),'TARGET_VERIFICATION_SYSTEM_IDENTITY_REJECTED')
+    name = 'asterv-'+operation[:24]
+    records = {database:system_account_lookup(database,None if database in ('passwd','group') else name)
+               for database in ('passwd','group','shadow','gshadow')}
+    records['groups'] = run(['/usr/bin/id','--groups',name],15).decode('ascii')
+    identity = system_identity_from_records(operation,nonce,records)
+    require(identity['uid']<=999 and identity['gid']<=999,'TARGET_VERIFICATION_SYSTEM_IDENTITY_REJECTED')
+    for database,number in (('passwd',identity['uid']),('group',identity['gid'])):
+        for key in (name,str(number)):
+            require(digest(system_account_lookup(database,key).encode())==identity[database+'_sha256'],
+                    'TARGET_VERIFICATION_SYSTEM_IDENTITY_REJECTED')
+    system_identity_idle(identity['uid'],identity['gid'])
+    return identity,records
 
 
 def install_module():
@@ -1148,25 +1182,11 @@ class Target(Host):
             # One invocation per explicit prepare. An interrupted intent may
             # resume only after all four local records are proven absent. Never
             # overwrite/repair partial or drifted identities or run a retry loop.
-            try:
-                result = run(['/usr/sbin/useradd','--system','--user-group','--no-create-home','--no-log-init',
-                    '--home-dir','/nonexistent','--shell','/usr/sbin/nologin','--expiredate','1970-01-02',
-                    '--inactive','-1','--comment','Aster verification '+self.operation+' '+intent['nonce'],
-                    '-K','SYS_UID_MIN=100','-K','SYS_UID_MAX=999','-K','SYS_GID_MIN=100','-K','SYS_GID_MAX=999',
-                    name],60)
-            except Refused:
-                raise Refused('TARGET_VERIFICATION_SYSTEM_CREATE_UNCONFIRMED') from None
-            require(result==b'','TARGET_VERIFICATION_SYSTEM_CREATE_UNCONFIRMED')
-        records = {database:system_account_lookup(database,None if database in ('passwd','group') else name)
-                   for database in ('passwd','group','shadow','gshadow')}
-        records['groups'] = run(['/usr/bin/id','--groups',name],15).decode('ascii')
-        identity = system_identity_from_records(self.operation,intent['nonce'],records)
-        require(identity['uid']<=999 and identity['gid']<=999,'TARGET_VERIFICATION_SYSTEM_IDENTITY_REJECTED')
-        for database, number in (('passwd',identity['uid']),('group',identity['gid'])):
-            for key in (name,str(number)):
-                require(digest(system_account_lookup(database,key).encode())==identity[database+'_sha256'],
-                        'TARGET_VERIFICATION_SYSTEM_IDENTITY_REJECTED')
-        system_identity_idle(identity['uid'],identity['gid'])
+            create_system_identity(self.operation,intent['nonce'])
+        # This is a non-login OS service identity, NOT a customer account or
+        # purchased instance lifetime. No account aging/expiration is imposed.
+        # The verification HTTP process retains its separately approved deadline.
+        identity,_ = inspect_system_identity(self.operation,intent['nonce'])
         receipt = {'schema':1,'operation_id':self.operation,
                    'intent_sha256':digest(self.i.protected_read(str(intent_path),8192)), 'identity':identity}
         if completed:

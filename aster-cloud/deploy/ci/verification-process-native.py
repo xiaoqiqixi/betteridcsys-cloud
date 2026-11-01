@@ -105,7 +105,7 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
         system_command('target-verification-system-status')=={**prepared,'readonly':True},code)
     owned_receipts = {name:(inputs/name).read_bytes() for name in
         ('verification-system-started.json','verification-system-account.json')}
-    # Modify only this fixture-owned, expired, locked account. /bin/false is
+    # Modify only this fixture-owned, locked non-login identity. /bin/false is
     # still noninteractive; status/prepare must refuse and must not repair it.
     manager.run(['/usr/sbin/usermod','--shell','/bin/false',system_identity['name']])
     drift = manager.system_account_lookup('passwd',system_identity['name'])

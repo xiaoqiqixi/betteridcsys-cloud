@@ -1112,6 +1112,35 @@ class VerificationGuardWorkflowContract(unittest.TestCase):
         workflow = (HERE.parents[2]/'.github/workflows/ci.yml').read_text()
         self.assertLess(workflow.index('      - name: Workflow syntax'), workflow.index('      - name: Verify minimal billing protocol SDK'))
 
+    def test_system_identity_gate_requires_actual_os_proof_and_cleanup(self):
+        workflow = (HERE.parents[2]/'.github/workflows/ci.yml').read_text()
+        marker = '      - name: Real non-login OS identity (not a customer account or service expiry)\n'
+        step = workflow.split(marker)
+        self.assertEqual(len(step), 2)
+        self.assertLess(workflow.index(marker), workflow.index('      - name: Linux unit, vet and build'))
+        body = step[1].split('      - name:', 1)[0]
+        program = textwrap.dedent(body.split("          python3 -I - <<'PYTEST'\n", 1)[1].split('          PYTEST\n', 1)[0])
+        yes = 'passed real_linux_accounts locked_password nonlogin_shell no_account_expiry isolated_uid_gid foreign_identity_refused drift_not_repaired cleanup_verified'.split()
+        no = 'http_started mysql_verified installed_target_approval migration_ready'.split()
+        valid = {'schema':1,'source_sha':'a'*40,**dict.fromkeys(yes,True),**dict.fromkeys(no,False)}
+        with tempfile.TemporaryDirectory(prefix='aster-system-identity-report-') as scratch:
+            def invoke(report):
+                (Path(scratch)/'verification-system-identity.json').write_text(json.dumps(report))
+                return subprocess.run([sys.executable,'-I','-'],input=program,text=True,
+                    env={**os.environ,'RUNNER_TEMP':scratch,'GITHUB_SHA':'a'*40},capture_output=True,timeout=10)
+            self.assertEqual(invoke(valid).returncode,0)
+            for field in yes+no:
+                for wrong in (None,1,not valid[field]):
+                    report = dict(valid)
+                    if wrong is None:
+                        del report[field]
+                    else:
+                        report[field] = wrong
+                    with self.subTest(field=field,value=wrong):
+                        self.assertNotEqual(invoke(report).returncode,0)
+            for change in ({'source_sha':'b'*40},{'schema':2},{'schema':True},{'unapproved':True}):
+                self.assertNotEqual(invoke({**valid,**change}).returncode,0)
+
     def test_actual_guard_gate_requires_exact_source_complete_boolean_proofs(self):
         workflow = (HERE.parents[2] / '.github/workflows/ci.yml').read_text()
         step = workflow.split('      - name: Independent root and non-root verification process guards (not service activation)\n')

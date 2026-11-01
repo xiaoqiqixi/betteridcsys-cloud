@@ -17,16 +17,16 @@ class VerificationSystemIdentityContract(unittest.TestCase):
 
     def records(self):
         # Different UID and GID are intentional: system allocation need not
-        # choose matching numbers. This account cannot authenticate via PAM.
+        # choose matching numbers. No password credential or login shell exists.
         return {
             'passwd': 'root:x:0:0:root:/root:/bin/bash\n'+self.name+':x:999:998:Aster verification '+self.operation+' '+self.nonce+':/nonexistent:/usr/sbin/nologin\n',
             'group': 'root:x:0:\n'+self.name+':x:998:\n',
-            'shadow': self.name+':!:20400:::::1:\n',
+            'shadow': self.name+':!:20400::::::\n',
             'gshadow': self.name+':!::\n',
             'groups': '998\n',
         }
 
-    def test_locked_expired_unique_identity_is_derived_from_real_record_formats(self):
+    def test_locked_nonlogin_service_identity_has_no_account_expiry(self):
         result = manager.system_identity_from_records(self.operation, self.nonce, self.records())
         self.assertEqual({k:result[k] for k in ('name','uid','gid')}, {'name':self.name,'uid':999,'gid':998})
         self.assertEqual(set(result), {'name','uid','gid','passwd_sha256','group_sha256','shadow_sha256','gshadow_sha256'})
@@ -61,10 +61,10 @@ class VerificationSystemIdentityContract(unittest.TestCase):
             self.rejected({**base,'passwd':base['passwd'].replace(old,new)})
         self.rejected(base,operation='d'*32)
 
-    def test_password_unlock_hash_or_unexpired_account_is_refused_without_secret_output(self):
+    def test_password_unlock_hash_or_expiry_drift_is_refused_without_secret_output(self):
         base = self.records()
         for old,new in ((':!:',':PRIVATE_HASH:'),(':!:',':!PRIVATE_HASH:'),(':!:',':!!:'),
-                        (':::::1:', '::::::'),(':::::1:', ':::::99999:')):
+                        ('::::::', ':::::1:'),('::::::', ':::::99999:')):
             self.rejected({**base,'shadow':base['shadow'].replace(old,new)})
 
     def test_truncated_aliased_or_malformed_records_are_not_absence_proof(self):

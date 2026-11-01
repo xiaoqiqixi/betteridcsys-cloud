@@ -27,6 +27,19 @@ jobs:
           cache: false
       - name: Workflow syntax
         run: bash aster-cloud/deploy/ci/lint-workflows.sh
+      - name: Real non-login OS identity (not a customer account or service expiry)
+        run: |
+          set -euo pipefail
+          sudo /usr/bin/python3 -I aster-cloud/deploy/ci/test_verification_system_identity_native.py --source "$GITHUB_SHA" | tee "$RUNNER_TEMP/verification-system-identity.json"
+          python3 -I - <<'PYTEST'
+          import json, os, pathlib
+          value = json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'verification-system-identity.json').read_text())
+          positive = set('passed real_linux_accounts locked_password nonlogin_shell no_account_expiry isolated_uid_gid foreign_identity_refused drift_not_repaired cleanup_verified'.split())
+          negative = set('http_started mysql_verified installed_target_approval migration_ready'.split())
+          assert set(value) == positive | negative | {'schema','source_sha'}
+          assert type(value['schema']) is int and value['schema'] == 1 and value['source_sha'] == os.environ['GITHUB_SHA']
+          assert all(value[k] is True for k in positive) and all(value[k] is False for k in negative)
+          PYTEST
       - name: Verify minimal billing protocol SDK
         run: |
           python3 scripts/verify-billing-contract.py
@@ -100,6 +113,7 @@ jobs:
           path: |
             ${{ runner.temp }}/verification-guard.json
             ${{ runner.temp }}/verification-process-rejection.json
+            ${{ runner.temp }}/verification-system-identity.json
           if-no-files-found: warn
           retention-days: 7
           overwrite: false
