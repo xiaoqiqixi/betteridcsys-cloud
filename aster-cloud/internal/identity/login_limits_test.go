@@ -1,8 +1,10 @@
 package identity
 
 import (
+	"context"
+	"database/sql"
+	"errors"
 	"testing"
-	"time"
 )
 
 func TestLoginPrefixCanonicalization(t *testing.T) {
@@ -20,14 +22,19 @@ func TestLoginPrefixCanonicalization(t *testing.T) {
 	}
 }
 
-func TestEmailBackoffIsExponentialAndCapped(t *testing.T) {
-	for failures, want := range map[int]time.Duration{
-		0: 0, 1: 100 * time.Millisecond, 2: 200 * time.Millisecond,
-		3: 400 * time.Millisecond, 4: 800 * time.Millisecond,
-		5: 1600 * time.Millisecond, 6: 2 * time.Second, 1000: 2 * time.Second,
-	} {
-		if got := loginBackoff(failures); got != want {
-			t.Errorf("backoff(%d) = %s, want %s", failures, got, want)
-		}
+func TestLoginReservationHonorsCancellation(t *testing.T) {
+	db, err := sql.Open("mysql", "unused:unused@unix(/nonexistent)/aster_cloud_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s, err := New(db, Config{Origin: "https://console.example.invalid"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.reserveLogin(ctx, "192.0.2.11:1234"); !errors.Is(err, context.Canceled) {
+		t.Fatal("cancelled login reservation reached the database", err)
 	}
 }

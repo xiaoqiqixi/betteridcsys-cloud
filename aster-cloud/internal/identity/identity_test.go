@@ -144,7 +144,7 @@ func TestInvalidPeerCannotCreateAnonymousOrAttemptLogin(t *testing.T) {
 		if _, err = s.anonymousSession(context.Background(), peer); err != ErrRateLimited {
 			t.Fatal("invalid peer reached database/session creation", peer, err)
 		}
-		if err = s.reserveLogin(context.Background(), "test@example.invalid", peer); err != ErrRateLimited {
+		if err = s.reserveLogin(context.Background(), peer); err != ErrRateLimited {
 			t.Fatal("invalid login peer", peer, err)
 		}
 	}

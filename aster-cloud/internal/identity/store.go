@@ -414,11 +414,7 @@ func loginIP(addr string) string {
 	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
-func loginFailureBucket(email, prefix string) [32]byte {
-	return tokenHash("login:email-ip:" + email + "\x00" + prefix)
-}
-
-func (s *Service) reserveLogin(ctx context.Context, email, addr string) error {
+func (s *Service) reserveLogin(ctx context.Context, addr string) error {
 	prefix := loginIP(addr)
 	if prefix == "" {
 		return ErrRateLimited
@@ -428,32 +424,29 @@ func (s *Service) reserveLogin(ctx context.Context, email, addr string) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, b := range []struct {
-		key [32]byte
-		max int
-	}{{tokenHash("ip:" + prefix), 40}, {loginFailureBucket(email, prefix), 10}} {
-		h := b.key
-		// ON DUPLICATE KEY UPDATE acquires an exclusive record lock. INSERT
-		// IGNORE + SELECT FOR UPDATE would first take shared duplicate locks and
-		// deadlock concurrent attempts while upgrading them.
-		if _, err = tx.ExecContext(ctx, "INSERT INTO controller_console_login_limits(bucket,window_at,attempts) VALUES(?,?,0) ON DUPLICATE KEY UPDATE bucket=controller_console_login_limits.bucket", h[:], s.now()); err != nil {
-			return err
-		}
-		var start time.Time
-		var attempts int
-		if err = tx.QueryRowContext(ctx, "SELECT window_at,attempts FROM controller_console_login_limits WHERE bucket=? FOR UPDATE", h[:]).Scan(&start, &attempts); err != nil {
-			return err
-		}
-		if !s.now().Before(start.Add(15 * time.Minute)) {
-			start = s.now()
-			attempts = 0
-		}
-		if attempts >= b.max {
-			return ErrRateLimited
-		}
-		if _, err = tx.ExecContext(ctx, "UPDATE controller_console_login_limits SET window_at=?,attempts=? WHERE bucket=?", start, attempts+1, h[:]); err != nil {
-			return err
-		}
+	// The direct peer prefix is the only login rate-limit key. Reserve before
+	// password hashing, including in-flight/aborted attempts; success does not
+	// reset this shared prefix budget. Email failures never delay another peer.
+	h := tokenHash("ip:" + prefix)
+	// ON DUPLICATE KEY UPDATE acquires an exclusive record lock. INSERT IGNORE
+	// followed by FOR UPDATE would deadlock concurrent shared-lock upgrades.
+	if _, err = tx.ExecContext(ctx, "INSERT INTO controller_console_login_limits(bucket,window_at,attempts) VALUES(?,?,0) ON DUPLICATE KEY UPDATE bucket=controller_console_login_limits.bucket", h[:], s.now()); err != nil {
+		return err
+	}
+	var start time.Time
+	var attempts int
+	if err = tx.QueryRowContext(ctx, "SELECT window_at,attempts FROM controller_console_login_limits WHERE bucket=? FOR UPDATE", h[:]).Scan(&start, &attempts); err != nil {
+		return err
+	}
+	if !s.now().Before(start.Add(15 * time.Minute)) {
+		start = s.now()
+		attempts = 0
+	}
+	if attempts >= 40 {
+		return ErrRateLimited
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE controller_console_login_limits SET window_at=?,attempts=? WHERE bucket=?", start, attempts+1, h[:]); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -497,64 +490,12 @@ func (s *Service) reserveAnonymous(ctx context.Context, peer string) error {
 	return tx.Commit()
 }
 
-const maxLoginBackoff = 2 * time.Second
-
-func loginBackoff(failures int) time.Duration {
-	if failures <= 0 {
-		return 0
-	}
-	if failures >= 6 {
-		return maxLoginBackoff
-	}
-	return (100 * time.Millisecond) << (failures - 1)
-}
-
-func (s *Service) waitLoginBackoff(ctx context.Context, email string) error {
-	h := tokenHash("login:email-backoff:" + email)
-	var at time.Time
-	var failures int
-	err := s.db.QueryRowContext(ctx, "SELECT window_at,attempts FROM controller_console_login_limits WHERE bucket=?", h[:]).Scan(&at, &failures)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	// Snapshot once, outside any transaction. More hostile traffic cannot
-	// extend this request's wait, and a valid password can always proceed.
-	delay := min(at.Add(loginBackoff(failures)).Sub(s.now()), maxLoginBackoff)
-	if delay <= 0 {
-		return nil
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (s *Service) recordLoginFailure(ctx context.Context, tx *sql.Tx, email string) error {
-	h := tokenHash("login:email-backoff:" + email)
-	// attempts saturates at the cap; window_at is the last actual failure.
-	// These counters and the failure audit commit together under the identity
-	// lock. Pair reservations include in-flight/aborted checks, preventing a
-	// parallel password-hashing burst, and are cleared on successful login.
-	_, err := tx.ExecContext(ctx, "INSERT INTO controller_console_login_limits(bucket,window_at,attempts) VALUES(?,?,1) ON DUPLICATE KEY UPDATE attempts=IF(window_at<=?,1,LEAST(attempts+1,6)),window_at=?", h[:], s.now(), s.now().Add(-15*time.Minute), s.now())
-	return err
-}
-
 func (s *Service) login(ctx context.Context, email, password, oldToken, addr string) (User, string, error) {
 	normalized, err := normalizeEmail(email)
 	if err != nil {
 		normalized = "invalid"
 	}
-	if err = s.reserveLogin(ctx, normalized, addr); err != nil {
-		return User{}, "", err
-	}
-	if err = s.waitLoginBackoff(ctx, normalized); err != nil {
+	if err = s.reserveLogin(ctx, addr); err != nil {
 		return User{}, "", err
 	}
 	var uid, hash string
@@ -583,9 +524,6 @@ func (s *Service) login(ctx context.Context, email, password, oldToken, addr str
 		}
 	}
 	if !valid || lookupErr != nil || !u.Enabled || currentHash != hash || revision < 1 || u.Revision != revision {
-		if err = s.recordLoginFailure(ctx, tx, normalized); err != nil {
-			return User{}, "", err
-		}
 		target := tokenHash(normalized)
 		if err = audit(ctx, tx, "anonymous", "identity.login_failed", hex.EncodeToString(target[:]), s.now()); err != nil {
 			return User{}, "", err
@@ -609,10 +547,6 @@ func (s *Service) login(ctx context.Context, email, password, oldToken, addr str
 		return User{}, "", err
 	}
 	if err = audit(ctx, tx, u.ID, "identity.login", u.ID, s.now()); err != nil {
-		return User{}, "", err
-	}
-	pair, account := loginFailureBucket(normalized, loginIP(addr)), tokenHash("login:email-backoff:"+normalized)
-	if _, err = tx.ExecContext(ctx, "DELETE FROM controller_console_login_limits WHERE bucket IN (?,?)", pair[:], account[:]); err != nil {
 		return User{}, "", err
 	}
 	return u, raw, tx.Commit()

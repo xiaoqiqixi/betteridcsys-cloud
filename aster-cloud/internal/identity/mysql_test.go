@@ -357,15 +357,15 @@ func TestMySQLConsoleIdentity(t *testing.T) {
 			t.Fatal("administrator credentials changed despite denial")
 		}
 	})
-	t.Run("persistent_parallel_account_and_peer_rate_limits", func(t *testing.T) {
+	t.Run("persistent_parallel_peer_rate_limits", func(t *testing.T) {
 		s, db := mysqlIdentity(t)
 		var good, limited atomic.Int32
 		var wg sync.WaitGroup
-		for range 20 {
+		for range 60 {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				err := s.reserveLogin(context.Background(), "limited@example.invalid", "192.0.2.20:2222")
+				err := s.reserveLogin(context.Background(), "192.0.2.20:2222")
 				if err == nil {
 					good.Add(1)
 				} else if errors.Is(err, ErrRateLimited) {
@@ -376,18 +376,18 @@ func TestMySQLConsoleIdentity(t *testing.T) {
 			}()
 		}
 		wg.Wait()
-		if good.Load() != 10 || limited.Load() != 10 {
-			t.Fatal("parallel account limit not atomic", good.Load(), limited.Load())
+		if good.Load() != 40 || limited.Load() != 20 {
+			t.Fatal("parallel peer limit not atomic", good.Load(), limited.Load())
 		}
 		reopened, _ := New(db, Config{Origin: s.origin})
-		if err := reopened.reserveLogin(context.Background(), "limited@example.invalid", "192.0.2.20:2222"); !errors.Is(err, ErrRateLimited) {
+		if err := reopened.reserveLogin(context.Background(), "192.0.2.20:2222"); !errors.Is(err, ErrRateLimited) {
 			t.Fatal("rate counter lost on restart")
 		}
-		if err := reopened.reserveLogin(context.Background(), "limited@example.invalid", "192.0.2.21:2222"); err != nil {
-			t.Fatal("another peer locked out this account", err)
+		if err := reopened.reserveLogin(context.Background(), "192.0.2.21:2222"); err != nil {
+			t.Fatal("another peer inherited this limit", err)
 		}
 		for i := range 41 {
-			err := s.reserveLogin(context.Background(), strings.Repeat("x", i+1)+"@example.invalid", "192.0.2.30:1234")
+			err := s.reserveLogin(context.Background(), "192.0.2.30:1234")
 			if i < 40 && err != nil {
 				t.Fatal(err)
 			}
@@ -397,7 +397,7 @@ func TestMySQLConsoleIdentity(t *testing.T) {
 		}
 		later := *s
 		later.nowFn = func() time.Time { return time.Now().Add(16 * time.Minute) }
-		if err := later.reserveLogin(context.Background(), "limited@example.invalid", "192.0.2.20:2222"); err != nil {
+		if err := later.reserveLogin(context.Background(), "192.0.2.20:2222"); err != nil {
 			t.Fatal("expired rate window not reset", err)
 		}
 	})
