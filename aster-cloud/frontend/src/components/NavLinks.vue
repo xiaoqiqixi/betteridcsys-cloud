@@ -61,7 +61,7 @@ const links = computed(() =>
       icon: Users,
       permission: "users.manage",
     },
-  ].filter((item) => session.can(item.permission)),
+  ].filter((item) => session.canView(item.permission)),
 );
 function active(item: { path: string; matchPath?: string }) {
   const section = item.matchPath || item.path;

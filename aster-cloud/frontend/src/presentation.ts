@@ -1,6 +1,7 @@
 // Shared presentation only: resource and operation states remain server-owned.
 export type StatusTone = "neutral" | "info" | "good" | "warning" | "danger";
 const labels: Record<string, [string, string, StatusTone]> = {
+  reserved: ["已预留", "Reserved", "info"],
   shutoff: ["已关机", "Shut off", "neutral"],
   sending: ["正在派发", "Sending", "info"],
   dispatched: ["已派发", "Dispatched", "info"],

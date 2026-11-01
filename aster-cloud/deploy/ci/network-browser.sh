@@ -17,6 +17,7 @@ ci="$cloud/deploy/ci"
 python3 -B "$ci/test_members_browser_contract.py"
 node --test "$ci/members-browser.test.mjs"
 node --test "$ci/identity-browser.test.mjs"
+node --test "$ci/verification-browser.test.mjs"
 [[ -f $cloud/frontend/dist/index.html ]] || fail 'Build the real frontend before browser acceptance.'
 [[ -f $ci/network-browser.mjs ]] || fail 'The required UI acceptance script is missing.'
 scratch=$(mktemp -d "$RUNNER_TEMP/aster-network-browser.XXXXXXXX")
@@ -142,7 +143,9 @@ cloud, scratch = map(pathlib.Path, sys.argv[1:])
     str(cloud / 'internal/control/owned_nat_browser_fixture_test.go'):
     str(cloud / 'deploy/ci/network-browser-fixture.gotxt'),
     str(cloud / 'internal/control/owned_identity_browser_fixture_test.go'):
-    str(cloud / 'deploy/ci/identity-browser-fixture.gotxt')
+    str(cloud / 'deploy/ci/identity-browser-fixture.gotxt'),
+    str(cloud / 'internal/control/owned_verification_browser_fixture_test.go'):
+    str(cloud / 'deploy/ci/verification-browser-fixture.gotxt')
 }}))
 PY
 (cd "$cloud" && go test -mod=readonly -race -overlay "$scratch/go-overlay.json" -c -o "$scratch/browser.test" ./internal/control)
@@ -348,3 +351,30 @@ grep -q '^--- PASS: TestOwnedIdentityBrowserFixture ' "$scratch/identity-fixture
 if grep -qE -- '--- (SKIP|FAIL):' "$scratch/identity-fixture.log"; then fail 'Identity fixture must never skip or fail.'; fi
 cp -- "$scratch/identity-fixture.json" "$BROWSER_ARTIFACT_DIR/fixture.json"
 node "$ci/identity-browser-contract.mjs" "$BROWSER_ARTIFACT_DIR"
+
+# Independent read-only verification database. Original identity/network tests
+# and snapshots above remain mandatory and unchanged.
+export BROWSER_ARTIFACT_DIR="$cloud/artifacts/network-browser/verification"
+mkdir "$BROWSER_ARTIFACT_DIR" || fail 'Refuse to mix verification browser evidence.'
+rm -- "$scratch/stop-browser" "$scratch/browser-credentials.json"
+fixture_done=false
+fixture_status=''
+(cd "$cloud/internal/control" && exec "$scratch/browser.test" -test.v -test.count=1 -test.timeout=8m -test.run '^TestOwnedVerificationBrowserFixture$') >"$scratch/verification-fixture.log" 2>&1 &
+fixture_pid=$!
+ready=false
+for ((attempt=0;attempt<900;attempt++)); do
+  if ! kill -0 "$fixture_pid" 2>/dev/null; then break; fi
+  if [[ -s $BROWSER_CREDENTIALS_FILE ]] && grep -q 'READY: verification loopback HTTPS' "$scratch/verification-fixture.log"; then ready=true; break; fi
+  sleep 0.1
+done
+[[ $ready == true ]] || fail 'Minimum SQL verification fixture did not become ready; private diagnostics withheld.'
+curl --fail --silent --show-error --cacert "$scratch/ca.pem" --resolve localhost:5447:127.0.0.1 --max-time 10 "$BASE_URL/" -o /dev/null
+verification_browser_status=0
+node "$ci/verification-browser.mjs" >"$scratch/verification-browser.log" 2>&1 || verification_browser_status=$?
+stop_fixture
+[[ $verification_browser_status == 0 ]] || fail 'Verification browser acceptance failed; inspect only sanitized report.json.'
+[[ $fixture_status == 0 ]] || fail 'Verification database history acceptance failed; private diagnostics withheld.'
+grep -q '^--- PASS: TestOwnedVerificationBrowserFixture ' "$scratch/verification-fixture.log" || fail 'Required verification fixture did not pass.'
+if grep -qE -- '--- (SKIP|FAIL):' "$scratch/verification-fixture.log"; then fail 'Verification fixture must never skip or fail.'; fi
+cp -- "$scratch/verification-fixture.json" "$BROWSER_ARTIFACT_DIR/fixture.json"
+node "$ci/verification-browser-contract.mjs" "$BROWSER_ARTIFACT_DIR"

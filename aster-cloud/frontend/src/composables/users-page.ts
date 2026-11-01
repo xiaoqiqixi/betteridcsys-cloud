@@ -14,7 +14,7 @@ export function useUsersPage() {
   let requested: (string | null)[] = [null];
   let generation = 0,
     abort: AbortController | undefined;
-  const allowed = computed(() => session.can("users.manage"));
+  const allowed = computed(() => session.canView("users.manage"));
   const denied = computed(
     () =>
       !allowed.value ||

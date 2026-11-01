@@ -113,6 +113,14 @@ func TestMySQLVerificationConsoleRejectsBusinessAndIdentityWrites(t *testing.T) 
 	defer server.Close()
 	browser := newConsoleHTTPBrowser(t, server)
 	browser.login(t, admin.Email)
+	statusMode, rawMode := browser.request(t, "GET", "/console/v1/auth/me", "", consoleHTTPOptions{})
+	var sessionMode struct {
+		VerificationMode *bool         `json:"verification_mode"`
+		User             identity.User `json:"user"`
+	}
+	if statusMode != 200 || json.Unmarshal(rawMode, &sessionMode) != nil || sessionMode.VerificationMode == nil || !*sessionMode.VerificationMode || !sessionMode.User.Can("users.manage") {
+		t.Fatal("verification session lacks server-confirmed mode or altered original grants")
+	}
 	before := verificationDatabaseImage(t, store)
 	path := "/console/v1/users"
 	body := consoleHTTPJSON(t, map[string]any{"email": "must-not-exist@example.invalid", "name": "Must not exist", "role": "admin", "password": consoleHTTPPassword, "reason": "Blocked during migration verification"})

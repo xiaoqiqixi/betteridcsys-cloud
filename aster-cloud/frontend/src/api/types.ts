@@ -8,6 +8,7 @@ export interface User {
   revision: number;
 }
 export interface Session {
+  verification_mode?: boolean;
   user: User;
   csrf_token: string;
 }

@@ -59,7 +59,7 @@ const navigationElement = () => commandRail.value?.navigationElement();
 const navigationTrigger = () => commandRail.value?.menuElement();
 const permission = computed(() => route.meta.permission as string | undefined);
 const authorized = computed(
-  () => !permission.value || session.can(permission.value),
+  () => !permission.value || session.canView(permission.value),
 );
 const roleText = computed(() =>
   session.user.value?.role === "admin"
@@ -248,6 +248,21 @@ onBeforeUnmount(() => {
         class="main-content"
         tabindex="-1"
       >
+        <div
+          v-if="session.verificationMode.value"
+          class="callout"
+          role="status"
+        >
+          <strong>{{ tr("迁移验证中", "Migration verification") }}</strong>
+          <p>
+            {{
+              tr(
+                "当前仅供核对数据，暂不能更改配置或操作实例。节点状态为迁移前的记录。",
+                "Review restored data only. Configuration changes and instance actions are unavailable. Node status reflects records from before the migration.",
+              )
+            }}
+          </p>
+        </div>
         <InlineError
           v-if="session.error.value"
           :error="session.error.value"

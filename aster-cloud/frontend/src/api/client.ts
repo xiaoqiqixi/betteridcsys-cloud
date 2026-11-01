@@ -51,6 +51,8 @@ export const validUser = (x: unknown): x is User =>
   x.permissions.every(text);
 export const validSession = (x: unknown): x is Session =>
   record(x) &&
+  (!Object.hasOwn(x, "verification_mode") ||
+    typeof x.verification_mode === "boolean") &&
   validUser(x.user) &&
   text(x.csrf_token) &&
   x.csrf_token.length > 0;

@@ -76,11 +76,7 @@ function canOperate(value: Action) {
     !detail.data.value?.migrations.some(
       (migration) => !["active", "rejected"].includes(migration.phase),
     ) &&
-    actionAllowed(
-      value,
-      instance.value.state,
-      session.user.value?.permissions || [],
-    )
+    actionAllowed(value, instance.value.state, session.permissions.value)
   );
 }
 function choose(value: Action, id = "") {
@@ -139,7 +135,9 @@ function tabKey(event: KeyboardEvent) {
             }}</UiButton
           >
         </header>
-        <InstanceObservationPanel :instance="instance" />
+        <InstanceObservationPanel
+          v-if="!session.verificationMode.value"
+          :instance="instance" />
         <div class="action-toolbar">
           <UiButton :disabled="!canOperate('start')" @click="choose('start')"
             ><Power :size="16" aria-hidden="true" />{{
@@ -221,7 +219,10 @@ function tabKey(event: KeyboardEvent) {
             />
           </template>
           <template v-else-if="tab === 'overview'"
-            ><InstanceMetricsPanel :instance="instance" />
+            ><InstanceMetricsPanel
+              v-if="!session.verificationMode.value"
+              :instance="instance"
+            />
             <div class="detail-grid">
               <article class="content-section">
                 <h2>{{ tr("资源规格", "Resources") }}</h2>
@@ -427,6 +428,7 @@ function tabKey(event: KeyboardEvent) {
           :action="action"
           :artifact-id="artifactId"
           @close="closeAction" /><MigrationWizard
+          v-if="session.can('migration.manage')"
           :open="migrationOpen"
           :instance="instance"
           :migrations="detail.data.value?.migrations || []"

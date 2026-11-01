@@ -1,0 +1,128 @@
+// Overlay-only browser fixture, never linked into a shipped controller.
+// This proves the production read-only HTTP surface with real minimum SQL,
+// not root managed activation or source-host migration.
+package control
+
+import (
+	"aster/cloud/internal/identity"
+	"context"
+	"encoding/json"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestOwnedVerificationBrowserFixture(t *testing.T) {
+	if os.Getenv("ASTER_BROWSER_CI") != "1" {
+		t.Skip("private browser runner only")
+	}
+	caseDir, dist := os.Getenv("ASTER_BROWSER_CASE"), os.Getenv("ASTER_BROWSER_DIST")
+	if !filepath.IsAbs(caseDir) || !filepath.IsAbs(dist) || caseDir == "/" || dist == "/" {
+		t.Fatal("verification browser private paths required")
+	}
+	if info, e := os.Stat(caseDir); e != nil || !info.IsDir() || info.Mode().Perm() != 0700 {
+		t.Fatal("verification browser private scratch required")
+	}
+	store := consoleHTTPStore(t)
+	profile, now := mysqlNode(t, store)
+	config := testConfig(profile)
+	request := testRequest(profile)
+	job, _, e := store.Admit(context.Background(), request, config.Candidates(request), now, time.Minute)
+	if e != nil {
+		t.Fatal("verification browser instance fixture unavailable")
+	}
+	const origin = "https://localhost:5447"
+	provisioner, e := identity.New(store.DB, identity.Config{Origin: origin})
+	if e != nil {
+		t.Fatal("verification browser identity fixture unavailable")
+	}
+	password := "Verify-Browser-" + id() + "!"
+	admin, e := provisioner.Bootstrap(context.Background(), "verification-browser@example.invalid", "迁移核对管理员", []byte(password))
+	if e != nil {
+		t.Fatal("verification browser administrator unavailable")
+	}
+	operation := id()
+	limited := verificationSQLStore(t, store, operation)
+	handler, e := NewVerificationConsole(context.Background(), limited, config, identity.Config{Origin: origin}, operation)
+	if e != nil {
+		t.Fatal("verification browser minimum identity rejected")
+	}
+	files, e := webOwned(dist, uint32(os.Geteuid()))
+	if e != nil {
+		t.Fatal("verification browser reviewed build unavailable")
+	}
+	unchanged := verificationAuthenticationImage(t, store)
+	var writes, nodeReads, logins, logouts atomic.Int32
+	surface := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/console/") || strings.HasPrefix(r.URL.Path, "/v1/") {
+			if r.Method != "GET" && r.Method != "HEAD" {
+				switch r.URL.Path {
+				case "/console/v1/auth/login":
+					logins.Add(1)
+				case "/console/v1/auth/logout":
+					logouts.Add(1)
+				default:
+					writes.Add(1)
+				}
+			}
+			for _, suffix := range []string{"/observation", "/metrics", "/migration-targets"} {
+				if strings.HasSuffix(r.URL.Path, suffix) {
+					nodeReads.Add(1)
+				}
+			}
+			handler.ServeHTTP(w, r)
+			return
+		}
+		files.ServeHTTP(w, r)
+	})
+	listener, e := net.Listen("tcp4", "127.0.0.1:5447")
+	if e != nil {
+		t.Fatal("verification browser loopback listener unavailable")
+	}
+	server := &http.Server{Handler: surface, ReadHeaderTimeout: 5 * time.Second}
+	defer server.Close()
+	done := make(chan error, 1)
+	go func() {
+		done <- server.ServeTLS(listener, filepath.Join(caseDir, "server.pem"), filepath.Join(caseDir, "server.key"))
+	}()
+	credentials, e := json.Marshal(map[string]any{"email": admin.Email, "password": password, "instance_id": job.InstanceID, "actor_id": admin.ID, "operation_id": operation})
+	if e != nil || os.WriteFile(filepath.Join(caseDir, "browser-credentials.json"), credentials, 0600) != nil {
+		t.Fatal("verification browser private handoff unavailable")
+	}
+	t.Log("READY: verification loopback HTTPS, minimum real MySQL; no host activation")
+	timer := time.NewTimer(6 * time.Minute)
+	defer timer.Stop()
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-timer.C:
+			t.Fatal("verification browser bounded lifetime exceeded")
+		case <-done:
+			t.Fatal("verification browser HTTPS stopped early")
+		case <-tick.C:
+			if _, e = os.Stat(filepath.Join(caseDir, "stop-browser")); e != nil {
+				continue
+			}
+			if e = server.Close(); e != nil {
+				t.Fatal("verification browser stop failed")
+			}
+			<-done
+			if writes.Load() != 0 || nodeReads.Load() != 0 || logins.Load() != 1 || logouts.Load() != 1 {
+				t.Fatal("verification browser required readonly interactions unconfirmed")
+			}
+			unchanged()
+			result := map[string]any{"schema": 1, "passed": true, "real_mysql": true, "minimum_sql_identity": true, "business_and_identity_records_unchanged": true, "historical_audit_prefix_unchanged": true, "business_write_attempts": writes.Load(), "forbidden_node_reads": nodeReads.Load(), "login_count": logins.Load(), "logout_count": logouts.Load(), "process_activation": false, "source_host_migration": false, "kvm_ready": false}
+			raw, e := json.MarshalIndent(result, "", "  ")
+			if e != nil || os.WriteFile(filepath.Join(caseDir, "verification-fixture.json"), append(raw, '\n'), 0600) != nil {
+				t.Fatal("verification browser durable proof unavailable")
+			}
+			return
+		}
+	}
+}

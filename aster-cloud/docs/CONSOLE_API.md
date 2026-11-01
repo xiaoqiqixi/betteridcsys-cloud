@@ -22,8 +22,8 @@
 | Method / path | 权限 | 输入 | 成功响应 |
 | --- | --- | --- | --- |
 | GET `/auth/csrf` | 可匿名 | 无 | 200 `{csrf_token}`，必要时建立短期 cookie |
-| POST `/auth/login` | 匿名或已有会话；须 CSRF | `{email,password}` | 200 `{user,csrf_token}`，轮换 cookie |
-| GET `/auth/me` | 已登录 | 无 | 200 `{user,csrf_token}` |
+| POST `/auth/login` | 匿名或已有会话；须 CSRF | `{email,password}` | 200 `{user,csrf_token,verification_mode}`，轮换 cookie |
+| GET `/auth/me` | 已登录 | 无 | 200 `{user,csrf_token,verification_mode}` |
 | POST `/auth/logout` | 已登录；须 CSRF | 无须 body | 204，撤销会话并清 cookie |
 | GET `/roles` | 已登录 | 无 | 200 `{items:[{id,name,permissions}]}` |
 | GET `/users` | `users.manage` | 可选单一 `cursor`；完整键集分页见 [成员分页](MEMBERS_PAGINATION.md) | 200 `{items:[User],limit:100,truncated_possible,next_cursor}` |
@@ -32,6 +32,12 @@
 | PATCH `/users/{user_id}` | `users.manage` 与委派规则 | 必填 `revision,reason`，以及 `email?,name?,password?,role?,enabled?,permissions?`；稳定 key | 200 `{user,operation}` |
 | POST `/users/{user_id}/revoke-sessions` | `users.manage` 与目标委派规则，含本人 | `{revision,reason}`；稳定 key | 200 `{user,operation}`；本人清 cookie |
 | GET `/identity-operations/{key}` | 当前 `users.manage`、原 actor、仍可管理目标 | 无 | 200 `{operation}`；未知/外来404，不证明未执行 |
+
+`verification_mode` 是服务端确认的布尔值：普通控制台为 `false`，受限迁移验证服务为 `true`。
+客户端不能用请求参数或本地偏好开启、关闭它。旧版普通响应可能不含该字段；若出现则必须是布尔值。
+验证模式仍返回账户的原始 `permissions`，不改写角色或授权，但允许的操作取权限与验证阶段限制的交集：
+可查看原本有权访问的本地记录，不可修改成员、配置、实例或派发任务，也不可请求节点实时观测、监控和迁移目标。
+前端须分别处理“可查看成员”和“可编辑成员”，不能因为写操作禁用而隐藏已有数据。真正的拒绝始终由后端执行。
 
 `User` 固定公开字段：`id,email,name,role,enabled,permissions,revision`。没有 password/hash、session token 或内部凭证。用户名邮箱规范化为小写 ASCII 邮箱；name 为 1–100 个 Unicode 字符。所有 user/instance/operation/artifact ID 为 32 位小写 hex；节点 ID 为 root 配置的独立标识。
 

@@ -1,4 +1,4 @@
-import { shallowRef } from "vue";
+import { computed, readonly, shallowRef } from "vue";
 import {
   ApiError,
   emptyResponse,
@@ -10,6 +10,7 @@ import {
 import type { User } from "../api/types";
 export function useSession(api: ApiClient) {
   const user = shallowRef<User | null>(null),
+    verificationMode = shallowRef(false),
     ready = shallowRef(false),
     busy = shallowRef(false),
     error = shallowRef(""),
@@ -20,6 +21,7 @@ export function useSession(api: ApiClient) {
     generation++;
     epoch.value++;
     user.value = null;
+    verificationMode.value = false;
     busy.value = false;
     api.setCSRF("");
   }
@@ -32,8 +34,10 @@ export function useSession(api: ApiClient) {
       pendingAuth.value = null;
       api.setCSRF(data.csrf_token);
       const changed =
+        verificationMode.value !== (data.verification_mode === true) ||
         JSON.stringify(user.value) !==
-        JSON.stringify(data.user.enabled ? data.user : null);
+          JSON.stringify(data.user.enabled ? data.user : null);
+      verificationMode.value = data.verification_mode === true;
       user.value = data.user.enabled ? data.user : null;
       if (!data.user.enabled) api.setCSRF("");
       if (changed) epoch.value++;
@@ -75,6 +79,7 @@ export function useSession(api: ApiClient) {
       if (ticket !== generation) return false;
       if (!data.user.enabled) throw new ApiError("forbidden");
       pendingAuth.value = null;
+      verificationMode.value = data.verification_mode === true;
       user.value = data.user;
       api.setCSRF(data.csrf_token);
       epoch.value++;
@@ -113,8 +118,18 @@ export function useSession(api: ApiClient) {
       busy.value = false;
     }
   }
+  const canView = (permission: string) =>
+    !!user.value?.enabled && user.value.permissions.includes(permission);
+  const permissions = computed(() =>
+    (user.value?.permissions || []).filter(
+      (permission) => !verificationMode.value || permission.endsWith(".read"),
+    ),
+  );
   return {
     user,
+    verificationMode: readonly(verificationMode),
+    permissions,
+    canView,
     ready,
     busy,
     error,
@@ -125,6 +140,7 @@ export function useSession(api: ApiClient) {
     login,
     logout,
     can: (permission: string) =>
-      !!user.value?.enabled && user.value.permissions.includes(permission),
+      canView(permission) &&
+      (!verificationMode.value || permission.endsWith(".read")),
   };
 }

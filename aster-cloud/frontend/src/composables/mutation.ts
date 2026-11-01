@@ -289,6 +289,10 @@ export function useMutation() {
     } = {},
   ): Promise<T | null> {
     if (busy.value) return null;
+    if (session.verificationMode.value) {
+      error.value = "forbidden";
+      return null;
+    }
     const owner = session.user.value?.id,
       identity = session.epoch.value;
     const stillCurrent = () => !options.isCurrent || options.isCurrent();

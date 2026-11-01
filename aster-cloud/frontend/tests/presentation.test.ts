@@ -32,6 +32,16 @@ describe("server state presentation", () => {
       tone: "warning",
     });
   });
+  it("labels a reserved instance in both languages without implying it is running", () => {
+    expect(statusPresentation("reserved", zh)).toEqual({
+      label: "已预留",
+      tone: "info",
+    });
+    expect(statusPresentation("reserved", en)).toEqual({
+      label: "Reserved",
+      tone: "info",
+    });
+  });
   it("shows unrecognized server states without guessing success", () => {
     for (const state of ["new_state", "constructor", "__proto__", "toString"])
       expect(statusPresentation(state, zh)).toEqual({

@@ -464,6 +464,9 @@ jobs:
             aster-cloud/artifacts/network-browser/identity/*.png
             aster-cloud/artifacts/network-browser/identity/report.json
             aster-cloud/artifacts/network-browser/identity/fixture.json
+            aster-cloud/artifacts/network-browser/verification/*.png
+            aster-cloud/artifacts/network-browser/verification/report.json
+            aster-cloud/artifacts/network-browser/verification/fixture.json
           if-no-files-found: warn
           retention-days: 7
           overwrite: false

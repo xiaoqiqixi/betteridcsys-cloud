@@ -144,6 +144,10 @@ export function useOverlayMutation(scope: () => string) {
     options: { key?: string; status?: number } = {},
   ) {
     if (busy.value || !session.user.value) return null;
+    if (session.verificationMode.value) {
+      error.value = "forbidden";
+      return null;
+    }
     const owner = session.user.value.id,
       identity = session.epoch.value,
       target = scope();

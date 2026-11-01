@@ -290,7 +290,7 @@ func (s *Service) Handler() http.Handler {
 				return
 			}
 			s.setCookie(w, token, s.ttl)
-			output(w, 200, map[string]any{"user": u, "csrf_token": csrfToken(token)})
+			output(w, 200, map[string]any{"user": u, "csrf_token": csrfToken(token), "verification_mode": s.verificationLock != ""})
 		case "/console/v1/auth/me":
 			if r.Method != "GET" {
 				failure(w, 405, "METHOD_NOT_ALLOWED")
@@ -299,7 +299,7 @@ func (s *Service) Handler() http.Handler {
 			s.Require("", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				u, _ := Actor(r.Context())
 				raw, _ := sessionCookie(r)
-				output(w, 200, map[string]any{"user": u, "csrf_token": csrfToken(raw)})
+				output(w, 200, map[string]any{"user": u, "csrf_token": csrfToken(raw), "verification_mode": s.verificationLock != ""})
 			})).ServeHTTP(w, r)
 		case "/console/v1/auth/logout":
 			if r.Method != "POST" {
