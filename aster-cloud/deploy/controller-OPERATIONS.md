@@ -174,3 +174,24 @@ previous pin显式恢复迁移，再使用[公网IP后台](../docs/PUBLIC_IP_MAN
 冷迁移源退役是单独确认动作，不自动删源盘；源未知/目标部分完成时不回收地址。
 旧 binary 不认识 schema9/journal5；禁止删新表/绑定/墓碑或清空 active 回滚。
 真实公网、KVM 和整机恢复验收仍须专用宿主完成，不动现有财务服务器网络。
+
+## Automatic dispatch (disabled by default)
+
+The existing `aster-controller serve` daemon and `aster-controller.service`
+also run the automatic dispatcher when the root-owned configuration contains
+`"dispatcher": {"enabled": true}`. Omit it or set `enabled` to `false` for
+manual dispatch. Run `migrate` with the migration identity before starting the
+new binary, then restart the controller service after changing policy. The
+installer imports this setting unchanged; guided configuration accepts the
+boolean `dispatcher_enabled` input and defaults to false.
+
+The dispatcher leases accepted billing jobs and console operations for one
+minute and uses the same workers as `dispatch` and `operation-dispatch`.
+Selection runs every two seconds, serially. The existing database gate keeps
+at most one mutation in flight per node (and therefore per instance), including
+manual workers. A claim commits `sending` before any POST. Lease expiry never
+resets `sending`: subsequent automatic work only reads node status for
+`sending`/`dispatched`. `uncertain` stays quarantined for operator review and
+is never selected automatically. Read-only reconciliation never replays a POST.
+The daemon stops with the API on SIGTERM or the controller migration fence.
+Lease selection and mutation outcomes remain in controller audit.

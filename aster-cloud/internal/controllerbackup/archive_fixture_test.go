@@ -42,7 +42,7 @@ func encryptedSQLFixture(t *testing.T, files map[string][]byte, operation string
 		entries = append(entries, map[string]any{"name": name, "size": len(all[name]), "sha256": hex.EncodeToString(h[:])})
 	}
 	plan := sha256.Sum256(all["source/plan.json"])
-	manifest, e := json.Marshal(map[string]any{"schema": 1, "protocol": "aster.controller-backup/1", "controller_id": "source-sql-test", "operation_id": operation, "source_commit": strings.Repeat("c", 40), "schema_version": 12, "source_plan_sha256": hex.EncodeToString(plan[:]), "files": entries})
+	manifest, e := json.Marshal(map[string]any{"schema": 1, "protocol": "aster.controller-backup/1", "controller_id": "source-sql-test", "operation_id": operation, "source_commit": strings.Repeat("c", 40), "schema_version": 13, "source_plan_sha256": hex.EncodeToString(plan[:]), "files": entries})
 	if e != nil {
 		t.Fatal(e)
 	}

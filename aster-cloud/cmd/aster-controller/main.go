@@ -288,6 +288,12 @@ func run(args []string) error {
 		overlayContext, stopOverlay := context.WithCancel(context.Background())
 		defer func() { stopOverlay(); overlayRunner.Close() }()
 		go overlayRunner.Run(overlayContext)
+		dispatcherDone := make(chan struct{})
+		go func() {
+			defer close(dispatcherDone)
+			control.NewDispatcher(store, config).Run(overlayContext)
+		}()
+		defer func() { stopOverlay(); <-dispatcherDone }()
 		var handler http.Handler = app.Handler()
 		if *consoleOrigin != "" {
 			auth, e := identity.New(store.DB, identity.Config{Origin: *consoleOrigin})

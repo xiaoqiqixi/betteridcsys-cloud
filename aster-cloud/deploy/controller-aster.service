@@ -1,11 +1,12 @@
 [Unit]
-Description=Aster independent controller (explicit provisioning dispatcher)
+Description=Aster controller (root-configured automatic dispatcher)
 After=network-online.target mysql.service
 Wants=network-online.target
 
 [Service]
 Type=simple
 # Reads root-owned policy. Local API never executes VMs; fixed mTLS nodes do.
+# Automatic dispatch runs in this process only with dispatcher.enabled=true.
 # To enable reviewed staff UI use the documented fixed HTTPS Origin and ui-dir
 # override; machine-only remains the default, never an implicit public console.
 # Privilege separation of this API is a documented follow-up, not an implicit claim.

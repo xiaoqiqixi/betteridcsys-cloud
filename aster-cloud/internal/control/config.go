@@ -22,6 +22,7 @@ import (
 )
 
 type Config struct {
+	Dispatcher           DispatcherConfig      `json:"dispatcher,omitzero"`
 	Schema               int                   `json:"schema"`
 	ControllerID         string                `json:"controller_id"`
 	Listen               string                `json:"listen"`

@@ -773,6 +773,8 @@ def validate_guided_inputs(component, inputs):
     host, _ = parse_origin(inputs.get("origin"))
     validate_certificate(inputs.get("certificate", ""), inputs.get("private_key", ""), host)
     if component == "controller":
+        if type(inputs.get("dispatcher_enabled", False)) is not bool:
+            fail("dispatcher_enabled must be an explicit boolean")
         protected_read(inputs.get("tls_ca_file", ""), 1024 * 1024, False)
     listen = inputs.get("listen", "")
     try:
@@ -857,6 +859,8 @@ def generate_approved_configuration(args, version_dir, state_dir):
             run_fixed([str(version_dir / "bin/aster-controller"), "init", "-config", str(seed / "config.json")])
             cfg = strict_json(protected_read(str(seed / "config.json")))
             cfg.update(listen=inputs["listen"], tls_cert_file=str(cert), tls_key_file=str(key), dsn_file=str(dsn))
+            if inputs.get("dispatcher_enabled", False):
+                cfg["dispatcher"] = {"enabled": True}
         approval = {"schema": 1, "component": COMPONENTS[args.component], "config_file": str(config_source),
                     "console_origin": inputs["origin"], "tls_ca_file": str(ca), "dedicated_database": True,
                     "database_name": dsn_raw.decode().strip().rsplit("/", 1)[-1].split("?", 1)[0],
@@ -1214,6 +1218,7 @@ def wizard(args):
                     args.wizard_inputs.update(dsn_file=dsn_choice,
                         migration_dsn_file=ask("Separate root0600 migration DSN file path (blank only if schema already current)"))
                 args.wizard_inputs["administrator_email"] = ask("First administrator email (password is prompted privately at bootstrap)")
+                args.wizard_inputs["dispatcher_enabled"] = ask("Enable automatic dispatch of accepted work? Type enable (blank = manual)") == "enable"
             else:
                 if ask("Confirm dedicated KVM host, never 1GB finance test server. Type dedicated-kvm") != "dedicated-kvm":
                     fail("Dedicated host approval not provided")

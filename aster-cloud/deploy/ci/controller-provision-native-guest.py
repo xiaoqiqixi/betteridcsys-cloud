@@ -228,7 +228,7 @@ def execute(metadata):
     result = json.loads(entry('target-database-plan').stdout)
     require(result['readonly'] and not result['database_restored'] and not result['migration_ready'])
     require(result['plan']['data']['charset'] == 'utf8mb4' and result['plan']['data']['collation'] == 'utf8mb4_bin' and
-            len(result['plan']['data']['tables']) == 34 and result['plan']['data']['rows'] == (18 if restoring else 12))
+            len(result['plan']['data']['tables']) == 35 and result['plan']['data']['rows'] == (19 if restoring else 13))
     require(not (inputs / 'database').exists())
     seal = Path('/var/lib/aster-controller') / controller / 'target-restore.json'
     state = Path('/var/lib/aster-cloud-installer/controller/state.json')
@@ -386,7 +386,7 @@ def execute(metadata):
         imported = json.loads(entry('target-restore').stdout)
         require(imported == {'schema': 1, 'operation_id': operation, 'database_restored': True,
             'read_only_verification': True, 'target_restore_approved': False, 'migration_ready': False,
-            'root_inventory_verified': True, 'data': {'tables': 34, 'rows': 18, 'exact_rows_verified': True,
+            'root_inventory_verified': True, 'data': {'tables': 35, 'rows': 19, 'exact_rows_verified': True,
                 'declared_constraints_verified': True, 'provisioning_marker_preserved': True,
                 'target_activation_approved': False, 'migration_ready': False}})
         # Independent SQL assertions: binary/empty/NULL, Unicode, microseconds,

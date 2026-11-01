@@ -1439,7 +1439,7 @@ class Target(Host):
             require(result.get('schema') == 1 and result.get('operation_id') == self.operation and
                     result.get('database_restored') is True and result.get('read_only_verification') is True and
                     result.get('target_restore_approved') is False and result.get('migration_ready') is False and
-                    data.get('tables') == 34 and data.get('rows') == plan['data']['rows'] and
+                    data.get('tables') == len(plan['data']['tables']) and data.get('rows') == plan['data']['rows'] and
                     all(data.get(k) is True for k in ('exact_rows_verified', 'declared_constraints_verified', 'provisioning_marker_preserved')) and
                     data.get('target_activation_approved') is False and data.get('migration_ready') is False,
                     'TARGET_IMPORTED_DATA_UNCONFIRMED')
