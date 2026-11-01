@@ -48,6 +48,12 @@ func run(args []string) error {
 		return control.ErrInput
 	}
 	command := args[0]
+	if command == "migration-verification-coordinator" {
+		if len(args) != 1 {
+			return control.ErrInput
+		}
+		return verificationCoordinator()
+	}
 	if command == verificationprocess.ChildCommand {
 		if len(args) != 1 {
 			return control.ErrInput

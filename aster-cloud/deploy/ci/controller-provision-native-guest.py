@@ -798,6 +798,7 @@ def execute(metadata):
         process_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(process_module)
         process_module.accept(ROOT, inputs, controller, operation, module, directory, version/'ui', require, progress)
+        process_module.accept_installed_handoff(inputs, operation, module, directory, version, phase_readonly, require, progress)
         # The actual HTTP tests used no login/CSRF creation; original auth and
         # business proofs must remain exactly at the prior phase, without reset.
         runtime_check(phase_readonly)
@@ -933,7 +934,7 @@ def execute(metadata):
             'verification_data_phase_bound', 'verification_data_auth_delta_validated', 'verification_data_drift_refused',
             'verification_data_immutable_intent', 'verification_data_revocation_compatible',
             'verification_runtime_credential_revalidated', 'verification_runtime_preserves_original_phase',
-            'verification_runtime_drift_and_revocation_refused', 'verification_isolated_https_sql', 'verification_static_ui_protected',
+            'verification_runtime_drift_and_revocation_refused', 'verification_isolated_https_sql', 'verification_original_approval_launch', 'verification_static_ui_protected',
             'verification_nonroot_no_new_privileges', 'verification_network_namespace_isolated',
             'verification_network_all_ipv4_tables_empty',
             'verification_stop_expiry_parent_death_drained')})

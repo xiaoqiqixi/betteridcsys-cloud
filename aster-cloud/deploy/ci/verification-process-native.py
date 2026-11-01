@@ -7,8 +7,11 @@ source-host export, successful staff login and browser/UI are NOT certified here
 import base64
 import ctypes
 from datetime import datetime, timedelta, timezone
+import errno
 import fcntl
+import hashlib
 import http.client
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -32,6 +35,172 @@ def empty_ipv4_route_snapshot(raw):
     # single-line text, whitespace, or a route row merely because it is one line.
     header = (b'Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT').ljust(127, b' ') + b'\n'
     return raw == b'' or raw == header
+
+
+def accept_installed_handoff(inputs, operation, module, directory, version, expected_phase, require, progress):
+    """Actual installed ELF + original approval + cleanup + private root channel.
+
+    This fixture deliberately uses UID/GID 65532, not a production OS account.
+    It certifies the root-to-service handoff, not systemd/account installation,
+    source-host migration, successful staff login or browser appearance.
+    """
+    code = 'VERIFICATION_PROCESS_MANAGED_HANDOFF'
+    require(os.geteuid() == 0, code)
+    spec = importlib.util.spec_from_file_location('installed_migration_handoff',
+        version/'templates/host-management/controller-migration.py')
+    manager = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(manager)
+    target = manager.Target(manager.install_module(), operation)
+    binary = version/'bin/aster-controller'
+    dbplan = target.read(inputs/'database-plan.json')
+    arguments = (operation, expected_phase['plan_sha256'], dbplan['data']['charset'], dbplan['data']['collation'])
+    phase = {k:v for k,v in expected_phase.items() if k != 'root_inventory_verified'}
+    expected = {'schema':1,'operation_id':operation,'phase':phase,'credential_verified':True,
+        'sql_identity_verified':True,'readonly':True,'service_started':False,'migration_ready':False}
+    tls = ssl.create_default_context(cafile=str(inputs/'configuration-tls.crt'))
+    tls.minimum_version = ssl.TLSVersion.TLSv1_2
+    processes = []
+    channels = []
+
+    def start():
+        parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        parent.settimeout(180)
+        channels.append(parent)
+        child_fd = child.fileno()
+        def inherited_channel():
+            # FD 3 is replaced only in the disposable child, never the parent.
+            if child_fd != 3:
+                os.dup2(child_fd, 3)
+                os.close(child_fd)
+            os.set_inheritable(3, True)
+        try:
+            process = subprocess.Popen([str(binary), 'migration-verification-coordinator'],
+                pass_fds=tuple(sorted({3, child_fd})), preexec_fn=inherited_channel,
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                cwd='/', env={'PATH':'/usr/bin:/bin','LANG':'C'})
+        finally:
+            child.close()
+        processes.append(process)
+        nonce = os.urandom(32).hex()
+        parent.sendall((json.dumps({'schema':1,'operation_id':operation,'nonce':nonce},
+            separators=(',',':'))+'\n').encode())
+        stream = parent.makefile('rb')
+        channels.append(stream)
+        return process, parent, stream, nonce
+
+    def finish_refused(process, parent, stream, busy=False):
+        stream.close()
+        parent.close()
+        stdout, stderr = process.communicate(timeout=20)
+        require(process.returncode == 1 and not stdout and len(stderr) <= 4096, code)
+        error = json.loads(stderr)
+        require(set(error) == {'time','level','msg','component','code'} and
+            error['code'] == ('CONTROLLER_MIGRATION_BUSY' if busy else 'COMMAND_FAILED') and
+            error['component'] == 'controller' and error['level'] == 'ERROR', code)
+        require(not list(inputs.glob('.restore-verify-*')), code)
+
+    def proof_for(process, stream, nonce):
+        raw = stream.readline((256 << 10) + 2)
+        require(raw.endswith(b'\n') and len(raw) <= (256 << 10) + 1 and process.poll() is None, code)
+        require(target.i.strict_json(raw) == {'schema':1,'nonce':nonce,'proof':expected}, code)
+        # These are real root SQL and installed manifest checks, performed again
+        # while Go holds the original target lock. No cached JSON permits start.
+        require(module.complete_verification_mysql(*arguments, readonly=True) == account, code)
+        manager.verify_installation(target, target.i, target=True)
+        target.verify_verification_data(expected['phase'], target.read(inputs/'plan.json'), dbplan, readonly=True)
+        require(len(list(inputs.glob('.restore-verify-*'))) == 1, code)
+        return hashlib.sha256(raw).hexdigest()
+
+    def ack(parent, nonce, digest, uid=65532):
+        parent.sendall((json.dumps({'schema':1,'nonce':nonce,'proof_sha256':digest,'uid':uid,'gid':65532},
+            separators=(',',':'))+'\n').encode())
+
+    def request(path):
+        with socket.create_connection(('127.0.0.1',9555), timeout=2) as raw:
+            with tls.wrap_socket(raw, server_hostname='source.invalid') as connection:
+                connection.sendall(('GET '+path+' HTTP/1.1\r\nHost: source.invalid:9555\r\nConnection: close\r\n\r\n').encode())
+                response = http.client.HTTPResponse(connection)
+                response.begin()
+                body = response.read((5 << 20) + 1)
+                require(len(body) <= (5 << 20), code)
+                return response.status, body
+
+    def stopped():
+        # Do not count timeout or an arbitrary network error as closed admission.
+        with socket.socket() as probe:
+            probe.settimeout(1)
+            require(probe.connect_ex(('127.0.0.1',9555)) == errno.ECONNREFUSED, code)
+        deadline = time.monotonic()+10
+        user = 'aster_v_'+operation[:23]
+        while True:
+            active = module.mysql_sql(directory,
+                "SELECT COUNT(*) FROM performance_schema.threads WHERE PROCESSLIST_USER='"+user+"';\n")
+            if active.strip() == b'0':
+                return
+            require(time.monotonic() < deadline, code)
+            time.sleep(.1)
+
+    with target.installation_lock(), target.lock('target.lock'):
+        target.unused_host(configuration=True, verification=True)
+        require(target.target_command('verification-runtime-check') == expected, code)
+        account = module.complete_verification_mysql(*arguments, readonly=True)
+        try:
+            progress('target-verification-managed-handoff-refusal')
+            for refusal in ('stale-proof', 'root-child'):
+                process, parent, stream, nonce = start()
+                digest = proof_for(process, stream, nonce)
+                if refusal == 'stale-proof':
+                    digest = '0'*64 if digest != '0'*64 else '1'*64
+                ack(parent, nonce, digest, uid=0 if refusal == 'root-child' else 65532)
+                require(stream.read(1) == b'', code)
+                finish_refused(process, parent, stream)
+                stopped()
+                require(target.target_command('verification-runtime-check') == expected, code)
+
+            progress('target-verification-managed-handoff-serving')
+            process, parent, stream, nonce = start()
+            ack(parent, nonce, proof_for(process, stream, nonce))
+            deadline = time.monotonic()+20
+            while True:
+                require(process.poll() is None and time.monotonic() < deadline, code)
+                try:
+                    status, body = request('/')
+                    break
+                except (ConnectionRefusedError, TimeoutError):
+                    time.sleep(.1)
+            require(status == 200 and body == (version/'ui/index.html').read_bytes(), code)
+            require(not list(inputs.glob('.restore-verify-*')), code)
+            status, body = request('/console/v1/auth/me')
+            require(status == 401 and isinstance(json.loads(body),dict), code)
+
+            # A second coordinator must fail before asking for another approval,
+            # even though its archive, original deadline and operation match.
+            duplicate, other, other_stream, _ = start()
+            require(other_stream.read(1) == b'', code)
+            finish_refused(duplicate, other, other_stream, busy=True)
+            require(request('/')[0] == 200, code)
+
+            progress('target-verification-managed-handoff-stopped')
+            stream.close()
+            parent.close()
+            stdout, stderr = process.communicate(timeout=20)
+            require(process.returncode == 0 and not stdout and not stderr, code)
+            stopped()
+            target.unused_host(configuration=True, verification=True)
+            require(target.target_command('verification-runtime-check') == expected, code)
+            require(module.complete_verification_mysql(*arguments, readonly=True) == account, code)
+            require(not list(inputs.glob('.restore-verify-*')), code)
+        finally:
+            for channel in reversed(channels):
+                channel.close()
+            for process in processes:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=10)
 
 def accept(root, inputs, controller, operation, module, directory, ui_directory, require, progress):
     require(os.geteuid() == 0)
