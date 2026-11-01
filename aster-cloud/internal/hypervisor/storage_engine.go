@@ -110,6 +110,9 @@ func (m *Manager) AcceptStorage(task nodeproto.TypedStorageTask, raw []byte) (no
 		if task.DirectPublic != instance.DirectPublic || instance.DirectPublicDetached || (!instance.DirectPublic.IsZero() && m.approvedDirect(instance.DirectPublic) != nil) {
 			return reject("DIRECT_PUBLIC_STORAGE_BINDING_REJECTED")
 		}
+		if instance.Rescue != nil || instance.GuestChange != nil || instance.Suspended && strings.HasPrefix(task.Action, "migrate_") {
+			return reject("GUEST_LIFECYCLE_STORAGE_CONFLICT")
+		}
 		if !instance.Network.IsZero() {
 			return reject("OVS_STORAGE_CONTRACT_UNSUPPORTED")
 		}

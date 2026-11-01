@@ -215,7 +215,7 @@ Package rules:
   TLS bypass, root sandbox override, upgrade/removal or existing config overwrite.
 - Fixed controller packages: `ca-certificates`, `openssl`; new-server mode adds
   `mysql-server`, `mysql-client`. Fixed node tools: `ca-certificates`, `qemu-utils`,
-  `qemu-system-x86`, `libvirt-clients`, `cloud-image-utils`. There is no arbitrary
+  `qemu-system-x86`, `libvirt-clients`, `cloud-image-utils`, `libguestfs-tools`, `openssl`. There is no arbitrary
   package-name flag. Only explicit libvirt preparation adds
   `libvirt-daemon-system`; the ordinary utility plan refuses daemon packages.
   Simulation refuses upgrades/removals and unrelated firewall/OVS daemons;

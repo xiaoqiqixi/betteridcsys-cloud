@@ -57,6 +57,7 @@ type StorageConfig struct {
 }
 
 type Config struct {
+	Guest                               GuestConfig           `json:"guest,omitzero"`
 	ShutdownTimeoutSeconds              int                   `json:"shutdown_timeout_seconds"`
 	OVSProfiles                         map[string]OVSProfile `json:"ovs_profiles,omitempty"`
 	Storage                             StorageConfig         `json:"storage"`
@@ -160,6 +161,9 @@ func LoadConfig(path string) (Config, error) {
 	return cfg, cfg.Validate()
 }
 func (c Config) Validate() error {
+	if err := c.Guest.validate(c.Images); err != nil {
+		return err
+	}
 	if c.ShutdownTimeoutSeconds < 10 || c.ShutdownTimeoutSeconds > 600 {
 		return errors.New("shutdown_timeout_seconds must be between 10 and 600")
 	}

@@ -52,5 +52,13 @@
     "allow_migration": false,
     "allow_controller_inbox_approval": false,
     "source_certificate_pins": {}
+  },
+  "guest": {
+    "enabled": false,
+    "families": {
+      "ubuntu22": "linux"
+    },
+    "rescue_images": [],
+    "rescue_writable": false
   }
 }

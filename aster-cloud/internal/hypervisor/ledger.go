@@ -30,6 +30,9 @@ type TargetBinding struct {
 	Activated         bool   `json:"activated"`
 }
 type Instance struct {
+	Suspended            bool                          `json:"suspended,omitempty"`
+	Rescue               *RescueState                  `json:"rescue,omitempty"`
+	GuestChange          *GuestChange                  `json:"guest_change,omitempty"`
 	PublicRetired        bool                          `json:"public_retired,omitempty"`
 	DirectPublic         nodeproto.DirectPublicBinding `json:"direct_public,omitzero"`
 	DirectPublicDetached bool                          `json:"direct_public_detached,omitempty"`
@@ -116,7 +119,7 @@ func OpenLedger(directory, nodeID string) (*Ledger, error) {
 			l.Close()
 			return nil, e
 		}
-		if len(raw) > maxJournalBytes || json.Unmarshal(raw, &l.state) != nil || (l.state.Schema != 1 && l.state.Schema != 2 && l.state.Schema != 3 && l.state.Schema != 4 && l.state.Schema != 5 && l.state.Schema != 6) || l.state.NodeID != nodeID || l.state.Operations == nil || l.state.Instances == nil {
+		if len(raw) > maxJournalBytes || json.Unmarshal(raw, &l.state) != nil || (l.state.Schema != 1 && l.state.Schema != 2 && l.state.Schema != 3 && l.state.Schema != 4 && l.state.Schema != 5 && l.state.Schema != 6 && l.state.Schema != 7) || l.state.NodeID != nodeID || l.state.Operations == nil || l.state.Instances == nil {
 			l.Close()
 			return nil, errors.New("invalid journal")
 		}
@@ -262,6 +265,10 @@ func (l *Ledger) Claim(task nodeproto.NodeTask, sha string) (nodeproto.NodeResul
 	if task.Protocol == nodeproto.NetworkProtocol && l.state.Schema < 3 {
 		l.state.Schema = 3
 	}
+	if nodeproto.GuestAction(task.Action) && l.state.Schema < 7 {
+		l.state.Schema = 7
+	}
+	task = task.Redacted()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	l.state.Operations[task.OperationID] = Operation{Task: task, Result: result, CreatedAt: now, UpdatedAt: now}
 	return result, true, l.save()
@@ -303,6 +310,9 @@ func (l *Ledger) Finish(id, status, code string, instance *Instance) (nodeproto.
 	}
 	op.Result.Status = status
 	op.ErrorCode = code
+	if nodeproto.GuestAction(op.Task.Action) {
+		op.Result.Code = code
+	}
 	op.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	l.state.Operations[id] = op
 	if instance != nil {
@@ -359,6 +369,9 @@ func (l *Ledger) validateLoaded() error {
 	ips := map[string]bool{}
 	leases, taps := map[string]bool{}, map[string]bool{}
 	for id, op := range l.state.Operations {
+		if op.Task.Guest.Params.Password != "" || nodeproto.GuestAction(op.Task.Action) && l.state.Schema < 7 {
+			return errors.New("invalid guest journal")
+		}
 		if id != op.Task.OperationID || !op.Result.Matches(op.Task, op.Result.RequestSHA256) || op.Task.NodeID != l.state.NodeID {
 			return errors.New("invalid journal operation identity")
 		}
@@ -376,6 +389,9 @@ func (l *Ledger) validateLoaded() error {
 		}
 	}
 	for id, i := range l.state.Instances {
+		if err := validateGuestInstance(i, l.state.Schema); err != nil {
+			return err
+		}
 		if !nodeproto.ValidID(id) || i.ID != id || !nodeproto.ValidID(i.OwnerRef) || i.Domain != "aster-"+id || filepath.Base(i.Directory) != i.Domain || !filepath.IsAbs(i.Directory) || i.Disk != filepath.Join(i.Directory, "system.qcow2") || (i.Seed != "" && i.Seed != filepath.Join(i.Directory, "seed.iso")) {
 			return errors.New("invalid journal instance identity")
 		}
@@ -426,6 +442,14 @@ func (l *Ledger) validateLoaded() error {
 }
 
 func cloneInstance(i Instance) Instance {
+	if i.Rescue != nil {
+		v := *i.Rescue
+		i.Rescue = &v
+	}
+	if i.GuestChange != nil {
+		v := *i.GuestChange
+		i.GuestChange = &v
+	}
 	if i.SourceFence != nil {
 		f := *i.SourceFence
 		i.SourceFence = &f

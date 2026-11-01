@@ -32,5 +32,5 @@ func (m *Manager) ObserveInstance(ctx context.Context, id string) (nodeproto.Ins
 	if e != nil {
 		return nodeproto.InstanceObservation{}, e
 	}
-	return nodeproto.InstanceObservation{DirectPublic: i.DirectPublic, DirectPublicDetached: i.DirectPublicDetached, Protocol: nodeproto.InstanceProtocol, NodeID: m.Config.NodeID, InstanceID: id, OwnerRef: i.OwnerRef, Hostname: i.Hostname, State: state, IPv4: i.IPv4, MAC: i.MAC, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), SourceFenced: i.SourceFence != nil, TargetPending: i.TargetBinding != nil && !i.TargetBinding.Activated}, nil
+	return nodeproto.InstanceObservation{Suspended: i.Suspended, RescueActive: i.Rescue != nil, DirectPublic: i.DirectPublic, DirectPublicDetached: i.DirectPublicDetached, Protocol: nodeproto.InstanceProtocol, NodeID: m.Config.NodeID, InstanceID: id, OwnerRef: i.OwnerRef, Hostname: i.Hostname, State: state, IPv4: i.IPv4, MAC: i.MAC, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), SourceFenced: i.SourceFence != nil, TargetPending: i.TargetBinding != nil && !i.TargetBinding.Activated}, nil
 }

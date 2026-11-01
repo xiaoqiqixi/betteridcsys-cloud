@@ -91,6 +91,12 @@ func (m *Manager) Doctor(ctx context.Context) DoctorReport {
 		s, e := os.Stat(path)
 		add("binary:"+path, e == nil && s.Mode().IsRegular() && s.Mode().Perm()&0111 != 0)
 	}
+	if m.Config.Guest.Enabled {
+		for _, path := range []string{VirtCustomize, OpenSSL, CloudLocalDS} {
+			st, e := os.Stat(path)
+			add("binary:"+path, e == nil && st.Mode().IsRegular() && st.Mode().Perm()&0111 != 0)
+		}
+	}
 	add("storage_directory", ownedPath(m.Config.StorageDirectory, false, true) == nil)
 	_, e = m.virsh(ctx, "list", "--all", "--name")
 	add("libvirt_system_readonly_query", e == nil)
@@ -213,6 +219,12 @@ func (m *Manager) Capabilities(ctx context.Context) nodeproto.Capabilities {
 		c.Limitations = append(c.Limitations, "Host doctor prerequisites are incomplete; no mutation is advertised.")
 	} else if !c.Maintenance {
 		c.Actions = []string{"create", "start", "shutdown", "reboot", "force_off"}
+		if m.Config.Guest.Enabled {
+			c.Actions = append(c.Actions, "reinstall", "reset_password", "rescue_enter", "rescue_exit", "suspend", "unsuspend", "resize")
+		}
+		if m.Config.Storage.Enabled {
+			c.Actions = append(c.Actions, "snapshot_create", "snapshot_restore", "snapshot_delete")
+		}
 		if c.DirectPublicNetwork != nil {
 			c.Actions = append(c.Actions, "public_adopt", "public_detach")
 		}

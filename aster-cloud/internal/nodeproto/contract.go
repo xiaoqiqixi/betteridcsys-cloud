@@ -3,6 +3,7 @@ package nodeproto
 
 import (
 	"aster/billing/controllerapi"
+	"aster/billing/serviceapi"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -23,6 +24,7 @@ var hostname = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 var digest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type NodeTask struct {
+	Guest        GuestParams             `json:"guest,omitzero"`
 	DirectPublic DirectPublicBinding     `json:"direct_public,omitzero"`
 	Network      NetworkBinding          `json:"network,omitzero"`
 	Protocol     string                  `json:"protocol"`
@@ -40,6 +42,7 @@ type NodeTask struct {
 }
 
 type NodeResult struct {
+	Code          string              `json:"code,omitempty"`
 	Protocol      string              `json:"protocol"`
 	OperationID   string              `json:"operation_id"`
 	RequestSHA256 string              `json:"request_sha256"`
@@ -83,6 +86,12 @@ func (t NodeTask) Valid() bool {
 		return false
 	}
 	if t.Protocol != DirectPublicProtocol && !t.DirectPublic.IsZero() || t.Protocol == DirectPublicProtocol && (!t.Network.IsZero() || !t.DirectPublic.ValidFor(t)) || t.Protocol == Protocol && !t.Network.IsZero() || t.Protocol == NetworkProtocol && !t.Network.ValidFor(t) {
+		return false
+	}
+	if GuestAction(t.Action) {
+		return !t.Force && t.ConfirmInstanceID == "" && t.Guest.Valid(t.Action)
+	}
+	if t.Guest != (GuestParams{}) {
 		return false
 	}
 	switch t.Action {
@@ -149,6 +158,13 @@ func DecodeTask(raw []byte) (NodeTask, error) {
 		allowed["direct_public"] = true
 		b, err := decodeDirectPublic(fields["direct_public"])
 		if err != nil || b != task.DirectPublic {
+			return NodeTask{}, ErrInvalid
+		}
+	}
+	if GuestAction(task.Action) {
+		allowed["guest"] = true
+		var guest GuestParams
+		if len(fields["guest"]) > 0 && (serviceapi.Decode(fields["guest"], &guest) != nil || guest != task.Guest) {
 			return NodeTask{}, ErrInvalid
 		}
 	}

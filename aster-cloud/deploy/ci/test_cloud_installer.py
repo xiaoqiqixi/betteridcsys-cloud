@@ -1389,7 +1389,8 @@ class InstallerContract(unittest.TestCase):
     def test_actual_controller_wizard_collects_inputs_without_writes_or_secret_echo(self):
         args = self.args(extra=("--wizard", "--plan"))
         inputs = self.guided_controller_inputs()
-        responses = ["", "", inputs["origin"], inputs["certificate"], inputs["private_key"], inputs["tls_ca_file"], inputs["listen"], inputs["dsn_file"], "", inputs["administrator_email"]]
+        responses = ["", "", inputs["origin"], inputs["certificate"], inputs["private_key"], inputs["tls_ca_file"], inputs["listen"], inputs["dsn_file"], "", inputs["administrator_email"], ""]
+        inputs["dispatcher_enabled"] = False
         before, output = self.tree(), io.StringIO()
         with mock.patch.object(installer.sys.stdin, "isatty", return_value=True), mock.patch("builtins.input", side_effect=responses), contextlib.redirect_stdout(output):
             result = installer.wizard(args)

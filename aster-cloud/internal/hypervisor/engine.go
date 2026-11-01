@@ -44,7 +44,7 @@ func (b *boundedOutput) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 func (OSRunner) Run(ctx context.Context, binary string, args ...string) ([]byte, error) {
-	if binary != Virsh && binary != QemuImg && binary != CloudLocalDS {
+	if binary != Virsh && binary != QemuImg && binary != CloudLocalDS && binary != VirtCustomize && binary != OpenSSL {
 		return nil, errors.New("binary not approved")
 	}
 	cmd := exec.CommandContext(ctx, binary, args...)
@@ -163,6 +163,9 @@ func (m *Manager) Accept(task nodeproto.NodeTask, raw []byte) (nodeproto.NodeRes
 		}
 		if !instance.Network.IsZero() && task.Action == "reboot" {
 			return reject("OVS_REBOOT_REQUIRES_SHUTDOWN_START")
+		}
+		if code := m.guestAdmission(task, instance); code != "" {
+			return reject(code)
 		}
 		prepared = &instance
 		quarantine := instance
@@ -316,12 +319,18 @@ func (m *Manager) execute(ctx context.Context, task nodeproto.NodeTask, result n
 	if task.Action == "delete" && (!m.Config.AllowDelete || task.ConfirmInstanceID != instance.ID) {
 		return finish("rejected", "DELETE_DISABLED_OR_UNCONFIRMED", nil)
 	}
+	if code := m.guestAdmission(task, instance); code != "" {
+		return finish("rejected", code, nil)
+	}
 	if e := m.assertOwned(ctx, instance); e != nil {
 		return finish("rejected", "LIVE_OWNERSHIP_UNCONFIRMED", nil)
 	}
 	state, e := m.state(ctx, instance.Domain)
 	if e != nil {
 		return finish("uncertain", "DOMAIN_STATE_UNAVAILABLE", nil)
+	}
+	if nodeproto.GuestAction(task.Action) {
+		return m.executeGuest(ctx, task, instance, state)
 	}
 	if !instance.Network.IsZero() && (task.Action == "start" || task.Action == "shutdown" || task.Action == "force_off") {
 		var err error
@@ -872,6 +881,17 @@ type parameterXML struct {
 	Name  string `xml:"name,attr"`
 	Value string `xml:"value,attr"`
 }
+type graphicsXML struct {
+	Type      string `xml:"type,attr"`
+	Listen    string `xml:"listen,attr"`
+	AutoPort  string `xml:"autoport,attr"`
+	Port      int    `xml:"port,attr,omitempty"`
+	Listeners []struct {
+		Type    string `xml:"type,attr"`
+		Address string `xml:"address,attr"`
+	} `xml:"listen"`
+}
+
 type domainXML struct {
 	UUID    string   `xml:"uuid,omitempty"`
 	XMLName xml.Name `xml:"domain"`
@@ -895,6 +915,7 @@ type domainXML struct {
 	OnReboot   string `xml:"on_reboot"`
 	OnCrash    string `xml:"on_crash"`
 	Devices    struct {
+		Graphics   []graphicsXML  `xml:"graphics"`
 		Emulator   string         `xml:"emulator"`
 		Disks      []diskXML      `xml:"disk"`
 		Interfaces []interfaceXML `xml:"interface"`
@@ -925,6 +946,7 @@ func (m *Manager) domainXML(i Instance) ([]byte, error) {
 		d.OnReboot = "destroy"
 		d.Metadata.Instance.NetworkSHA256 = i.Network.Digest()
 	}
+	d.Devices.Graphics = []graphicsXML{{Type: "vnc", Listen: "127.0.0.1", AutoPort: "yes"}}
 	d.Devices.Emulator = Emulator
 	disk := diskXML{Type: "file", Device: "disk"}
 	disk.Driver = &struct {
@@ -943,6 +965,27 @@ func (m *Manager) domainXML(i Instance) ([]byte, error) {
 	disk.Target.Dev = "vda"
 	disk.Target.Bus = "virtio"
 	d.Devices.Disks = append(d.Devices.Disks, disk)
+	if i.Rescue != nil {
+		original := disk
+		original.Target.Dev = "vdb"
+		if !i.Rescue.Writable {
+			original.ReadOnly = &struct{}{}
+			original.Source.SecurityLabel = &diskSecurityLabelXML{Model: "dac", Relabel: "no"}
+		}
+		rescue := i
+		rescue.Disk = rescueDisk(i)
+		rescue.Resources.ImageID = i.Rescue.ImageID
+		backing, e := m.domainBacking(rescue)
+		if e != nil {
+			return nil, e
+		}
+		disk.Source.File = rescue.Disk
+		disk.BackingStore = &backingStoreXML{}
+		if backing != "" {
+			disk.BackingStore = &backingStoreXML{Type: "file", Format: &diskFormatXML{Type: "qcow2"}, Source: &diskSourceXML{File: backing, SecurityLabel: &diskSecurityLabelXML{Model: "dac", Relabel: "no"}}, BackingStore: &backingStoreXML{}}
+		}
+		d.Devices.Disks = []diskXML{disk, original}
+	}
 	if i.Seed != "" {
 		seed := diskXML{Type: "file", Device: "cdrom", ReadOnly: &struct{}{}}
 		seed.Source.File = i.Seed
@@ -1015,6 +1058,19 @@ func (m *Manager) assertOwned(ctx context.Context, i Instance) error {
 	if xml.Unmarshal(raw, &domain) != nil || domain.Type != "kvm" || domain.Name != i.Domain || domain.Metadata.Instance.XMLName.Space != "urn:aster:node:1" || domain.Metadata.Instance.InstanceID != i.ID || domain.Metadata.Instance.OwnerRef != i.OwnerRef || domain.Metadata.Instance.NodeID != m.Config.NodeID {
 		return ErrOwnership
 	}
+	if len(domain.Devices.Graphics) > 1 {
+		return ErrOwnership
+	}
+	for _, g := range domain.Devices.Graphics {
+		if g.Type != "vnc" || g.Listen != "127.0.0.1" {
+			return ErrOwnership
+		}
+		for _, l := range g.Listeners {
+			if l.Type != "address" || l.Address != "127.0.0.1" {
+				return ErrOwnership
+			}
+		}
+	}
 	if domain.VCPU != i.Resources.CPUCores || domain.Devices.Emulator != Emulator || domain.OS.Type.Arch != "x86_64" || domain.OS.Type.Value != "hvm" {
 		return ErrOwnership
 	}
@@ -1039,6 +1095,9 @@ func (m *Manager) assertOwned(ctx context.Context, i Instance) error {
 	if i.Seed != "" {
 		expected = 2
 	}
+	if i.Rescue != nil {
+		expected++
+	}
 	if len(domain.Devices.Disks) != expected {
 		return ErrOwnership
 	}
@@ -1050,7 +1109,7 @@ func (m *Manager) assertOwned(ctx context.Context, i Instance) error {
 		seen[disk.Source.File] = true
 		switch disk.Source.File {
 		case i.Disk:
-			if disk.Device != "disk" || disk.Target.Dev != "vda" || disk.Target.Bus != "virtio" || disk.Driver == nil || disk.Driver.Name != "qemu" || disk.Driver.Type != "qcow2" {
+			if disk.Device != "disk" || disk.Target.Dev != guestSystemDevice(i) || disk.Target.Bus != "virtio" || disk.Driver == nil || disk.Driver.Name != "qemu" || disk.Driver.Type != "qcow2" {
 				return ErrOwnership
 			}
 		case i.Seed:
@@ -1058,6 +1117,11 @@ func (m *Manager) assertOwned(ctx context.Context, i Instance) error {
 				return ErrOwnership
 			}
 		default:
+			if i.Rescue == nil || disk.Source.File != rescueDisk(i) || disk.Device != "disk" || disk.Target.Dev != "vda" || disk.Target.Bus != "virtio" || disk.Driver == nil || disk.Driver.Type != "qcow2" || disk.ReadOnly != nil {
+				return ErrOwnership
+			}
+		}
+		if i.Rescue != nil && disk.Source.File == i.Disk && (disk.ReadOnly != nil) == i.Rescue.Writable {
 			return ErrOwnership
 		}
 	}
@@ -1161,6 +1225,14 @@ func (m *Manager) deletePreflight(ctx context.Context, i Instance) ([]string, er
 		}
 	}
 	paths := []string{}
+	if i.Rescue != nil {
+		path := rescueDisk(i)
+		if err := ownedPath(path, true, false); err != nil {
+			return nil, err
+		}
+		allowed[filepath.Base(path)] = true
+		paths = append(paths, path)
+	}
 	for _, r := range m.Ledger.Recoveries(i.ID) {
 		if !strings.HasPrefix(r.PreviousDiskName, "system.qcow2.before-") || !nodeproto.ValidID(strings.TrimPrefix(r.PreviousDiskName, "system.qcow2.before-")) {
 			return nil, ErrOwnership

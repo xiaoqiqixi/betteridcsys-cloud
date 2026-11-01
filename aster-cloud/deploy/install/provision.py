@@ -33,7 +33,7 @@ MYSQL_SOCKET = "/run/mysqld/mysqld.sock"
 MYSQL_DROPIN = Path("/etc/systemd/system/mysql.service.d/aster-cloud-local-only.conf")
 CODENAMES = {"22.04": "jammy", "24.04": "noble"}
 PACKAGES = {"controller": ("ca-certificates", "openssl"),
-            "node": ("ca-certificates", "qemu-utils", "qemu-system-x86", "libvirt-clients", "cloud-image-utils")}
+            "node": ("ca-certificates", "qemu-utils", "qemu-system-x86", "libvirt-clients", "cloud-image-utils", "libguestfs-tools", "openssl")}
 SYSTEM_SCHEMAS = {"mysql", "sys", "information_schema", "performance_schema"}
 RUNTIME_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE")
 # 002_console_identity creates an FK; MySQL also requires REFERENCES on its

@@ -73,7 +73,9 @@ func (l *Ledger) resolveInstance(i Instance, resolution nodeproto.InstanceResolu
 		return nil, errors.New("no unresolved operation")
 	}
 	// The annotation and observed instance state share one fsynced journal save.
-	l.state.Schema = 6
+	if l.state.Schema < 6 {
+		l.state.Schema = 6
+	}
 	i.State = resolution.ObservedState
 	l.state.Instances[i.ID] = cloneInstance(i)
 	var results []nodeproto.NodeResult

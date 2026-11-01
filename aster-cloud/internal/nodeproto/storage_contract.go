@@ -244,6 +244,8 @@ type StorageFileReceipt struct {
 const InstanceProtocol = "aster.node.instance/1"
 
 type InstanceObservation struct {
+	Suspended            bool                `json:"suspended,omitempty"`
+	RescueActive         bool                `json:"rescue_active,omitempty"`
 	DirectPublic         DirectPublicBinding `json:"direct_public,omitzero"`
 	DirectPublicDetached bool                `json:"direct_public_detached,omitempty"`
 	Protocol             string              `json:"protocol"`
