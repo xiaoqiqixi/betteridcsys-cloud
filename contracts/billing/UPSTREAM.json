@@ -13,12 +13,12 @@
     "contracts/billing/internal/controllers/service.go": "604aad48f809a0d0d24c18bfe6e3659af7048b2b305043e3ef94f43a8a10d81c",
     "contracts/billing/serviceapi/client.go": "114e543f604cdf0c3b95cb5ea4775bd75a30cff4d42d5a71e33d02997f547ad7",
     "contracts/billing/serviceapi/client_test.go": "4b8d8a4db521f7027010c648828f09a60f9c2f83b162546b7cfe8be69cfaac47",
-    "contracts/billing/serviceapi/contract.go": "73224e5d40f5808d982cc1e3b3165033b318b188f478430996ab00f315cd0be6",
+    "contracts/billing/serviceapi/contract.go": "b2cdb996a8ac88a77c6e6c3b3b235d789803b15bb510542ef8c93b3813bb4109",
     "contracts/billing/serviceapi/contract_test.go": "e730ab07ad874ce9d996712204993139085db1c893e2581b197e4a6463060236"
   },
   "protocols": [
     "aster.controller/1",
     "aster.service/1"
   ],
-  "compatibility_note": "Add serviceapi; share single-dial HTTP transport without changing controllerapi wire validation."
+  "compatibility_note": "Add serviceapi and shared pinned transport; optional explicit set_bandwidth resize parameters preserve prior rates when omitted and require bounded directional Mbps. Existing requests retain their canonical bytes."
 }
