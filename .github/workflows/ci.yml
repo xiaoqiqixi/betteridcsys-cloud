@@ -2,6 +2,7 @@ name: Cloud controller and node checks
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,7 +27,10 @@ jobs:
           go-version: '1.27.3'
           cache: false
       - name: Workflow syntax
-        run: bash aster-cloud/deploy/ci/lint-workflows.sh
+        run: |
+          bash aster-cloud/deploy/ci/lint-workflows.sh
+          python3 -B aster-cloud/deploy/ci/test_ci_workflow.py
+          python3 -B aster-cloud/deploy/ci/test_protocol_docs.py
       - name: Real non-login OS identity (not a customer account or service expiry)
         run: |
           set -euo pipefail
@@ -162,6 +166,7 @@ jobs:
           npm audit --audit-level=high
 
   native-libvirt:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Native libvirt preparation (ubuntu-${{ matrix.ubuntu }})
     strategy:
       fail-fast: false
@@ -240,6 +245,7 @@ jobs:
           overwrite: false
 
   native-controller-provision:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Native ${{ matrix.scenario }} (ubuntu-${{ matrix.ubuntu }})
     strategy:
       fail-fast: false
@@ -323,6 +329,7 @@ jobs:
           overwrite: false
 
   native-ovs-parser:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Native OVS parser and encoder (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -369,6 +376,7 @@ jobs:
           # XML validation only: do not start libvirt, define filters or touch host networking.
 
   native-nat:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Native NAT packet flow and revocation (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -406,6 +414,7 @@ jobs:
           fi
 
   native-mysql:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Independent controller MySQL acceptance (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -433,6 +442,7 @@ jobs:
         run: python3 -I aster-cloud/deploy/ci/prepare-cloud-runner.py cleanup
 
   network-browser:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Real MySQL network management browser acceptance
     runs-on: ubuntu-24.04
     # First measured tool provisioning took 21m48s. Keep the actual fixture and

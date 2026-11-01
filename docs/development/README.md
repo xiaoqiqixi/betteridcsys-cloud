@@ -10,7 +10,20 @@
 
 ## 验证与发布
 
-开发检查见下方“本地构建与测试”。[独立仓库 CI](../../.github/workflows/ci.yml)包含 12 项任务：Ubuntu22/24 Go 检查、两个原生 libvirt 准备环境、两个 OVS 解析器环境、两个 NAT 网络命名空间环境、管理台、两个真实 MySQL/systemd 主控环境与真实后端浏览器回归。必须核对同一提交的实际结果，不能把任务已配置视为验收通过。
+开发检查见下方“本地构建与测试”。[独立仓库 CI](../../.github/workflows/ci.yml)定义 8 组任务，矩阵展开后共 **18 项任务**：
+
+| Job ID | 数量 | 覆盖范围 |
+| --- | ---: | --- |
+| `go-unit` | 2 | Ubuntu 22.04/24.04：Go race、vet、构建、最小财务 SDK、部署工具与安全合同 |
+| `frontend` | 1 | Vue 类型、单测、构建、格式与依赖检查 |
+| `native-libvirt` | 2 | Ubuntu 22.04/24.04 签名 guest 中的 libvirt 软件准备 |
+| `native-controller-provision` | 6 | Ubuntu 22.04/24.04 各运行 restore-data、restore-sessions、restore-configuration 三种场景 |
+| `native-ovs-parser` | 2 | Ubuntu 22.04/24.04 原生 OVS 解析与编码 |
+| `native-nat` | 2 | Ubuntu 22.04/24.04 隔离网络命名空间中的 NAT 报文与撤销 |
+| `native-mysql` | 2 | Ubuntu 22.04/24.04 独立 MySQL、race、静态构建与漏洞检查 |
+| `network-browser` | 1 | 真实后端、独立 MySQL 与严格 TLS 浏览器回归 |
+
+main push、同仓库 PR 和手动触发均运行全部 18 项；fork PR 运行两项 Go 检查与一项前端检查，原生/浏览器任务按 job 条件干净跳过。当前 workflow 不使用仓库 secrets，权限固定为 `contents: read`；未来依赖 secrets 的任务也必须保留同仓库门禁。PR 使用普通 `pull_request`，不使用 `pull_request_target` 执行提交代码。concurrency 为 main 的每个提交按 SHA 分组，保留完整运行；其他 ref 按 ref 分组，后续提交取消同组旧运行。必须核对同一提交的实际结果，不能把任务已配置视为验收通过。
 
 主控实库与浏览器任务使用云仓库自己的[隔离 MySQL 测试环境](../../aster-cloud/deploy/ci/native-mysql/README.md)，不需要检出财务实现。浏览器使用临时 Firefox 配置和独立测试 CA，结束后清理，不修改开发者或生产主机的证书信任。
 
