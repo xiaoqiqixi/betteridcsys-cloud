@@ -106,6 +106,7 @@ export interface InstanceDetail {
   migrations: Migration[];
 }
 export interface Node {
+  allocation_disabled?: boolean;
   id: string;
   online: boolean;
   datacenter_id: string;

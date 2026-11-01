@@ -206,7 +206,7 @@ func (s *SQLStore) Check(ctx context.Context) error {
 			return ErrConflict
 		}
 	}
-	for _, query := range []string{"SELECT operation_id,kind,holder,expires_at FROM controller_dispatch_leases LIMIT 0", "SELECT id FROM controller_lock WHERE id=1", "SELECT id,profile_sha256,datacenter_id,maintenance,heartbeat_at,free_cpu,free_memory_mib,free_disk_gib,capabilities,updated_at FROM controller_nodes LIMIT 0", "SELECT " + jobColumns + " FROM controller_jobs LIMIT 0", "SELECT id,owner_ref,node_id,hostname,state,resources,created_at,updated_at FROM controller_instances LIMIT 0", "SELECT operation_id,node_id,cpu,memory_mib,disk_gib,released,created_at FROM controller_reservations LIMIT 0", "SELECT id,actor,action,target,created_at FROM controller_audit LIMIT 0", "SELECT id,state,request_json FROM controller_operations LIMIT 0", "SELECT id,instance_id FROM controller_artifacts LIMIT 0", "SELECT id,phase FROM controller_migrations LIMIT 0"} {
+	for _, query := range []string{"SELECT region_id,policy,updated_at FROM controller_region_placement LIMIT 0", "SELECT node_id,allocation_disabled,updated_at FROM controller_node_allocation LIMIT 0", "SELECT operation_id,kind,holder,expires_at FROM controller_dispatch_leases LIMIT 0", "SELECT id FROM controller_lock WHERE id=1", "SELECT id,profile_sha256,datacenter_id,maintenance,heartbeat_at,free_cpu,free_memory_mib,free_disk_gib,capabilities,updated_at FROM controller_nodes LIMIT 0", "SELECT " + jobColumns + " FROM controller_jobs LIMIT 0", "SELECT id,owner_ref,node_id,hostname,state,resources,created_at,updated_at FROM controller_instances LIMIT 0", "SELECT operation_id,node_id,cpu,memory_mib,disk_gib,released,created_at FROM controller_reservations LIMIT 0", "SELECT id,actor,action,target,created_at FROM controller_audit LIMIT 0", "SELECT id,state,request_json FROM controller_operations LIMIT 0", "SELECT id,instance_id FROM controller_artifacts LIMIT 0", "SELECT id,phase FROM controller_migrations LIMIT 0"} {
 		rows, e := s.DB.QueryContext(ctx, query)
 		if e != nil {
 			return e
@@ -312,6 +312,15 @@ func (s *SQLStore) Admit(ctx context.Context, r controllerapi.Request, candidate
 		return Job{}, false, e
 	}
 	j := Job{OperationID: r.OperationID, OrderID: r.OrderID, ControllerID: r.Product.ControllerID, RequestSHA: digest, RequestJSON: raw, NodeRequest: []byte{}, State: "rejected", CreatedAt: now, UpdatedAt: now}
+	if len(candidates) > 0 {
+		candidates, e = rankCandidates(ctx, tx, candidates)
+		if e != nil {
+			return Job{}, false, e
+		}
+		if len(candidates) == 0 {
+			return Job{}, false, ErrCapacity
+		}
+	}
 	supported := false
 	fresh := false
 	for _, candidate := range candidates {
@@ -586,7 +595,7 @@ func (s *SQLStore) Maintenance(ctx context.Context, node string, on bool) error 
 	return tx.Commit()
 }
 func (s *SQLStore) Nodes(ctx context.Context) ([]NodeView, error) {
-	rows, e := s.DB.QueryContext(ctx, "SELECT n.id,n.datacenter_id,n.maintenance,n.heartbeat_at,n.free_cpu,n.free_memory_mib,n.free_disk_gib,COALESCE(SUM(CASE WHEN r.released=FALSE THEN r.cpu ELSE 0 END),0),COALESCE(SUM(CASE WHEN r.released=FALSE THEN r.memory_mib ELSE 0 END),0),COALESCE(SUM(CASE WHEN r.released=FALSE THEN r.disk_gib ELSE 0 END),0) FROM controller_nodes n LEFT JOIN controller_reservations r ON r.node_id=n.id GROUP BY n.id ORDER BY n.id LIMIT 100")
+	rows, e := s.DB.QueryContext(ctx, "SELECT n.id,n.datacenter_id,n.maintenance,n.heartbeat_at,n.free_cpu,n.free_memory_mib,n.free_disk_gib,COALESCE((SELECT allocation_disabled FROM controller_node_allocation WHERE node_id=n.id),FALSE),COALESCE(SUM(CASE WHEN r.released=FALSE THEN r.cpu ELSE 0 END),0),COALESCE(SUM(CASE WHEN r.released=FALSE THEN r.memory_mib ELSE 0 END),0),COALESCE(SUM(CASE WHEN r.released=FALSE THEN r.disk_gib ELSE 0 END),0) FROM controller_nodes n LEFT JOIN controller_reservations r ON r.node_id=n.id GROUP BY n.id ORDER BY n.id LIMIT 100")
 	if e != nil {
 		return nil, e
 	}
@@ -594,7 +603,7 @@ func (s *SQLStore) Nodes(ctx context.Context) ([]NodeView, error) {
 	out := []NodeView{}
 	for rows.Next() {
 		var n NodeView
-		if e = rows.Scan(&n.ID, &n.DatacenterID, &n.Maintenance, &n.HeartbeatAt, &n.FreeCPU, &n.FreeMemoryMiB, &n.FreeDiskGiB, &n.ReservedCPU, &n.ReservedMemoryMiB, &n.ReservedDiskGiB); e != nil {
+		if e = rows.Scan(&n.ID, &n.DatacenterID, &n.Maintenance, &n.HeartbeatAt, &n.FreeCPU, &n.FreeMemoryMiB, &n.FreeDiskGiB, &n.AllocationDisabled, &n.ReservedCPU, &n.ReservedMemoryMiB, &n.ReservedDiskGiB); e != nil {
 			return nil, e
 		}
 		out = append(out, n)

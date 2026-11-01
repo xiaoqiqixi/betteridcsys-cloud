@@ -114,6 +114,8 @@ export const validNode = (x: unknown): x is Node =>
   text(x.datacenter_id) &&
   typeof x.online === "boolean" &&
   typeof x.maintenance === "boolean" &&
+  (x.allocation_disabled === undefined ||
+    typeof x.allocation_disabled === "boolean") &&
   (x.heartbeat_at === null || text(x.heartbeat_at)) &&
   [
     "free_cpu",

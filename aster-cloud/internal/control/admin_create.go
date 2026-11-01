@@ -56,10 +56,13 @@ func (s *SQLStore) CreateInstance(ctx context.Context, c Config, actor, op strin
 		return Operation{}, false, ErrConflict
 	}
 	candidates := c.Candidates(controllerapi.Request{OwnerRef: in.OwnerRef, Product: controllerapi.ProductSpec{Mode: "preset", ControllerID: c.ControllerID, RemoteProductID: in.PresetID}})
-	if len(candidates) != 1 {
+	if len(candidates) == 0 {
 		return Operation{}, false, ErrInput
 	}
-	candidate := candidates[0]
+	candidate, e := selectCapacityCandidate(ctx, tx, candidates, now, time.Duration(c.HeartbeatTTLSeconds)*time.Second)
+	if e != nil {
+		return Operation{}, false, e
+	}
 	r := candidate.Resources
 	p := candidate.Node
 	task := nodeproto.NodeTask{Protocol: nodeproto.Protocol, OperationID: op, NodeID: p.ID, Action: "create", InstanceID: op, OwnerRef: in.OwnerRef, Hostname: in.Hostname, Resources: r}

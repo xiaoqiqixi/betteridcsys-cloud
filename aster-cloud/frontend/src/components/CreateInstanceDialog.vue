@@ -61,7 +61,7 @@ const accepted = reactive({ id: "", instance: "" });
 const options = computed(() =>
   (presets.data.value?.items || []).map((p) => ({
     value: p.id,
-    label: `${p.id} · ${p.node_id} · ${p.resources.cpu_cores} vCPU / ${sizeMiB(p.resources.memory_mib)} / ${p.resources.system_disk_gib} GiB`,
+    label: `${p.id} · ${p.node_id || p.resources.datacenter_id} · ${p.resources.cpu_cores} vCPU / ${sizeMiB(p.resources.memory_mib)} / ${p.resources.system_disk_gib} GiB`,
   })),
 );
 const valid = computed(

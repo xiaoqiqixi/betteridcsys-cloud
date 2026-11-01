@@ -195,3 +195,26 @@ resets `sending`: subsequent automatic work only reads node status for
 is never selected automatically. Read-only reconciliation never replays a POST.
 The daemon stops with the API on SIGTERM or the controller migration fence.
 Lease selection and mutation outcomes remain in controller audit.
+
+## Regional placement and allocation
+
+Root config opts regions into automatic selection with
+`"placement_regions": ["dc-a"]`. A normal-network preset uses `node_id: ""`
+and resources with `compute_node_id: ""`, the exact `datacenter_id`, optional
+`node_group_id`, and approved image/storage IDs. Custom billing products can
+use the same explicit region selection. Concrete node IDs and VPC bindings
+remain pinned. Placement never substitutes an image, storage or VPC profile.
+
+The Nodes page and `/console/v1/placement` expose each region's policy;
+`POST /console/v1/placement/{region}` with `{"policy":"least_instances"}`
+requires `nodes.manage`. Policies are `least_instances` (default),
+`most_free_memory` (heartbeat free memory minus outstanding reservations), or
+`fill_first` (node ID order until capacity is exhausted). Ties use node ID.
+Ranking, capacity checks and reservations share the `controller_lock`
+transaction for both billing and console creates.
+
+`POST /console/v1/nodes/{node}/allocation` accepts
+`{"allocation_disabled":true}` with `nodes.manage`. This blocks new creates
+and incoming migrations without blocking accepted work or existing-instance
+operations. Maintenance remains a separate, stricter control. Both policy
+changes and allocation changes are audited. GETs never trigger placement.

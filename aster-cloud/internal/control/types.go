@@ -163,17 +163,18 @@ func (j Job) Result() controllerapi.Result {
 }
 
 type NodeView struct {
-	Online            bool       `json:"online"`
-	ID                string     `json:"id"`
-	DatacenterID      string     `json:"datacenter_id"`
-	Maintenance       bool       `json:"maintenance"`
-	HeartbeatAt       *time.Time `json:"heartbeat_at"`
-	FreeCPU           int64      `json:"free_cpu"`
-	FreeMemoryMiB     int64      `json:"free_memory_mib"`
-	FreeDiskGiB       int64      `json:"free_disk_gib"`
-	ReservedCPU       int64      `json:"reserved_cpu"`
-	ReservedMemoryMiB int64      `json:"reserved_memory_mib"`
-	ReservedDiskGiB   int64      `json:"reserved_disk_gib"`
+	AllocationDisabled bool       `json:"allocation_disabled"`
+	Online             bool       `json:"online"`
+	ID                 string     `json:"id"`
+	DatacenterID       string     `json:"datacenter_id"`
+	Maintenance        bool       `json:"maintenance"`
+	HeartbeatAt        *time.Time `json:"heartbeat_at"`
+	FreeCPU            int64      `json:"free_cpu"`
+	FreeMemoryMiB      int64      `json:"free_memory_mib"`
+	FreeDiskGiB        int64      `json:"free_disk_gib"`
+	ReservedCPU        int64      `json:"reserved_cpu"`
+	ReservedMemoryMiB  int64      `json:"reserved_memory_mib"`
+	ReservedDiskGiB    int64      `json:"reserved_disk_gib"`
 }
 type Instance struct {
 	ID        string                  `json:"id"`

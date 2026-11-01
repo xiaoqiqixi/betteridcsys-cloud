@@ -45,7 +45,7 @@ func (c Console) Handler() http.Handler {
 			return
 		}
 		permission := "instances.read"
-		if path == "/console/v1/nodes" || strings.HasPrefix(path, "/console/v1/nodes/") || strings.HasPrefix(path, "/console/v1/networks/") || strings.HasPrefix(path, "/console/v1/overlays/") || strings.HasPrefix(path, "/console/v1/public-ips/") {
+		if strings.HasPrefix(path, "/console/v1/placement") || path == "/console/v1/nodes" || strings.HasPrefix(path, "/console/v1/nodes/") || strings.HasPrefix(path, "/console/v1/networks/") || strings.HasPrefix(path, "/console/v1/overlays/") || strings.HasPrefix(path, "/console/v1/public-ips/") {
 			permission = "nodes.read"
 		}
 		if path == "/console/v1/audit" {
@@ -96,6 +96,10 @@ func (c Console) resource(w http.ResponseWriter, r *http.Request) {
 	user, ok := identity.Actor(ctx)
 	if !ok {
 		failure(w, 401, "AUTH_REQUIRED")
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/console/v1/placement") || strings.HasPrefix(r.URL.Path, "/console/v1/nodes/") && strings.HasSuffix(r.URL.Path, "/allocation") {
+		c.placement(w, r)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/console/v1/public-ingress-operations/") || strings.HasPrefix(r.URL.Path, "/console/v1/instances/") && strings.HasSuffix(r.URL.Path, "/public-ingress") {

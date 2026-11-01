@@ -310,6 +310,13 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 		resources.ComputeNodeID = target.ID
 		resources.DatacenterID = target.DatacenterID
 		resources.NodeGroupID = target.GroupID
+		allowed, err := allocationAllowed(ctx, tx, target.ID)
+		if err != nil {
+			return Operation{}, false, err
+		}
+		if !allowed {
+			return Operation{}, false, ErrCapacity
+		}
 		var maintenance bool
 		var seen sql.NullTime
 		var profile string

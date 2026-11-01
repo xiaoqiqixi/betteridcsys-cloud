@@ -22,6 +22,7 @@ import (
 )
 
 type Config struct {
+	PlacementRegions     []string              `json:"placement_regions,omitempty"`
 	Dispatcher           DispatcherConfig      `json:"dispatcher,omitzero"`
 	Schema               int                   `json:"schema"`
 	ControllerID         string                `json:"controller_id"`
@@ -255,6 +256,16 @@ func (c Config) Valid() bool {
 		}
 		seen[n.ID] = true
 	}
+	if len(c.PlacementRegions) > 64 {
+		return false
+	}
+	regions := map[string]bool{}
+	for _, region := range c.PlacementRegions {
+		if !c.hasRegion(region) || regions[region] {
+			return false
+		}
+		regions[region] = true
+	}
 	if !c.validNodeMaterials() || !c.validOverlayClusters() {
 		return false
 	}
@@ -276,6 +287,13 @@ func (c Config) Valid() bool {
 	for _, p := range c.Presets {
 		n, ok := c.Node(p.NodeID)
 		spec := controllerapi.ProductSpec{Mode: "custom", ControllerID: c.ControllerID, Resources: &p.Resources}
+		if p.NodeID == "" {
+			if !identifier.MatchString(p.ID) || presetSeen[p.ID] || !spec.Valid() || p.Resources.ComputeNodeID != "" || p.Resources.NetworkType != "normal" || p.NetworkProfileID != "" || !contains(c.PlacementRegions, p.Resources.DatacenterID) {
+				return false
+			}
+			presetSeen[p.ID] = true
+			continue
+		}
 		if !identifier.MatchString(p.ID) || presetSeen[p.ID] || !ok || !spec.Valid() || p.Resources.ComputeNodeID != n.ID || p.Resources.DatacenterID != n.DatacenterID || p.Resources.NodeGroupID != n.GroupID {
 			return false
 		}
@@ -375,6 +393,10 @@ func (c Config) Candidates(r controllerapi.Request) []Candidate {
 	if r.Product.Mode == "preset" {
 		for _, p := range c.Presets {
 			if p.ID == r.Product.RemoteProductID {
+				if p.NodeID == "" && p.Resources.ComputeNodeID == "" && p.Resources.NetworkType == "normal" {
+					resources := p.Resources
+					return c.Candidates(controllerapi.Request{OwnerRef: r.OwnerRef, Product: controllerapi.ProductSpec{Mode: "custom", ControllerID: c.ControllerID, Resources: &resources}})
+				}
 				n, ok := c.Node(p.NodeID)
 				if ok {
 					if candidate, ok := add(n, p.Resources, p.NetworkProfileID); ok {
@@ -407,8 +429,23 @@ func (c Config) Candidates(r controllerapi.Request) []Candidate {
 			return nil
 		}
 	}
-	// This first vertical slice requires explicit concrete IDs. It never silently
-	// maps a custom node group, storage, bandwidth or VPC to a different resource.
+	// Region placement is explicit: an omitted compute node selects only normal
+	// network nodes in the named region/group, with the same image and storage.
+	if wanted.ComputeNodeID == "" && wanted.NetworkType == "normal" && wanted.DatacenterID != "" && contains(c.PlacementRegions, wanted.DatacenterID) {
+		out := []Candidate{}
+		for _, n := range c.Nodes {
+			if n.DatacenterID != wanted.DatacenterID || wanted.NodeGroupID != "" && n.GroupID != wanted.NodeGroupID || c.directRequired(n.ID) {
+				continue
+			}
+			resources := wanted
+			resources.ComputeNodeID, resources.NodeGroupID = n.ID, n.GroupID
+			if candidate, ok := add(n, resources, ""); ok {
+				out = append(out, candidate)
+			}
+		}
+		return out
+	}
+	// Concrete and VPC selections retain their exact approved bindings.
 	for _, n := range c.Nodes {
 		if wanted.ComputeNodeID == n.ID && wanted.DatacenterID == n.DatacenterID && wanted.NodeGroupID == n.GroupID {
 			if candidate, ok := add(n, wanted, profileID); ok {

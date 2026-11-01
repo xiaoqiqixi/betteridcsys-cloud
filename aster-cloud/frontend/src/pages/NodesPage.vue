@@ -11,6 +11,8 @@ import UiButton from "../components/UiButton.vue";
 import UiOverlay from "../components/UiOverlay.vue";
 import StateBlock from "../components/StateBlock.vue";
 import StatusBadge from "../components/StatusBadge.vue";
+import AllocationToggle from "../components/AllocationToggle.vue";
+import PlacementPanel from "../components/PlacementPanel.vue";
 import InlineError from "../components/InlineError.vue";
 const {
   prefs: { tr, locale },
@@ -167,6 +169,7 @@ async function save() {
                     tr("维护", "Maintenance")
                   }}
                 </UiButton>
+                <AllocationToggle :node="node" @saved="list.reload" />
               </td>
             </tr>
           </tbody>
@@ -251,8 +254,8 @@ async function save() {
               }}
             </UiButton>
           </footer>
-        </article>
-      </div></StateBlock
+          <AllocationToggle :node="node" @saved="list.reload" />
+        </article></div></StateBlock
     ><UiOverlay
       :open="!!selected"
       :title="
@@ -298,6 +301,7 @@ async function save() {
         ></template
       ></UiOverlay
     >
+    <PlacementPanel />
   </section>
 </template>
 <style scoped>
