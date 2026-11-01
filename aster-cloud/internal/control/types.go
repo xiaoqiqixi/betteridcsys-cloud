@@ -28,7 +28,7 @@ func (c Capability) Supports(r controllerapi.Resources, node NodeProfile) bool {
 	return c.SupportsNetwork(r, node, "")
 }
 func vpcResources(r controllerapi.Resources) bool {
-	return r.NetworkType == "vpc" && r.IPv4Count == 1 && r.IPv6Count == 0 && r.BandwidthMbps >= 1 && r.BandwidthMbps <= 100000 && r.InboundBandwidthMbps >= 1 && r.InboundBandwidthMbps <= 100000 && r.TransferGiB == 0 && r.TrafficDirection == "all"
+	return r.NetworkType == "vpc" && r.IPv4Count == 1 && r.IPv6Count == 0 && r.BandwidthMbps >= 1 && r.BandwidthMbps <= 100000 && r.InboundBandwidthMbps >= 1 && r.InboundBandwidthMbps <= 100000 && r.TransferGiB >= 0 && r.TransferGiB <= 1073741824 && (r.TrafficDirection == "all" || r.TrafficDirection == "in" || r.TrafficDirection == "out")
 }
 
 func (c Capability) SupportsNetwork(r controllerapi.Resources, node NodeProfile, profileID string) bool {
@@ -36,14 +36,13 @@ func (c Capability) SupportsNetwork(r controllerapi.Resources, node NodeProfile,
 	base := spec.Valid() && c.Protocol == nodeproto.Protocol && c.NodeID == node.ID && !c.Maintenance && c.Hypervisor == "libvirt-kvm" &&
 		r.ComputeNodeID == node.ID && r.DatacenterID == node.DatacenterID && r.NodeGroupID == node.GroupID &&
 		contains(c.ImageIDs, r.ImageID) && contains(c.StorageIDs, r.SystemStorageID) && r.DataDiskGiB == 0 && r.DataStorageID == "" && contains(c.Actions, "create")
-	if !base || !c.validNetworkCapabilities() {
+	if !base || !c.validNetworkCapabilities() || !supportsTraffic(c, r) {
 		return false
 	}
 	if profileID != "" {
 		return vpcResources(r) && contains(c.NetworkProfiles, nodeproto.OVSNetworkCapability) && contains(c.OVSNetworkProfiles, profileID) && containsInt(c.IPv4Counts, 1) && containsInt(c.IPv6Counts, 0)
 	}
-	return r.NetworkType == "normal" && r.IPv4Count == 1 && r.IPv6Count == 0 && contains(c.NetworkProfiles, "normal-static-ipv4-dedicated-bridge") && supportsNormalBandwidth(c, r) && r.TransferGiB == 0 &&
-		r.TrafficDirection == "all" && containsInt(c.IPv4Counts, r.IPv4Count) && containsInt(c.IPv6Counts, r.IPv6Count) &&
+	return r.NetworkType == "normal" && r.IPv4Count == 1 && r.IPv6Count == 0 && contains(c.NetworkProfiles, "normal-static-ipv4-dedicated-bridge") && supportsNormalBandwidth(c, r) && containsInt(c.IPv4Counts, r.IPv4Count) && containsInt(c.IPv6Counts, r.IPv6Count) &&
 		containsInt(c.BandwidthMbps, 0) && containsInt(c.TransferGiB, 0) && contains(c.Actions, "create")
 }
 
@@ -124,6 +123,7 @@ type OverlayAdmission struct {
 	HeartbeatTTLSeconds int              `json:"-"`
 }
 type Candidate struct {
+	TrafficPolicy        *TrafficPolicy
 	DirectPublicRequired bool
 	Overlay              *OverlayAdmission
 	Node                 NodeProfile

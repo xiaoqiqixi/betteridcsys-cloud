@@ -131,7 +131,7 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 		return files, count, e
 	}
 	files, count, e := capture()
-	if e != nil || len(files) != 42 || count < 17 {
+	if e != nil || len(files) != 45 || count < 18 {
 		t.Fatal("complete source snapshot unavailable", e, len(files), count)
 	}
 	var schema controllerbackup.DatabaseSchema
@@ -197,7 +197,7 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 		var err error
 		dataPlan, err = a.PlanDatabase(ctx)
 		return err
-	}); err != nil || dataPlan.Schema != 1 || dataPlan.Charset != "utf8mb4" || dataPlan.Collation != "utf8mb4_bin" || len(dataPlan.Tables) != 41 || dataPlan.Rows != count {
+	}); err != nil || dataPlan.Schema != 1 || dataPlan.Charset != "utf8mb4" || dataPlan.Collation != "utf8mb4_bin" || len(dataPlan.Tables) != 44 || dataPlan.Rows != count {
 		t.Fatal("authenticated data plan must preserve source encoding and complete row inventory", err, dataPlan)
 	}
 	restore := func() (controllerbackup.DatabaseRestoreReport, error) {
@@ -266,7 +266,7 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 		t.Fatal("cannot restore authenticated fixture")
 	}
 	report, e := restore()
-	if e != nil || report.Tables != 41 || report.Rows != count || !report.ExactRowsVerified || !report.DeclaredConstraintsVerified || report.TargetActivationApproved || report.MigrationReady {
+	if e != nil || report.Tables != 44 || report.Rows != count || !report.ExactRowsVerified || !report.DeclaredConstraintsVerified || report.TargetActivationApproved || report.MigrationReady {
 		t.Fatal("exact database restore did not pass, or claimed activation", e, report)
 	}
 	compareTarget := func() {
@@ -339,7 +339,7 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 			t.Fatal("orphan FK was accepted or reported successful", e, report)
 		}
 		var tables int
-		if target.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()").Scan(&tables) != nil || tables != 41 {
+		if target.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()").Scan(&tables) != nil || tables != 44 {
 			t.Fatal("test did not reach the actual migrated SQL target")
 		}
 		for name := range files {
@@ -350,7 +350,7 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 			var count int
 			want := 0
 			if table == "controller_schema" {
-				want = 16
+				want = 17
 			} else if table == "controller_lock" || table == "controller_identity_lock" {
 				want = 1
 			}
@@ -487,11 +487,11 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 					{"SELECT COUNT(*) FROM controller_nodes", 0},
 					{"SELECT COUNT(*) FROM controller_console_users", 0},
 					{"SELECT COUNT(*) FROM controller_console_sessions", 0},
-					{"SELECT COUNT(*) FROM controller_schema", 16},
+					{"SELECT COUNT(*) FROM controller_schema", 17},
 					{"SELECT COUNT(*) FROM controller_lock", 1},
 					{"SELECT COUNT(*) FROM controller_identity_lock", 1},
 					{"SELECT COUNT(*) FROM aster_installer_ownership", 1},
-					{"SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()", 42},
+					{"SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()", 45},
 				} {
 					var got int
 					if target.DB.QueryRowContext(ctx, check.query).Scan(&got) != nil || got != check.want {
@@ -507,12 +507,12 @@ func TestMySQLMigrationSnapshotPreservesTypedBytes(t *testing.T) {
 				}
 				return
 			}
-			if e != nil || report.Tables != 41 || report.Rows != count || !report.ExactRowsVerified || !report.ProvisioningMarkerPreserved || report.TargetActivationApproved || report.MigrationReady {
+			if e != nil || report.Tables != 44 || report.Rows != count || !report.ExactRowsVerified || !report.ProvisioningMarkerPreserved || report.TargetActivationApproved || report.MigrationReady {
 				t.Fatal("marked empty target restore not verified", e, report)
 			}
 			var gotNonce, gotServer string
 			var tables int
-			if target.DB.QueryRowContext(ctx, "SELECT nonce,server_uuid FROM aster_installer_ownership WHERE id=1").Scan(&gotNonce, &gotServer) != nil || gotNonce != nonce || gotServer != server || target.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()").Scan(&tables) != nil || tables != 42 {
+			if target.DB.QueryRowContext(ctx, "SELECT nonce,server_uuid FROM aster_installer_ownership WHERE id=1").Scan(&gotNonce, &gotServer) != nil || gotNonce != nonce || gotServer != server || target.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()").Scan(&tables) != nil || tables != 45 {
 				t.Fatal("restore lost or replaced its own marker")
 			}
 			var raw []byte

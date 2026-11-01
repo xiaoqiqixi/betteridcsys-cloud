@@ -24,17 +24,18 @@ var hostname = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 var digest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type NodeTask struct {
-	Guest        GuestParams             `json:"guest,omitzero"`
-	DirectPublic DirectPublicBinding     `json:"direct_public,omitzero"`
-	Network      NetworkBinding          `json:"network,omitzero"`
-	Protocol     string                  `json:"protocol"`
-	OperationID  string                  `json:"operation_id"`
-	NodeID       string                  `json:"node_id"`
-	Action       string                  `json:"action"`
-	InstanceID   string                  `json:"instance_id"`
-	OwnerRef     string                  `json:"owner_ref"`
-	Hostname     string                  `json:"hostname"`
-	Resources    controllerapi.Resources `json:"resources"`
+	TrafficControl TrafficControl          `json:"traffic_control,omitzero"`
+	Guest          GuestParams             `json:"guest,omitzero"`
+	DirectPublic   DirectPublicBinding     `json:"direct_public,omitzero"`
+	Network        NetworkBinding          `json:"network,omitzero"`
+	Protocol       string                  `json:"protocol"`
+	OperationID    string                  `json:"operation_id"`
+	NodeID         string                  `json:"node_id"`
+	Action         string                  `json:"action"`
+	InstanceID     string                  `json:"instance_id"`
+	OwnerRef       string                  `json:"owner_ref"`
+	Hostname       string                  `json:"hostname"`
+	Resources      controllerapi.Resources `json:"resources"`
 	// Delete additionally requires the operator-configured allow_delete and this exact ID.
 	ConfirmInstanceID string `json:"confirm_instance_id,omitempty"`
 	// Force permits destroy only after an observed graceful reboot timeout.
@@ -79,6 +80,10 @@ func (r InstanceResolution) Valid() bool {
 func ValidID(value string) bool     { return hexID.MatchString(value) }
 func ValidNodeID(value string) bool { return nodeID.MatchString(value) }
 func (t NodeTask) Valid() bool {
+	if !t.TrafficControl.Valid() || t.Action != TrafficControlAction && t.TrafficControl != (TrafficControl{}) {
+		return false
+	}
+
 	if t.Force && t.Action != "reboot" {
 		return false
 	}
@@ -95,7 +100,7 @@ func (t NodeTask) Valid() bool {
 		return false
 	}
 	switch t.Action {
-	case "create", "start", "shutdown", "reboot", "force_off":
+	case "create", "start", "shutdown", "reboot", "force_off", TrafficControlAction:
 		return t.ConfirmInstanceID == ""
 	case "public_adopt", "public_detach":
 		return t.Protocol == DirectPublicProtocol && t.ConfirmInstanceID == t.InstanceID
@@ -165,6 +170,13 @@ func DecodeTask(raw []byte) (NodeTask, error) {
 		allowed["guest"] = true
 		var guest GuestParams
 		if len(fields["guest"]) > 0 && (serviceapi.Decode(fields["guest"], &guest) != nil || guest != task.Guest) {
+			return NodeTask{}, ErrInvalid
+		}
+	}
+	if task.Action == TrafficControlAction {
+		allowed["traffic_control"] = true
+		var control TrafficControl
+		if len(fields["traffic_control"]) > 0 && (serviceapi.Decode(fields["traffic_control"], &control) != nil || control != task.TrafficControl) {
 			return NodeTask{}, ErrInvalid
 		}
 	}

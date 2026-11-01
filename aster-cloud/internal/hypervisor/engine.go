@@ -58,7 +58,8 @@ func (OSRunner) Run(ctx context.Context, binary string, args ...string) ([]byte,
 }
 
 type Manager struct {
-	domainKind          string // test-only TCG backend; production always defaults to KVM
+	domainKind          string                 // test-only TCG backend; production always defaults to KVM
+	readTrafficBootID   func() ([]byte, error) // production nil: native kernel boot identity
 	readOverlaySnapshot func(fabric.OverlayConfig) (overlayproto.Snapshot, string, error)
 	loadOVSConfig       func(string) (fabric.Config, error)  // nil in production
 	ovsFactory          func(fabric.Config) (ovsGate, error) // deterministic test seam
@@ -178,8 +179,19 @@ func (m *Manager) acceptGuest(task nodeproto.NodeTask, raw []byte, password stri
 		if !instance.Network.IsZero() && task.Action == "reboot" {
 			return reject("OVS_REBOOT_REQUIRES_SHUTDOWN_START")
 		}
+		if code := m.trafficAdmission(task, instance); code != "" {
+			return reject(code)
+		}
 		if code := m.guestAdmission(task, instance); code != "" {
 			return reject(code)
+		}
+		if m.Config.AllowTrafficAccounting {
+			sample, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			e := m.sampleTrafficInstance(sample, instance)
+			cancel()
+			if e != nil {
+				return reject("TRAFFIC_SNAPSHOT_UNCONFIRMED")
+			}
 		}
 		prepared = &instance
 		quarantine := instance
@@ -342,6 +354,9 @@ func (m *Manager) execute(ctx context.Context, task nodeproto.NodeTask, result n
 	state, e := m.state(ctx, instance.Domain)
 	if e != nil {
 		return finish("uncertain", "DOMAIN_STATE_UNAVAILABLE", nil)
+	}
+	if task.Action == nodeproto.TrafficControlAction && prepared != nil {
+		return m.executeTrafficControl(ctx, task, *prepared)
 	}
 	if nodeproto.GuestAction(task.Action) {
 		return m.executeGuest(ctx, task, instance, state)
@@ -525,7 +540,7 @@ func (m *Manager) prepareWithRetired(t nodeproto.NodeTask, allowRetired bool) (I
 	if _, ok := c.Images[r.ImageID]; !ok {
 		return Instance{}, ErrUnsupported
 	}
-	if r.SystemStorageID != c.StorageID || r.DataDiskGiB != 0 || r.DataStorageID != "" || r.TransferGiB != 0 || r.IPv6Count != 0 || r.TrafficDirection != "all" {
+	if r.SystemStorageID != c.StorageID || r.DataDiskGiB != 0 || r.DataStorageID != "" || r.IPv6Count != 0 || !c.allowsTraffic(r) {
 		return Instance{}, ErrUnsupported
 	}
 	if !t.DirectPublic.IsZero() {
@@ -1019,7 +1034,7 @@ func (m *Manager) domainXML(i Instance) ([]byte, error) {
 		nic.Source.Bridge = m.Config.Network.Bridge
 		nic.Model.Type = "virtio"
 		if i.Network.IsZero() {
-			nic.Bandwidth = bandwidthFor(i.Resources)
+			nic.Bandwidth = bandwidthFor(effectiveBandwidth(i))
 			if !i.DirectPublic.IsZero() {
 				nic.Link = &nicLinkXML{State: "up"}
 				if i.DirectPublicDetached || i.SourceFence != nil {
@@ -1157,7 +1172,7 @@ func (m *Manager) assertOwned(ctx context.Context, i Instance) error {
 			return ErrOwnership
 		}
 		nic := domain.Devices.Interfaces[0]
-		if !bandwidthMatches(nic.Bandwidth, bandwidthFor(i.Resources)) {
+		if !bandwidthMatches(nic.Bandwidth, bandwidthFor(effectiveBandwidth(i))) {
 			return ErrOwnership
 		}
 		if nic.Type != "bridge" || nic.MAC.Address != i.MAC || nic.Source.Bridge != m.Config.Network.Bridge || nic.Port == nil || nic.Filter == nil || nic.VirtualPort != nil || nic.Port.Isolated != "yes" || nic.Model.Type != "virtio" || nic.Filter.Filter != m.Config.Network.Filter {

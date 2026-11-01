@@ -63,7 +63,7 @@ func (n NetworkBinding) ValidFor(t NodeTask) bool {
 		return false
 	}
 	r := t.Resources
-	return n.VLANID >= 1 && n.VLANID <= 4094 && n.MAC == NetworkMAC(n.NodeID, n.InstanceID) && n.InterfaceID == NetworkInterfaceID(n.InstanceID) && n.InboundMbps >= 1 && n.InboundMbps <= 100000 && n.OutboundMbps >= 1 && n.OutboundMbps <= 100000 && r.NetworkType == "vpc" && r.IPv4Count == 1 && r.IPv6Count == 0 && r.BandwidthMbps == n.OutboundMbps && r.InboundBandwidthMbps == n.InboundMbps && r.TransferGiB == 0 && r.TrafficDirection == "all"
+	return n.VLANID >= 1 && n.VLANID <= 4094 && n.MAC == NetworkMAC(n.NodeID, n.InstanceID) && n.InterfaceID == NetworkInterfaceID(n.InstanceID) && n.InboundMbps >= 1 && n.InboundMbps <= 100000 && n.OutboundMbps >= 1 && n.OutboundMbps <= 100000 && r.NetworkType == "vpc" && r.IPv4Count == 1 && r.IPv6Count == 0 && r.BandwidthMbps == n.OutboundMbps && r.InboundBandwidthMbps == n.InboundMbps && r.TransferGiB >= 0 && r.TransferGiB <= 1073741824 && (r.TrafficDirection == "all" || r.TrafficDirection == "in" || r.TrafficDirection == "out")
 }
 func decodeNetworkBinding(raw json.RawMessage) (NetworkBinding, error) {
 	var n NetworkBinding

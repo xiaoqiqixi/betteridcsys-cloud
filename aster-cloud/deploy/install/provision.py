@@ -21,7 +21,7 @@ import subprocess
 import time
 import xml.etree.ElementTree as ET
 
-RESTORED_CONTROLLER_TABLES = 42  # All controller tables plus the installer ownership marker.
+RESTORED_CONTROLLER_TABLES = 45  # All controller tables plus the installer ownership marker.
 
 APT_GET = "/usr/bin/apt-get"
 MYSQL = "/usr/bin/mysql"

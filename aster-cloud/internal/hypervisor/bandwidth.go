@@ -34,16 +34,21 @@ func bandwidthFor(r controllerapi.Resources) *bandwidthXML {
 	return b
 }
 func bandwidthMatches(a, b *bandwidthXML) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	equal := func(a, b *bandwidthRateXML) bool {
-		if a == nil || b == nil {
-			return a == b
+	// libvirt may serialize a cleared limit as an absent/empty bandwidth element
+	// or an average of zero; all mean unlimited in that direction.
+	rate := func(r *bandwidthRateXML) uint64 {
+		if r == nil {
+			return 0
 		}
-		return a.Average == b.Average
+		return r.Average
 	}
-	return equal(a.Inbound, b.Inbound) && equal(a.Outbound, b.Outbound)
+	if a == nil {
+		a = &bandwidthXML{}
+	}
+	if b == nil {
+		b = &bandwidthXML{}
+	}
+	return rate(a.Inbound) == rate(b.Inbound) && rate(a.Outbound) == rate(b.Outbound)
 }
 func (c Config) allowsBandwidth(r controllerapi.Resources) bool {
 	if r.BandwidthMbps < 0 || r.BandwidthMbps > 100000 || r.InboundBandwidthMbps < 0 || r.InboundBandwidthMbps > 100000 {

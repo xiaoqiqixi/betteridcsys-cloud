@@ -36,7 +36,7 @@ func TestControllerArchiveInspection(t *testing.T) {
 		"controller/config.json":    []byte("{}\n"), "source/installation.json": []byte("{}\n"),
 		"source/plan.json": []byte("{}\n"), "source/isolated.json": []byte("{}\n"),
 	}
-	// Independent inventory from the version-15 SQL migrations.
+	// Independent inventory from the version-17 SQL migrations.
 	for _, name := range strings.Fields(`controller_schema controller_lock controller_nodes controller_instances
 controller_jobs controller_reservations controller_audit controller_identity_lock controller_console_users
 controller_console_sessions controller_console_login_limits controller_identity_audit controller_operations
@@ -44,7 +44,7 @@ controller_artifacts controller_migrations controller_network_vpcs controller_ne
 controller_instance_networks controller_overlay_vpcs controller_overlay_epochs controller_overlay_tasks controller_overlay_members
 controller_public_ip_pools controller_public_ip_inventory controller_public_ip_leases controller_public_ip_active
 controller_public_ip_operations controller_public_ip_resources controller_public_ip_resource_operations controller_public_ip_bindings
-controller_public_ingress_versions controller_public_ingress_operations controller_identity_operations controller_dispatch_leases controller_region_placement controller_node_allocation controller_metrics controller_metric_cursors controller_service_operations controller_service_state`) {
+controller_public_ingress_versions controller_public_ingress_operations controller_identity_operations controller_dispatch_leases controller_region_placement controller_node_allocation controller_metrics controller_metric_cursors controller_service_operations controller_service_state controller_traffic_policies controller_traffic_samples controller_traffic`) {
 		files["database/"+name+".jsonl"] = nil
 	}
 	names := make([]string, 0, len(files))
@@ -62,7 +62,7 @@ controller_public_ingress_versions controller_public_ingress_operations controll
 	manifest, _ := json.Marshal(map[string]any{
 		"schema": 1, "protocol": "aster.controller-backup/1", "controller_id": "source-one",
 		"operation_id": strings.Repeat("a", 32), "source_commit": strings.Repeat("b", 40),
-		"schema_version": 16, "source_plan_sha256": planDigest, "files": entries,
+		"schema_version": 17, "source_plan_sha256": planDigest, "files": entries,
 	})
 	var plain bytes.Buffer
 	tw := tar.NewWriter(&plain)
@@ -125,7 +125,7 @@ controller_public_ingress_versions controller_public_ingress_operations controll
 	}
 	var report map[string]any
 	if json.Unmarshal(out, &report) != nil || report["authenticated"] != true || report["content_integrity_verified"] != true ||
-		report["controller_id"] != "source-one" || report["entries"] != float64(47) || report["data_semantics_verified"] != false ||
+		report["controller_id"] != "source-one" || report["entries"] != float64(50) || report["data_semantics_verified"] != false ||
 		report["target_restore_approved"] != false || report["migration_ready"] != false {
 		t.Fatalf("container proof must not claim restore approval: %s", out)
 	}

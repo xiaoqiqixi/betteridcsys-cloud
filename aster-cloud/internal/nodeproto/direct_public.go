@@ -52,7 +52,7 @@ func (b DirectPublicBinding) ValidIdentity() bool {
 }
 func (b DirectPublicBinding) ValidFor(t NodeTask) bool {
 	r := t.Resources
-	return b.ValidIdentity() && b.NodeID == t.NodeID && b.OwnerRef == t.OwnerRef && b.InstanceID == t.InstanceID && r.NetworkType == "normal" && r.IPv4Count == 1 && r.IPv6Count == 0 && r.BandwidthMbps >= 0 && r.BandwidthMbps <= 100000 && r.InboundBandwidthMbps >= 0 && r.InboundBandwidthMbps <= 100000 && r.TransferGiB == 0 && r.TrafficDirection == "all"
+	return b.ValidIdentity() && b.NodeID == t.NodeID && b.OwnerRef == t.OwnerRef && b.InstanceID == t.InstanceID && r.NetworkType == "normal" && r.IPv4Count == 1 && r.IPv6Count == 0 && r.BandwidthMbps >= 0 && r.BandwidthMbps <= 100000 && r.InboundBandwidthMbps >= 0 && r.InboundBandwidthMbps <= 100000 && r.TransferGiB >= 0 && r.TransferGiB <= 1073741824 && (r.TrafficDirection == "all" || r.TrafficDirection == "in" || r.TrafficDirection == "out")
 }
 func decodeDirectPublic(raw json.RawMessage) (DirectPublicBinding, error) {
 	var b DirectPublicBinding

@@ -30,6 +30,7 @@ type TargetBinding struct {
 	Activated         bool   `json:"activated"`
 }
 type Instance struct {
+	TrafficControl       nodeproto.TrafficControl      `json:"traffic_control,omitzero"`
 	Suspended            bool                          `json:"suspended,omitempty"`
 	Rescue               *RescueState                  `json:"rescue,omitempty"`
 	GuestChange          *GuestChange                  `json:"guest_change,omitempty"`
@@ -62,6 +63,7 @@ type Operation struct {
 const maxJournalBytes = 64 << 20
 
 type journal struct {
+	Traffic           map[string]trafficRecord         `json:"traffic,omitempty"`
 	PublicRetirements map[string]PublicRetirement      `json:"public_retirements,omitempty"`
 	NetworkRecoveries map[string]networkRecoveryRecord `json:"network_recoveries,omitempty"`
 	InboxTransfers    map[string]InboxTransfer         `json:"inbox_transfers,omitempty"`
@@ -119,7 +121,7 @@ func OpenLedger(directory, nodeID string) (*Ledger, error) {
 			l.Close()
 			return nil, e
 		}
-		if len(raw) > maxJournalBytes || json.Unmarshal(raw, &l.state) != nil || (l.state.Schema < 1 || l.state.Schema > bandwidthJournalSchema) || l.state.NodeID != nodeID || l.state.Operations == nil || l.state.Instances == nil {
+		if len(raw) > maxJournalBytes || json.Unmarshal(raw, &l.state) != nil || (l.state.Schema < 1 || l.state.Schema > trafficJournalSchema) || l.state.NodeID != nodeID || l.state.Operations == nil || l.state.Instances == nil {
 			l.Close()
 			return nil, errors.New("invalid journal")
 		}
@@ -258,6 +260,9 @@ func (l *Ledger) Claim(task nodeproto.NodeTask, sha string) (nodeproto.NodeResul
 	if (task.Network.IsZero() && hasBandwidth(task.Resources) || task.Guest.Params.SetBandwidth) && l.state.Schema < bandwidthJournalSchema {
 		l.state.Schema = bandwidthJournalSchema
 	}
+	if (task.Action == nodeproto.TrafficControlAction || task.Resources.TransferGiB > 0 || task.Resources.TrafficDirection != "all") && l.state.Schema < trafficJournalSchema {
+		l.state.Schema = trafficJournalSchema
+	}
 	result := nodeproto.NodeResult{Protocol: task.Protocol, OperationID: task.OperationID, RequestSHA256: sha, InstanceID: task.InstanceID, Status: "accepted"}
 	if task.Force && l.state.Schema < 6 {
 		l.state.Schema = 6
@@ -369,16 +374,31 @@ func (l *Ledger) Instance(id string) (Instance, bool) {
 }
 
 func (l *Ledger) validateLoaded() error {
+	for id, record := range l.state.Traffic {
+		i, ok := l.state.Instances[id]
+		if !ok || l.state.Schema < trafficJournalSchema || record.Runtime == "" || record.Revision == 0 || !trafficView(l.state.NodeID, i, record).Valid() {
+			return errors.New("invalid traffic journal")
+		}
+		for _, day := range record.Days {
+			if day.Revision > record.Revision {
+				return errors.New("future traffic revision")
+			}
+		}
+	}
+
 	if err := l.validateNetworkRecoveries(); err != nil {
 		return err
 	}
 	ips := map[string]bool{}
 	leases, taps := map[string]bool{}, map[string]bool{}
 	for id, op := range l.state.Operations {
+		if op.Task.Action == nodeproto.TrafficControlAction && l.state.Schema < trafficJournalSchema {
+			return errors.New("traffic control needs schema 9")
+		}
 		if op.Task.Guest.Params.Password != "" || nodeproto.GuestAction(op.Task.Action) && l.state.Schema < 7 {
 			return errors.New("invalid guest journal")
 		}
-		if (op.Task.Network.IsZero() && hasBandwidth(op.Task.Resources) || op.Task.Guest.Params.SetBandwidth) && l.state.Schema < bandwidthJournalSchema {
+		if op.Task.Guest.Params.SetBandwidth && l.state.Schema < bandwidthJournalSchema {
 			return errors.New("bandwidth task needs journal 8")
 		}
 		if id != op.Task.OperationID || !op.Result.Matches(op.Task, op.Result.RequestSHA256) || op.Task.NodeID != l.state.NodeID {
@@ -398,6 +418,12 @@ func (l *Ledger) validateLoaded() error {
 		}
 	}
 	for id, i := range l.state.Instances {
+		if (i.Resources.TransferGiB > 0 || i.Resources.TrafficDirection != "all") && l.state.Schema < trafficJournalSchema {
+			return errors.New("accounted instance needs schema 9")
+		}
+		if !i.TrafficControl.Valid() || i.TrafficControl != (nodeproto.TrafficControl{}) && l.state.Schema < trafficJournalSchema {
+			return errors.New("invalid traffic control journal")
+		}
 		if err := validateGuestInstance(i, l.state.Schema); err != nil {
 			return err
 		}

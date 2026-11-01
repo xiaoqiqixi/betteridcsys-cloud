@@ -15,6 +15,7 @@ export function sizeMiB(value: number) {
     : `${value} MiB`;
 }
 export const actionNames: Record<string, [string, string]> = {
+  traffic_policy: ["流量策略", "Traffic policy"],
   create: ["创建实例", "Create instance"],
   public_adopt: ["接纳实例公网地址", "Adopt VM public address"],
   public_detach: ["解除实例公网地址", "Detach VM public address"],

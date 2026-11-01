@@ -78,7 +78,7 @@ func (s *SQLStore) CreateInstance(ctx context.Context, c Config, actor, op strin
 		return Operation{}, false, ErrCapacity
 	}
 	var caps Capability
-	if maintenance || !seen.Valid || !heartbeatFresh(&seen.Time, now, time.Duration(c.HeartbeatTTLSeconds)*time.Second) || profile != candidate.ProfileSHA || !strict(capsRaw, &caps) || !caps.SupportsNetwork(r, p, candidate.NetworkProfileID) {
+	if maintenance || !seen.Valid || !heartbeatFresh(&seen.Time, now, time.Duration(c.HeartbeatTTLSeconds)*time.Second) || profile != candidate.ProfileSHA || !strict(capsRaw, &caps) || !caps.SupportsNetwork(r, p, candidate.NetworkProfileID) || !presetTrafficSupported(c, in.PresetID, caps, r.NetworkType) {
 		return Operation{}, false, ErrCapacity
 	}
 	if in.PublicIPResourceID != "" {
@@ -98,6 +98,9 @@ func (s *SQLStore) CreateInstance(ctx context.Context, c Config, actor, op strin
 		return Operation{}, false, ErrCapacity
 	}
 	if _, e = tx.ExecContext(ctx, "INSERT INTO controller_instances(id,owner_ref,node_id,hostname,state,resources,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", op, in.OwnerRef, p.ID, in.Hostname, "reserved", mustJSON(r), now, now); e != nil {
+		return Operation{}, false, e
+	}
+	if e = presetTrafficPolicy(ctx, tx, c, op, in.PresetID, now); e != nil {
 		return Operation{}, false, e
 	}
 	task, e = bindCreateNetwork(ctx, tx, task, candidate, now)

@@ -141,7 +141,7 @@ func TestResolveFailsClosed(t *testing.T) {
 	}
 }
 func TestResolvedJournalCannotBeDowngradedOrOpenedAsFutureSchema(t *testing.T) {
-	for _, schema := range []int{5, bandwidthJournalSchema + 1} {
+	for _, schema := range []int{5, trafficJournalSchema + 1} {
 		t.Run(string(rune('0'+schema)), func(t *testing.T) {
 			m, _, task := uncertainReboot(t)
 			if _, err := m.resolveInstance(context.Background(), task.InstanceID, "Verified original VM", 0); err != nil {

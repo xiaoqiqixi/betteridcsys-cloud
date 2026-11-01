@@ -257,3 +257,66 @@ and cursors older than 30 days, including those for deleted instances.
 `SQLStore.QueryMetrics(ctx, instanceID, range, now)` is read-only and returns the
 `aster.service/1` model for `1h`, `24h`, `7d` or `30d` with explicit null gaps.
 The existing live console metrics GET continues to perform no database writes.
+
+### Traffic periods and overage operations
+
+Enable `allow_traffic_accounting: true` in the root-owned node configuration,
+`telemetry: {"enabled": true}` in the controller, and the dispatcher described
+above for automatic enforcement. All are opt-in. No HTTP GET or reconciliation
+call starts sampling or changes a limit. Node serving samples owned NICs once per
+minute with the allow-listed `virsh domid` and `virsh domifstat` commands, and
+captures a final sample before normal power/guest mutations. A failed final
+sample refuses that mutation. Sampling stops while another mutation is active
+or the instance is quarantined.
+
+Schema 9 journals keep a persistent random stream ID, host boot/domain identity,
+raw counters and 62 days of UTC daily cumulative revisions. The first sample
+establishes a baseline; enabling accounting does not bill earlier traffic.
+Counter decreases are resets unless they cross the near-uint64 wrap boundary;
+a new host boot/domain identity always resets the baseline to the new counters.
+Intervals crossing midnight belong to the observation day, so boundary precision
+is the sampling interval. Traffic between the last successful sample and an
+unobserved domain crash cannot be reconstructed. The console shows the last
+sample time, including absent/stale samples, instead of presenting no data as
+measured zero.
+
+`SQLStore.AggregateTraffic` checks node/owner binding and applies only the
+increase in each `(instance, node, stream, day)` revision inside `controller_lock`.
+`controller_traffic` retains totals per instance and billing period; retained
+source-node journals are also collected after migration. Replaying any snapshot
+is idempotent. `ServiceTraffic` and `ServiceMetrics` now supply CL-3's authenticated
+`aster.service/1` reads without write side effects.
+
+Each root preset may specify `traffic_policy`, for example:
+
+```json
+{"reset_day":15,"direction":"both","limit_bytes":107374182400,"overage_policy":"throttle:10"}
+```
+
+Without an override, reset day is 1 (UTC), direction maps product `all` to `both`,
+quota is `transfer_gib * 1073741824` (0 means unlimited), and overage is `none`.
+The console's instance bandwidth/traffic panel and
+`GET/POST /console/v1/instances/{id}/traffic` expose these settings. The console
+API uses decimal **strings** for byte counts/limits to preserve uint64 values in
+JavaScript; the root JSON example above uses numeric bytes. Writes require
+`instances.manage` and the existing session/CSRF checks. Reset day can change
+before any nonzero samples; afterwards it is fixed to avoid rewriting billed
+history. Days 29–31 clamp to the last day of a shorter month. Policy changes
+are blocked while an earlier enforcement operation remains unresolved.
+
+`none`, `throttle:<1–100000 Mbps>` and `suspend` are enforced by ordinary durable
+`traffic_policy` operations, with the same sending fence, node journal and audit
+trail as manual work. Policy/period/placement-bound IDs prevent duplicate work;
+accepted actions past their period end are refused by the node. A lost command
+acknowledgement remains uncertain and needs operator resolution. A new period
+queues a separate clear operation; it never starts a stopped VM or clears a
+billing suspension. Throttle caps each direction at the smaller of its product
+limit and the overage rate. Normal NIC changes apply both live and persistent
+libvirt limits and verify readback. Active traffic controls block cold migration
+until cleared, so migration cannot discard an override.
+
+OVS products continue to use their existing pinned fabric meters for provisioned
+bandwidth and support traffic accounting/suspension. The fabric has no live meter
+resize contract; dynamic overage throttling and guest resize are explicitly
+unsupported for OVS. The API refuses that policy and the console reports the
+capability rather than accepting an unenforced rate.

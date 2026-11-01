@@ -12,9 +12,11 @@ import (
 )
 
 type OperationInput struct {
-	Force   bool                  `json:"force,omitempty"`
-	Guest   nodeproto.GuestParams `json:"guest,omitzero"`
-	service *serviceIntent        `json:"-"`
+	trafficEnforcement *trafficEnforcementIntent `json:"-"`
+	TrafficControl     nodeproto.TrafficControl  `json:"traffic_control,omitzero"`
+	Force              bool                      `json:"force,omitempty"`
+	Guest              nodeproto.GuestParams     `json:"guest,omitzero"`
+	service            *serviceIntent            `json:"-"`
 
 	Action       string `json:"action"`
 	Confirmation string `json:"confirmation"`
@@ -68,7 +70,7 @@ type Migration struct {
 
 func OperationPermission(action string) string {
 	switch action {
-	case "create", "start", "shutdown", "public_adopt", "public_detach":
+	case "create", "start", "shutdown", "public_adopt", "public_detach", nodeproto.TrafficControlAction:
 		return "instances.manage"
 	case "reboot", "force_off", "delete", "reinstall", "reset_password", "rescue_enter", "rescue_exit", "suspend", "unsuspend", "resize":
 		return "instances.dangerous"
@@ -96,6 +98,9 @@ func dangerous(action string) bool {
 	return false
 }
 func (in OperationInput) valid(instance string) bool {
+	if !in.TrafficControl.Valid() || in.Action != nodeproto.TrafficControlAction && in.TrafficControl != (nodeproto.TrafficControl{}) {
+		return false
+	}
 	if in.Force && in.Action != "reboot" {
 		return false
 	}
@@ -225,6 +230,9 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 	if e != nil {
 		return Operation{}, false, e
 	}
+	if e = trafficEnforcementGateTx(ctx, tx, v, in.trafficEnforcement, now); e != nil {
+		return Operation{}, false, e
+	}
 	if v.State != "created" && v.State != "shutoff" && !nodeproto.ValidObservedState(v.State) {
 		return Operation{}, false, ErrState
 	}
@@ -286,10 +294,11 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 		st.DirectPublic = direct
 	}
 	switch in.Action {
-	case "start", "shutdown", "reboot", "force_off", "delete", "reinstall", "reset_password", "rescue_enter", "rescue_exit", "suspend", "unsuspend", "resize":
+	case "start", "shutdown", "reboot", "force_off", "delete", "reinstall", "reset_password", "rescue_enter", "rescue_exit", "suspend", "unsuspend", "resize", nodeproto.TrafficControlAction:
 		t := nodeproto.NodeTask{Protocol: nodeproto.Protocol, OperationID: op, NodeID: v.NodeID, Action: in.Action, InstanceID: v.ID, OwnerRef: v.OwnerRef, Hostname: v.Hostname, Resources: v.Resources}
 		t.Force = in.Force
 		t.Guest = in.Guest
+		t.TrafficControl = in.TrafficControl
 		if !network.IsZero() {
 			t.Protocol, t.Network = nodeproto.NetworkProtocol, network
 		}
@@ -299,6 +308,23 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 		}
 		if in.Action == "delete" {
 			t.ConfirmInstanceID = v.ID
+		}
+		if t.Action == nodeproto.TrafficControlAction {
+			var raw []byte
+			var caps Capability
+			if e = tx.QueryRowContext(ctx, "SELECT capabilities FROM controller_nodes WHERE id=?", v.NodeID).Scan(&raw); e != nil {
+				return Operation{}, false, e
+			}
+			policy := TrafficPolicy{OveragePolicy: "none"}
+			if t.TrafficControl.Suspended {
+				policy.OveragePolicy = "suspend"
+			}
+			if t.TrafficControl.ThrottleMbps > 0 {
+				policy.OveragePolicy = "throttle:"
+			}
+			if !strict(raw, &caps) || !trafficPolicySupported(caps, policy, v.Resources.NetworkType) {
+				return Operation{}, false, ErrState
+			}
 		}
 		if !c.approvesTaskNetwork(t) {
 			return Operation{}, false, ErrState
@@ -661,6 +687,15 @@ func (s *SQLStore) CompleteOperation(ctx context.Context, c Config, op, status s
 		}
 		state := ""
 		switch o.Action {
+		case nodeproto.TrafficControlAction:
+			task, err := nodeproto.DecodeTask(o.Request)
+			if err != nil {
+				return Operation{}, ErrState
+			}
+			if task.TrafficControl.Suspended {
+				state = "shutoff"
+			}
+
 		case "create", "start", "reboot", "reinstall", "reset_password", "rescue_enter", "rescue_exit":
 			state = "running"
 		case "shutdown", "force_off", "suspend", "resize":

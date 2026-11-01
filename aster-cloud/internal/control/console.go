@@ -98,6 +98,10 @@ func (c Console) resource(w http.ResponseWriter, r *http.Request) {
 		failure(w, 401, "AUTH_REQUIRED")
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/console/v1/instances/") && strings.HasSuffix(r.URL.Path, "/traffic") {
+		c.instanceTraffic(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/console/v1/placement") || strings.HasPrefix(r.URL.Path, "/console/v1/nodes/") && strings.HasSuffix(r.URL.Path, "/allocation") {
 		c.placement(w, r)
 		return

@@ -56,6 +56,7 @@ type NodeProfile struct {
 	materials               *NodeMaterialBinding `json:"-"`
 }
 type Preset struct {
+	TrafficPolicy    *TrafficPolicy          `json:"traffic_policy,omitempty"`
 	ID               string                  `json:"id"`
 	NodeID           string                  `json:"node_id"`
 	Resources        controllerapi.Resources `json:"resources"`
@@ -287,6 +288,9 @@ func (c Config) Valid() bool {
 	}
 	presetSeen := map[string]bool{}
 	for _, p := range c.Presets {
+		if p.TrafficPolicy != nil && !p.TrafficPolicy.Valid() {
+			return false
+		}
 		n, ok := c.Node(p.NodeID)
 		spec := controllerapi.ProductSpec{Mode: "custom", ControllerID: c.ControllerID, Resources: &p.Resources}
 		if p.NodeID == "" {
@@ -397,11 +401,16 @@ func (c Config) Candidates(r controllerapi.Request) []Candidate {
 			if p.ID == r.Product.RemoteProductID {
 				if p.NodeID == "" && p.Resources.ComputeNodeID == "" && p.Resources.NetworkType == "normal" {
 					resources := p.Resources
-					return c.Candidates(controllerapi.Request{OwnerRef: r.OwnerRef, Product: controllerapi.ProductSpec{Mode: "custom", ControllerID: c.ControllerID, Resources: &resources}})
+					candidates := c.Candidates(controllerapi.Request{OwnerRef: r.OwnerRef, Product: controllerapi.ProductSpec{Mode: "custom", ControllerID: c.ControllerID, Resources: &resources}})
+					for j := range candidates {
+						candidates[j].TrafficPolicy = p.TrafficPolicy
+					}
+					return candidates
 				}
 				n, ok := c.Node(p.NodeID)
 				if ok {
 					if candidate, ok := add(n, p.Resources, p.NetworkProfileID); ok {
+						candidate.TrafficPolicy = p.TrafficPolicy
 						return []Candidate{candidate}
 					}
 				}

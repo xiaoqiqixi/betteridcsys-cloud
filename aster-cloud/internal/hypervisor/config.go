@@ -57,6 +57,7 @@ type StorageConfig struct {
 }
 
 type Config struct {
+	AllowTrafficAccounting              bool                  `json:"allow_traffic_accounting,omitempty"`
 	Guest                               GuestConfig           `json:"guest,omitzero"`
 	ShutdownTimeoutSeconds              int                   `json:"shutdown_timeout_seconds"`
 	AllowBandwidthLimits                bool                  `json:"allow_bandwidth_limits,omitempty"`

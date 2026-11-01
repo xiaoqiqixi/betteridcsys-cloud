@@ -20,6 +20,7 @@ import StateBlock from "../components/StateBlock.vue";
 import StatusBadge from "../components/StatusBadge.vue";
 import ActionDialog from "../components/ActionDialog.vue";
 import InstanceObservationPanel from "../components/InstanceObservationPanel.vue";
+import InstanceTrafficPanel from "../components/InstanceTrafficPanel.vue";
 import InstanceMetricsPanel from "../components/InstanceMetricsPanel.vue";
 import SourceRetirementPanel from "../components/SourceRetirementPanel.vue";
 import MigrationWizard from "../components/MigrationWizard.vue";
@@ -222,6 +223,10 @@ function tabKey(event: KeyboardEvent) {
             ><InstanceMetricsPanel
               v-if="!session.verificationMode.value"
               :instance="instance"
+            />
+            <InstanceTrafficPanel
+              v-if="!session.verificationMode.value"
+              :instance-id="instance.id"
             />
             <div class="detail-grid">
               <article class="content-section">

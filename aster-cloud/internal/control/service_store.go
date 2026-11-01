@@ -240,6 +240,14 @@ func serviceGateTx(ctx context.Context, tx *sql.Tx, c Config, v Instance, in Ope
 			return serviceReject("UNSUPPORTED_GUEST")
 		}
 	}
+	if in.Action == "resize" && in.Guest.Params.SetBandwidth {
+		proposed := v.Resources
+		proposed.BandwidthMbps = in.Guest.Params.BandwidthMbps
+		proposed.InboundBandwidthMbps = in.Guest.Params.InboundBandwidthMbps
+		if !supportsNormalBandwidth(caps, proposed) {
+			return serviceReject("UNSUPPORTED_BANDWIDTH")
+		}
+	}
 	if in.Action == "resize" && in.Guest.Params.DiskGB < v.Resources.SystemDiskGiB {
 		return serviceReject("DISK_SHRINK_FORBIDDEN")
 	}

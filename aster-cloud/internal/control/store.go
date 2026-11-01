@@ -206,7 +206,7 @@ func (s *SQLStore) Check(ctx context.Context) error {
 			return ErrConflict
 		}
 	}
-	for _, query := range []string{"SELECT instance_id,bucket,aggregate_json FROM controller_metrics LIMIT 0", "SELECT instance_id,observed_at,sample FROM controller_metric_cursors LIMIT 0", "SELECT region_id,policy,updated_at FROM controller_region_placement LIMIT 0", "SELECT node_id,allocation_disabled,updated_at FROM controller_node_allocation LIMIT 0", "SELECT operation_id,kind,holder,expires_at FROM controller_dispatch_leases LIMIT 0", "SELECT id FROM controller_lock WHERE id=1", "SELECT id,profile_sha256,datacenter_id,maintenance,heartbeat_at,free_cpu,free_memory_mib,free_disk_gib,capabilities,updated_at FROM controller_nodes LIMIT 0", "SELECT " + jobColumns + " FROM controller_jobs LIMIT 0", "SELECT id,owner_ref,node_id,hostname,state,resources,created_at,updated_at FROM controller_instances LIMIT 0", "SELECT operation_id,node_id,cpu,memory_mib,disk_gib,released,created_at FROM controller_reservations LIMIT 0", "SELECT id,actor,action,target,created_at FROM controller_audit LIMIT 0", "SELECT id,state,request_json FROM controller_operations LIMIT 0", "SELECT id,instance_id FROM controller_artifacts LIMIT 0", "SELECT id,phase FROM controller_migrations LIMIT 0"} {
+	for _, query := range []string{"SELECT instance_id,policy,updated_at FROM controller_traffic_policies LIMIT 0", "SELECT instance_id,node_id,stream_id,sample_day,revision,rx_bytes,tx_bytes,observed_at FROM controller_traffic_samples LIMIT 0", "SELECT instance_id,period_start,period_end,rx_bytes,tx_bytes FROM controller_traffic LIMIT 0", "SELECT instance_id,bucket,aggregate_json FROM controller_metrics LIMIT 0", "SELECT instance_id,observed_at,sample FROM controller_metric_cursors LIMIT 0", "SELECT region_id,policy,updated_at FROM controller_region_placement LIMIT 0", "SELECT node_id,allocation_disabled,updated_at FROM controller_node_allocation LIMIT 0", "SELECT operation_id,kind,holder,expires_at FROM controller_dispatch_leases LIMIT 0", "SELECT id FROM controller_lock WHERE id=1", "SELECT id,profile_sha256,datacenter_id,maintenance,heartbeat_at,free_cpu,free_memory_mib,free_disk_gib,capabilities,updated_at FROM controller_nodes LIMIT 0", "SELECT " + jobColumns + " FROM controller_jobs LIMIT 0", "SELECT id,owner_ref,node_id,hostname,state,resources,created_at,updated_at FROM controller_instances LIMIT 0", "SELECT operation_id,node_id,cpu,memory_mib,disk_gib,released,created_at FROM controller_reservations LIMIT 0", "SELECT id,actor,action,target,created_at FROM controller_audit LIMIT 0", "SELECT id,state,request_json FROM controller_operations LIMIT 0", "SELECT id,instance_id FROM controller_artifacts LIMIT 0", "SELECT id,phase FROM controller_migrations LIMIT 0"} {
 		rows, e := s.DB.QueryContext(ctx, query)
 		if e != nil {
 			return e
@@ -358,7 +358,7 @@ func (s *SQLStore) Admit(ctx context.Context, r controllerapi.Request, candidate
 		if !strict(caps, &capability) {
 			return Job{}, false, ErrUnavailable
 		}
-		if !capability.SupportsNetwork(candidate.Resources, n, candidate.NetworkProfileID) {
+		if !capability.SupportsNetwork(candidate.Resources, n, candidate.NetworkProfileID) || candidate.TrafficPolicy != nil && !trafficPolicySupported(capability, *candidate.TrafficPolicy, candidate.Resources.NetworkType) {
 			continue
 		}
 		var rc, rm, rd int64
@@ -381,6 +381,11 @@ func (s *SQLStore) Admit(ctx context.Context, r controllerapi.Request, candidate
 		resourceRaw, _ := json.Marshal(rsc)
 		if _, e = tx.ExecContext(ctx, "INSERT INTO controller_instances(id,owner_ref,node_id,hostname,state,resources,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", j.InstanceID, r.OwnerRef, n.ID, r.Hostname, "reserved", resourceRaw, now, now); e != nil {
 			return Job{}, false, e
+		}
+		if candidate.TrafficPolicy != nil {
+			if e = writeTrafficPolicy(ctx, tx, j.InstanceID, *candidate.TrafficPolicy, now); e != nil {
+				return Job{}, false, e
+			}
 		}
 		task, e = bindCreateNetwork(ctx, tx, task, candidate, now)
 		if e != nil {

@@ -80,6 +80,27 @@ func (m *Manager) Handler() http.Handler {
 			return
 		}
 		switch {
+		case strings.HasPrefix(r.URL.Path, "/v1/instances/") && strings.HasSuffix(r.URL.Path, "/traffic"):
+			if r.Method != http.MethodGet {
+				respond(w, 405, errorBody("METHOD_NOT_ALLOWED"))
+				return
+			}
+			if r.URL.RawQuery != "" || r.URL.ForceQuery {
+				respond(w, 400, errorBody("INVALID_QUERY"))
+				return
+			}
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/instances/"), "/traffic")
+			if !nodeproto.ValidID(id) {
+				respond(w, 404, errorBody("NOT_FOUND"))
+				return
+			}
+			snapshot, e := m.Ledger.Traffic(id)
+			if e != nil {
+				respond(w, 409, errorBody("TRAFFIC_UNCONFIRMED"))
+				return
+			}
+			respond(w, 200, snapshot)
+
 		case strings.HasPrefix(r.URL.Path, "/v1/instances/") && strings.HasSuffix(r.URL.Path, "/metrics"):
 			if r.Method != http.MethodGet {
 				w.Header().Set("Allow", http.MethodGet)

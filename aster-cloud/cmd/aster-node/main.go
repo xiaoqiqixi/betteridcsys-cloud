@@ -246,6 +246,9 @@ func run() error {
 	server.ErrorLog = diagnostics.TransportLog(slog.Default())
 	signals, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	trafficDone := make(chan struct{})
+	go func() { defer close(trafficDone); manager.RunTraffic(signals) }()
+	defer func() { stop(); <-trafficDone }()
 	go func() {
 		<-signals.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

@@ -179,6 +179,12 @@ func (m *Manager) Capabilities(ctx context.Context) nodeproto.Capabilities {
 		c.NetworkProfiles = append(c.NetworkProfiles, "normal-isolated-no-nic")
 		c.IPv4Counts = append(c.IPv4Counts, 0)
 	}
+	if m.Config.AllowTrafficAccounting {
+		c.NetworkProfiles = append(c.NetworkProfiles, nodeproto.TrafficCapability, nodeproto.TrafficSuspendCapability)
+		if m.Config.AllowBandwidthLimits && m.Config.Network.Enabled {
+			c.NetworkProfiles = append(c.NetworkProfiles, nodeproto.TrafficThrottleCapability)
+		}
+	}
 	if m.Config.Network.Enabled {
 		c.NetworkProfiles = append(c.NetworkProfiles, "normal-static-ipv4-dedicated-bridge")
 		if m.Config.AllowBandwidthLimits {
@@ -222,6 +228,9 @@ func (m *Manager) Capabilities(ctx context.Context) nodeproto.Capabilities {
 		c.Limitations = append(c.Limitations, "Host doctor prerequisites are incomplete; no mutation is advertised.")
 	} else if !c.Maintenance {
 		c.Actions = []string{"create", "start", "shutdown", "reboot", "force_off", "console", "metrics"}
+		if m.Config.AllowTrafficAccounting {
+			c.Actions = append(c.Actions, nodeproto.TrafficControlAction)
+		}
 		if m.Config.Guest.Enabled {
 			c.Actions = append(c.Actions, "reinstall", "reset_password", "rescue_enter", "rescue_exit", "suspend", "unsuspend", "resize")
 		}
