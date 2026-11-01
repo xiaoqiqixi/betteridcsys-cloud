@@ -60,6 +60,15 @@ func (c *stateMachineConn) QueryContext(_ context.Context, q string, args []driv
 	switch {
 	case strings.Contains(q, "FROM controller_lock"):
 		return stateMachineRows("id", int64(1)), nil
+	case strings.Contains(q, "FROM controller_node_allocation"):
+		return stateMachineRows("allocation_disabled"), nil
+	case strings.Contains(q, "FROM controller_region_placement"):
+		return stateMachineRows("policy"), nil
+	case strings.Contains(q, "FROM controller_nodes n WHERE n.id"):
+		if _, ok := f.nodes[args[0].Value.(string)]; !ok {
+			return stateMachineRows("instances,memory"), nil
+		}
+		return stateMachineRows("instances,memory", int64(0), int64(65536)), nil
 	case strings.Contains(q, "SELECT COUNT(*)"):
 		count := int64(0)
 		if strings.Contains(q, "controller_operations WHERE instance_id") && f.op.ID != "" {
