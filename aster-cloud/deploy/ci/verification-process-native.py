@@ -25,7 +25,7 @@ def fixture_failure(raw):
     code = raw.decode('ascii', errors='replace').removesuffix('\n')
     return code if len(raw) <= 128 and code in FAILURE_CODES else 'TARGET_NATIVE_ASSERTION_FAILED'
 
-def accept(root, inputs, controller, operation, module, directory, require, progress):
+def accept(root, inputs, controller, operation, module, directory, ui_directory, require, progress):
     require(os.geteuid() == 0)
     require(ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) == 0)
     case = Path('/opt') / ('aster-verification-native-' + operation)
@@ -44,7 +44,8 @@ def accept(root, inputs, controller, operation, module, directory, require, prog
         expires_at=phase['expires_at'], uid=65532, gid=65532,
         dsn=(directory/'verification-mysql-dsn').read_text().removesuffix('\n'),
         certificate_pem=base64.b64encode((inputs/'configuration-tls.crt').read_bytes()).decode(),
-        private_key_pem=base64.b64encode((inputs/'configuration-tls.key').read_bytes()).decode())
+        private_key_pem=base64.b64encode((inputs/'configuration-tls.key').read_bytes()).decode(),
+        ui_directory=str(ui_directory))
     cert = ssl.create_default_context(cafile=str(inputs/'configuration-tls.crt'))
     cert.minimum_version = ssl.TLSVersion.TLSv1_2
     state = Path('/var/lib/aster-controller')/controller
@@ -64,15 +65,58 @@ def accept(root, inputs, controller, operation, module, directory, require, prog
             os.close(fd)
         require((state/'target-restore.json').read_bytes() == original_seal, 'VERIFICATION_PROCESS_TARGET_SEAL')
 
-    def request(method, path):
+    def request_bytes(method, path):
         with socket.create_connection(('127.0.0.1', 9555), timeout=2) as raw:
             with cert.wrap_socket(raw, server_hostname='source.invalid') as tls:
                 tls.sendall((method+' '+path+' HTTP/1.1\r\nHost: source.invalid:9555\r\nConnection: close\r\nContent-Length: 0\r\n\r\n').encode())
                 response = http.client.HTTPResponse(tls)
                 response.begin()
-                payload = response.read(65537)
-                require(len(payload) <= 65536)
-                return response.status, json.loads(payload)
+                payload = response.read((5 << 20) + 1)
+                require(len(payload) <= (5 << 20), 'VERIFICATION_PROCESS_STATIC_UI')
+                return response.status, {name.lower(): value for name, value in response.getheaders()}, payload
+
+    def request(method, path):
+        status, _, payload = request_bytes(method, path)
+        require(len(payload) <= 65536)
+        return status, json.loads(payload)
+
+    def static_ui():
+        # Installed, manifest-bound root-owned fixture assets, not a mocked
+        # handler. This proves transport/file isolation, not visual acceptance.
+        for path, filename in (('/', 'index.html'), ('/index.html', 'index.html'),
+                               ('/assets/native.js', 'assets/native.js'), ('/assets/native.css', 'assets/native.css')):
+            status, headers, payload = request_bytes('GET', path)
+            require(status == 200 and payload == (ui_directory/filename).read_bytes(), 'VERIFICATION_PROCESS_STATIC_UI')
+            require(headers.get('cache-control') == 'no-store' and headers.get('x-content-type-options') == 'nosniff',
+                    'VERIFICATION_PROCESS_STATIC_UI')
+            csp = headers.get('content-security-policy', '')
+            require(all(value in csp for value in ("script-src 'self'", "connect-src 'self'", "frame-ancestors 'none'")),
+                    'VERIFICATION_PROCESS_STATIC_UI')
+        status, headers, payload = request_bytes('HEAD', '/assets/native.js')
+        require(status == 200 and not payload and headers.get('etag'), 'VERIFICATION_PROCESS_STATIC_UI')
+        for path in ('/console', '/v1', '/api/unknown', '/console/v1/unknown', '/v1/unknown',
+                     '/console%2fv1/auth/me', '/assets/%6eative.js', '/?', '/assets/native.js?cache=1'):
+            status, _, payload = request_bytes('GET', path)
+            require(status == 403 and json.loads(payload).get('error', {}).get('code') == 'MIGRATION_VERIFICATION_READ_ONLY',
+                    'VERIFICATION_PROCESS_STATIC_UI')
+        for path in ('/assets/native.js.map', '/assets/private.json', '/assets/../index.html', '/assets//native.js'):
+            status, _, payload = request_bytes('GET', path)
+            require(status == 404 and b'PRIVATE_' not in payload, 'VERIFICATION_PROCESS_STATIC_UI')
+        for method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+            status, body = request(method, '/assets/native.js')
+            require(status == 403 and body.get('error', {}).get('code') == 'MIGRATION_VERIFICATION_READ_ONLY',
+                    'VERIFICATION_PROCESS_STATIC_UI')
+        # An asset becoming writable after startup must fail closed, not remain
+        # available from a process cache. Restore only this injected mode fault.
+        asset = ui_directory/'assets/native.js'
+        try:
+            asset.chmod(0o666)
+            status, _, payload = request_bytes('GET', '/assets/native.js')
+            require(status == 404 and b'nativeStaticFixture' not in payload, 'VERIFICATION_PROCESS_STATIC_UI')
+        finally:
+            asset.chmod(0o644)
+        status, _, payload = request_bytes('GET', '/assets/native.js')
+        require(status == 200 and payload == asset.read_bytes(), 'VERIFICATION_PROCESS_STATIC_UI')
 
     def child_of(parent):
         children = set()
@@ -173,6 +217,9 @@ def accept(root, inputs, controller, operation, module, directory, require, prog
             child = child_of(parent)
             restricted(child, parent)
             probe_drained(False)
+            if mode == 'stop':
+                progress('target-verification-process-static-ui')
+                static_ui()
             progress('target-verification-process-write-denied')
             code, body = request('POST', '/console/v1/users')
             require(code == 403 and body.get('error', {}).get('code') == 'MIGRATION_VERIFICATION_READ_ONLY')

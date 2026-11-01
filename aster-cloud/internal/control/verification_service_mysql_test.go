@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -134,6 +136,46 @@ func TestMySQLVerificationServiceRefusesWrongCertificateOrigin(t *testing.T) {
 	}
 	if limited.DB.Ping() == nil || !reflect.DeepEqual(before, verificationDatabaseImage(t, admin)) {
 		t.Fatal("rejected service retained SQL pool or changed database")
+	}
+}
+
+func TestMySQLVerificationServiceRefusesUnprotectedUIBeforeServing(t *testing.T) {
+	admin := consoleHTTPStore(t)
+	op := id()
+	limited := verificationSQLStore(t, admin, op)
+	directory, _ := webBuildFixture(t)
+	if os.Geteuid() == 0 {
+		// A real foreign-owned file, even in a protected directory, is not an
+		// approved build. Do not substitute an owner override in production.
+		if err := os.Chown(filepath.Join(directory, "index.html"), 65532, 65532); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	ca, key, _ := authority(t)
+	certificate := issue(t, ca, key, false)
+	config := testConfig(testProfile())
+	config.Listen = listener.Addr().String()
+	before := verificationDatabaseImage(t, admin)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err = ServeVerificationConsole(ctx, listener, limited, VerificationServiceConfig{Controller: config,
+		Identity: identity.Config{Origin: "https://" + config.Listen}, Operation: op,
+		ExpiresAt: time.Now().UTC().Add(time.Minute).Truncate(time.Microsecond), UIDirectory: directory,
+		CertificatePEM: certificate.certPEM, PrivateKeyPEM: certificate.keyPEM})
+	if !errors.Is(err, ErrInput) {
+		t.Fatalf("unprotected UI was not rejected before serving: %v", err)
+	}
+	if limited.DB.Ping() == nil || !reflect.DeepEqual(before, verificationDatabaseImage(t, admin)) {
+		t.Fatal("unprotected UI retained SQL pool or changed database")
+	}
+	if connection, err := net.DialTimeout("tcp4", config.Listen, time.Second); err == nil {
+		connection.Close()
+		t.Fatal("unprotected UI retained listener")
 	}
 }
 

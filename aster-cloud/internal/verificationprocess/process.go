@@ -31,6 +31,9 @@ type Config struct {
 	DSN            string         `json:"dsn"`
 	CertificatePEM []byte         `json:"certificate_pem"`
 	PrivateKeyPEM  []byte         `json:"private_key_pem"`
+	// Optional protected UI from the exact installation approved by the root
+	// coordinator. Never taken from an HTTP request or a caller's working tree.
+	UIDirectory string `json:"ui_directory,omitempty"`
 }
 
 func (c Config) valid() bool {

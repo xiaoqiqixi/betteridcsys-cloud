@@ -284,7 +284,7 @@ func Child() (result error) {
 	if _, err = io.WriteString(connection, "verified "+boot.Nonce+"\n"); err != nil {
 		return refused("VERIFICATION_CHILD_RECHECK")
 	}
-	cfg := control.VerificationServiceConfig{Controller: boot.Config.Controller, Identity: identity.Config{Origin: boot.Config.Origin}, Operation: boot.Config.Operation, ExpiresAt: boot.Config.ExpiresAt, CertificatePEM: boot.Config.CertificatePEM, PrivateKeyPEM: boot.Config.PrivateKeyPEM}
+	cfg := control.VerificationServiceConfig{Controller: boot.Config.Controller, Identity: identity.Config{Origin: boot.Config.Origin}, Operation: boot.Config.Operation, ExpiresAt: boot.Config.ExpiresAt, CertificatePEM: boot.Config.CertificatePEM, PrivateKeyPEM: boot.Config.PrivateKeyPEM, UIDirectory: boot.Config.UIDirectory}
 	err = control.ServeVerificationConsole(ctx, listener, store, cfg)
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil

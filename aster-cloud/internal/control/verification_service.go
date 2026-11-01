@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,6 +25,9 @@ type VerificationServiceConfig struct {
 	ExpiresAt      time.Time
 	CertificatePEM []byte
 	PrivateKeyPEM  []byte
+	// UIDirectory is optional. The root coordinator supplies the verified
+	// installed UI, never an HTTP parameter or an untrusted staging directory.
+	UIDirectory string
 }
 
 // ServeVerificationConsole consumes the listener and the dedicated SQL pool,
@@ -63,6 +67,13 @@ func ServeVerificationConsole(ctx context.Context, listener net.Listener, store 
 	if !serverPurpose {
 		return ErrInput
 	}
+	var web http.Handler
+	if cfg.UIDirectory != "" {
+		web, err = Web(cfg.UIDirectory)
+		if err != nil {
+			return ErrInput
+		}
+	}
 	lifetime, cancel := context.WithDeadline(ctx, cfg.ExpiresAt)
 	defer cancel()
 	handler, err := NewVerificationConsole(lifetime, store, cfg.Controller, cfg.Identity, cfg.Operation)
@@ -82,6 +93,15 @@ func ServeVerificationConsole(ctx context.Context, listener net.Listener, store 
 		requests.Add(1)
 		gate.Unlock()
 		defer requests.Done()
+		// This UI uses hash navigation. Only the entry point and packaged assets
+		// are public static routes; no SPA fallback for an unknown API, encoded
+		// alias, business method, or path that a ServeMux could clean/redirect.
+		if web != nil && r.URL.RawPath == "" && !r.URL.ForceQuery && r.URL.RawQuery == "" &&
+			(r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+			(r.URL.Path == "/" || r.URL.Path == "/index.html" || strings.HasPrefix(r.URL.Path, "/assets/")) {
+			web.ServeHTTP(w, r)
+			return
+		}
 		handler.ServeHTTP(w, r)
 	})
 	server := &http.Server{
