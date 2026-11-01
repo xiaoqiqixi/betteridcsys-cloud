@@ -1,6 +1,12 @@
 package nodeproto
 
-import "aster/billing/serviceapi"
+import (
+	"aster/billing/serviceapi"
+	"bytes"
+	"strings"
+
+	"golang.org/x/crypto/ssh"
+)
 
 // GuestParams extends only explicit lifecycle actions. Password is sent once
 // over mTLS, then removed before either side writes its durable operation.
@@ -31,6 +37,23 @@ func StartsGuest(t NodeTask) bool {
 	}
 	return false
 }
+
+// Parse the actual SSH wire key before any destructive reinstall is admitted.
+// The public SDK validates the request shape without importing SSH machinery.
+func ValidGuestSSHKey(value string) bool {
+	if len(value) > 8192 || strings.ContainsAny(value, "\x00\r\n") {
+		return false
+	}
+	key, _, options, rest, err := ssh.ParseAuthorizedKey([]byte(value))
+	if err != nil || len(options) != 0 || len(bytes.TrimSpace(rest)) != 0 {
+		return false
+	}
+	switch key.Type() {
+	case ssh.KeyAlgoED25519, ssh.KeyAlgoRSA, ssh.KeyAlgoECDSA256:
+		return true
+	}
+	return false
+}
 func (g GuestParams) Valid(action string) bool {
 	if g.SecretSHA256 != "" && (!g.PasswordRequired || !digest.MatchString(g.SecretSHA256)) {
 		return false
@@ -43,7 +66,7 @@ func (g GuestParams) Valid(action string) bool {
 	} else if p.Password != "" {
 		return false
 	}
-	if !p.Valid(action) {
+	if !p.Valid(action) || p.SSHPublicKey != "" && !ValidGuestSSHKey(p.SSHPublicKey) {
 		return false
 	}
 	if action == "reinstall" || action == "rescue_enter" {

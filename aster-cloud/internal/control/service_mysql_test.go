@@ -205,3 +205,20 @@ func TestMySQLServiceRejectsMismatchedImageApprovalBeforeDispatch(t *testing.T) 
 		t.Fatal("approval change replaced the first receipt", again, replay, e)
 	}
 }
+
+func TestMySQLServiceMalformedSSHKeyIsDurablyRejectedBeforeDispatch(t *testing.T) {
+	s, c, _, v, now := readyService(t)
+	ctx := context.Background()
+	r := serviceapi.ActionRequest{Protocol: serviceapi.Protocol, OperationID: id(), OwnerRef: v.OwnerRef, Action: "reinstall", Params: serviceapi.Params{ImageID: v.Resources.ImageID, SSHPublicKey: "ssh-ed25519 AAAA"}}
+	receipt, replay, err := s.AdmitService(ctx, c, v.ID, r, now)
+	if err != nil || replay || receipt.Status != "rejected" || receipt.Code != "INVALID_SSH_PUBLIC_KEY" {
+		t.Fatal(receipt, replay, err)
+	}
+	if _, err = s.Operation(ctx, r.OperationID); !errors.Is(err, ErrNotFound) {
+		t.Fatal("malformed key created dispatchable work", err)
+	}
+	again, replay, err := s.AdmitService(ctx, c, v.ID, r, now)
+	if err != nil || !replay || receipt.Result() != again.Result() {
+		t.Fatal(again, replay, err)
+	}
+}

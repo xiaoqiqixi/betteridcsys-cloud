@@ -72,6 +72,22 @@ func TestGuestImageCapabilitiesBindTheRootCatalog(t *testing.T) {
 	}
 }
 
+func TestGuestMalformedSSHKeyCannotClaimAReinstallIntent(t *testing.T) {
+	m, f, task := guestFixture(t)
+	before, _ := m.Ledger.Instance(task.InstanceID)
+	commands := len(f.commands)
+	task = guestTask(m, task, "4", "reinstall", serviceapi.Params{ImageID: "ubuntu22", SSHPublicKey: "ssh-ed25519 AAAA"})
+	raw, _ := json.Marshal(task)
+	if _, err := m.Accept(task, raw); err == nil {
+		t.Fatal("malformed key accepted")
+	}
+	after, _ := m.Ledger.Instance(task.InstanceID)
+	_, claimed := m.Ledger.Query(task.OperationID)
+	if claimed || len(f.commands) != commands || !reflect.DeepEqual(before, after) {
+		t.Fatal("malformed key changed guest state")
+	}
+}
+
 func (r *guestRunner) Run(ctx context.Context, binary string, args ...string) ([]byte, error) {
 	if binary == QemuImg && args[0] == "resize" {
 		r.fakeRunner.mu.Lock()

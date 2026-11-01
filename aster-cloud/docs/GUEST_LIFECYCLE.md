@@ -32,7 +32,9 @@ Password reset uses the offline libguestfs `virt-customize --root-password`
 file selector with an inherited stdin pipe, `--no-network` and `--no-logfile`.
 Windows and images without an explicit Linux family return `UNSUPPORTED_GUEST`.
 Reinstall hashes a password through `openssl passwd -6 -stdin` before writing
-cloud-init user-data. Plaintext credentials never reach argv, environment,
+cloud-init user-data. Reinstall SSH keys are parsed before admission; malformed
+keys and authorized_keys options are rejected without touching the disk.
+Plaintext credentials never reach argv, environment,
 controller/node records, audit, diagnostics or host seed files. The guest's
 password hash is intentionally present in its cloud-init seed and shadow file.
 
