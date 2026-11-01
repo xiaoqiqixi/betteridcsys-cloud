@@ -8,7 +8,8 @@ base = root / 'contracts/billing'
 metadata = json.loads((base / 'UPSTREAM.json').read_text())
 assert metadata['schema'] == 1
 expected = metadata['files']
-assert len(expected) == 8
+assert metadata['protocols'] == ['aster.controller/1', 'aster.service/1']
+assert len(expected) >= 8
 actual = {p.relative_to(root).as_posix() for p in base.rglob('*.go')}
 assert actual == set(expected), 'Unexpected/missing billing protocol source'
 for name, digest in expected.items():
@@ -17,4 +18,4 @@ for name, digest in expected.items():
     assert hashlib.sha256(p.read_bytes()).hexdigest() == digest, 'Billing protocol changed without an explicit compatibility update'
 assert (base / 'go.mod').read_text() == 'module aster/billing\n\ngo 1.26.0\n'
 assert (root / 'go.work').read_text() == 'go 1.26.0\n\nuse (\n\t./aster-cloud\n\t./contracts/billing\n)\n', 'Unexpected local workspace membership'
-print('PASS: eight pinned public protocol/transport sources; no financial backend dependency')
+print(f'PASS: {len(expected)} pinned public protocol/transport sources; no financial backend dependency')

@@ -6,9 +6,19 @@
     "contracts/billing/controllerapi/contract_test.go": "cc167d111fb5adae6d545f39377bec05fd1fb6bfdb13fe69927f41b6c9fff62a",
     "contracts/billing/controllerapi/transport.go": "0a6c6761e361cb181276bfefce6c6e6b7b535f3c25a73d28c68a7e98060ffcae",
     "contracts/billing/controllerapi/transport_test.go": "8ef84541badee31bd40eced514854cd1cdc03be1232a5d6223229de545febe8b",
-    "contracts/billing/internal/controllers/client.go": "0ef1476aa70ecf5efef644fc64c1539d4600c8f4945ca0014b2d2e1ce80469de",
+    "contracts/billing/internal/controllers/client.go": "4e4463b51435379a9d91069bec8b88c4365559fedb3a7b7f3f9e2e42f1eba292",
     "contracts/billing/internal/controllers/client_test.go": "44e81c1e3112739a51d2b324888841c4903913085e914ec3c0e7e274576570d5",
     "contracts/billing/internal/controllers/contract.go": "096fc9b1ca26e69a1396f39a8bbcfd983014a722ef864045b306b88086a7b555",
-    "contracts/billing/internal/controllers/contract_test.go": "6094c9ad78648bd17f7c02fa9a51f073148067075481393da43870de6c20d961"
-  }
+    "contracts/billing/internal/controllers/contract_test.go": "6094c9ad78648bd17f7c02fa9a51f073148067075481393da43870de6c20d961",
+    "contracts/billing/internal/controllers/service.go": "604aad48f809a0d0d24c18bfe6e3659af7048b2b305043e3ef94f43a8a10d81c",
+    "contracts/billing/serviceapi/client.go": "114e543f604cdf0c3b95cb5ea4775bd75a30cff4d42d5a71e33d02997f547ad7",
+    "contracts/billing/serviceapi/client_test.go": "4b8d8a4db521f7027010c648828f09a60f9c2f83b162546b7cfe8be69cfaac47",
+    "contracts/billing/serviceapi/contract.go": "73224e5d40f5808d982cc1e3b3165033b318b188f478430996ab00f315cd0be6",
+    "contracts/billing/serviceapi/contract_test.go": "e730ab07ad874ce9d996712204993139085db1c893e2581b197e4a6463060236"
+  },
+  "protocols": [
+    "aster.controller/1",
+    "aster.service/1"
+  ],
+  "compatibility_note": "Add serviceapi; share single-dial HTTP transport without changing controllerapi wire validation."
 }
