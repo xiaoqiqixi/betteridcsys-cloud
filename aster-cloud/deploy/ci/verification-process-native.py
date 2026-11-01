@@ -23,6 +23,7 @@ import time
 
 
 FAILURE_CODES = set('VERIFICATION_HOST_GUARD VERIFICATION_HOST_EXECUTABLE VERIFICATION_LISTENER VERIFICATION_SPAWN VERIFICATION_HANDSHAKE VERIFICATION_EARLY_EXIT VERIFICATION_CHILD_AUTHORITY VERIFICATION_CHILD_IDENTITY VERIFICATION_CHILD_GUARD VERIFICATION_CHILD_BOOTSTRAP VERIFICATION_CHILD_LISTENER VERIFICATION_CHILD_SQL VERIFICATION_CHILD_RECHECK VERIFICATION_CHILD_SERVICE'.split())
+SYSTEM_IDENTITY_FAILURES = set('TARGET_VERIFICATION_SYSTEM_APPROVAL_REQUIRED TARGET_VERIFICATION_SYSTEM_CREATE_UNCONFIRMED TARGET_VERIFICATION_SYSTEM_FOREIGN_IDENTITY TARGET_VERIFICATION_SYSTEM_HOME_PRESENT TARGET_VERIFICATION_SYSTEM_IDENTITY_BUSY TARGET_VERIFICATION_SYSTEM_IDENTITY_CHANGED TARGET_VERIFICATION_SYSTEM_IDENTITY_REJECTED TARGET_VERIFICATION_SYSTEM_INTENT_CHANGED TARGET_VERIFICATION_SYSTEM_LOOKUP_REJECTED TARGET_VERIFICATION_SYSTEM_LOOKUP_UNCONFIRMED TARGET_VERIFICATION_SYSTEM_NOT_PREPARED TARGET_VERIFICATION_SYSTEM_NSS_REJECTED TARGET_VERIFICATION_SYSTEM_PARTIAL_IDENTITY TARGET_VERIFICATION_SYSTEM_PHASE_CHANGED TARGET_VERIFICATION_SYSTEM_PROCESS_UNCONFIRMED'.split())
 
 def fixture_failure(raw):
     code = raw.decode('ascii', errors='replace').removesuffix('\n')
@@ -40,8 +41,8 @@ def empty_ipv4_route_snapshot(raw):
 def accept_installed_handoff(inputs, operation, module, directory, version, expected_phase, require, progress):
     """Actual installed ELF + original approval + cleanup + private root channel.
 
-    This fixture deliberately uses UID/GID 65532, not a production OS account.
-    It certifies the root-to-service handoff, not systemd/account installation,
+    This scenario prepares and checks the real operation-owned system account.
+    It certifies the root-to-service handoff, not a managed systemd lifecycle,
     source-host migration, successful staff login or browser appearance.
     """
     code = 'VERIFICATION_PROCESS_MANAGED_HANDOFF'
@@ -51,12 +52,70 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
     manager = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(manager)
     target = manager.Target(manager.install_module(), operation)
+    def system_command(action):
+        try:
+            return target.prepare(action)
+        except manager.Refused as error:
+            require(False,str(error) if str(error) in SYSTEM_IDENTITY_FAILURES else code)
     binary = version/'bin/aster-controller'
     dbplan = target.read(inputs/'database-plan.json')
     arguments = (operation, expected_phase['plan_sha256'], dbplan['data']['charset'], dbplan['data']['collation'])
     phase = {k:v for k,v in expected_phase.items() if k != 'root_inventory_verified'}
     expected = {'schema':1,'operation_id':operation,'phase':phase,'credential_verified':True,
         'sql_identity_verified':True,'readonly':True,'service_started':False,'migration_ready':False}
+    progress('target-verification-system-account')
+    # Fixture-owned foreign name: preparation must refuse before creating its
+    # journal or adopting the group. Cleanup never deletes an unexpected record.
+    foreign = 'asterv-'+operation[:24]
+    require(manager.system_account_lookup('group',foreign,missing=True) is None,code)
+    manager.run(['/usr/sbin/groupadd','--system',foreign])
+    foreign_record = manager.system_account_lookup('group',foreign)
+    try:
+        try:
+            target.prepare('target-verification-system-prepare')
+        except manager.Refused as error:
+            require(str(error)=='TARGET_VERIFICATION_SYSTEM_FOREIGN_IDENTITY',code)
+        else:
+            require(False,code)
+        require(manager.system_account_lookup('group',foreign)==foreign_record and
+            not (inputs/'verification-system-started.json').exists() and
+            not (inputs/'verification-system-account.json').exists(),code)
+    finally:
+        if manager.system_account_lookup('group',foreign)==foreign_record:
+            manager.run(['/usr/sbin/groupdel',foreign])
+    prepared = system_command('target-verification-system-prepare')
+    require(set(prepared)=={'schema','operation_id','verification_plan_sha256','system_identity',
+        'system_identity_verified','readonly','root_inventory_verified','service_started','migration_ready'} and
+        prepared['schema']==1 and prepared['operation_id']==operation and
+        prepared['verification_plan_sha256']==phase['plan_sha256'] and prepared['system_identity_verified'] is True and
+        prepared['root_inventory_verified'] is True and prepared['readonly'] is False and
+        prepared['service_started'] is False and prepared['migration_ready'] is False, code)
+    system_identity = prepared['system_identity']
+    require(set(system_identity)=={'name','uid','gid','receipt_sha256'} and
+        system_identity['name']=='asterv-'+operation[:24] and
+        type(system_identity['uid']) is int and type(system_identity['gid']) is int and
+        100 <= system_identity['uid'] <= 999 and 100 <= system_identity['gid'] <= 999, code)
+    require(system_command('target-verification-system-prepare')==prepared and
+        system_command('target-verification-system-status')=={**prepared,'readonly':True},code)
+    owned_receipts = {name:(inputs/name).read_bytes() for name in
+        ('verification-system-started.json','verification-system-account.json')}
+    # Modify only this fixture-owned, expired, locked account. /bin/false is
+    # still noninteractive; status/prepare must refuse and must not repair it.
+    manager.run(['/usr/sbin/usermod','--shell','/bin/false',system_identity['name']])
+    drift = manager.system_account_lookup('passwd',system_identity['name'])
+    try:
+        for action in ('target-verification-system-prepare','target-verification-system-status'):
+            try:
+                target.prepare(action)
+            except manager.Refused as error:
+                require(str(error)=='TARGET_VERIFICATION_SYSTEM_IDENTITY_REJECTED',code)
+            else:
+                require(False,code)
+            require(manager.system_account_lookup('passwd',system_identity['name'])==drift and
+                all((inputs/name).read_bytes()==raw for name,raw in owned_receipts.items()),code)
+    finally:
+        manager.run(['/usr/sbin/usermod','--shell','/usr/sbin/nologin',system_identity['name']])
+    require(system_command('target-verification-system-status')=={**prepared,'readonly':True},code)
     tls = ssl.create_default_context(cafile=str(inputs/'configuration-tls.crt'))
     tls.minimum_version = ssl.TLSVersion.TLSv1_2
     processes = []
@@ -108,11 +167,13 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
         require(module.complete_verification_mysql(*arguments, readonly=True) == account, code)
         manager.verify_installation(target, target.i, target=True)
         target.verify_verification_data(expected['phase'], target.read(inputs/'plan.json'), dbplan, readonly=True)
+        require(target.system_identity(expected,readonly=True)==system_identity,code)
         require(len(list(inputs.glob('.restore-verify-*'))) == 1, code)
         return hashlib.sha256(raw).hexdigest()
 
-    def ack(parent, nonce, digest, uid=65532):
-        parent.sendall((json.dumps({'schema':1,'nonce':nonce,'proof_sha256':digest,'uid':uid,'gid':65532},
+    def ack(parent, nonce, digest, uid=None):
+        parent.sendall((json.dumps({'schema':1,'nonce':nonce,'proof_sha256':digest,
+            'uid':system_identity['uid'] if uid is None else uid,'gid':system_identity['gid']},
             separators=(',',':'))+'\n').encode())
 
     def request(path):
@@ -151,7 +212,7 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
                 digest = proof_for(process, stream, nonce)
                 if refusal == 'stale-proof':
                     digest = '0'*64 if digest != '0'*64 else '1'*64
-                ack(parent, nonce, digest, uid=0 if refusal == 'root-child' else 65532)
+                ack(parent, nonce, digest, uid=0 if refusal == 'root-child' else None)
                 require(stream.read(1) == b'', code)
                 finish_refused(process, parent, stream)
                 stopped()
@@ -170,6 +231,26 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
                     time.sleep(.1)
             require(status == 200 and body == (version/'ui/index.html').read_bytes(), code)
             require(not list(inputs.glob('.restore-verify-*')), code)
+            children = set()
+            for task in (Path('/proc')/str(process.pid)/'task').iterdir():
+                try:
+                    children.update((task/'children').read_text().split())
+                except FileNotFoundError:
+                    continue
+            require(len(children)==1 and all(value.isdigit() for value in children),code)
+            child = Path('/proc')/children.pop()
+            observed = 0
+            for task in (child/'task').iterdir():
+                try:
+                    fields = dict(line.split(':',1) for line in (task/'status').read_text().splitlines() if ':' in line)
+                except FileNotFoundError:
+                    continue
+                require(fields['Uid'].split()==[str(system_identity['uid'])]*4 and
+                    fields['Gid'].split()==[str(system_identity['gid'])]*4 and not fields['Groups'].strip() and
+                    fields['NoNewPrivs'].strip()=='1' and all(fields[key].strip()=='0000000000000000'
+                    for key in ('CapInh','CapPrm','CapEff','CapAmb')),code)
+                observed += 1
+            require(observed>0,code)
             status, body = request('/console/v1/auth/me')
             require(status == 401 and isinstance(json.loads(body),dict), code)
 
@@ -189,6 +270,7 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
             target.unused_host(configuration=True, verification=True)
             require(target.target_command('verification-runtime-check') == expected, code)
             require(module.complete_verification_mysql(*arguments, readonly=True) == account, code)
+            require(target.system_identity(expected,readonly=True)==system_identity,code)
             require(not list(inputs.glob('.restore-verify-*')), code)
         finally:
             for channel in reversed(channels):

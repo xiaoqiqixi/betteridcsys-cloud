@@ -23,6 +23,7 @@ import sys
 PROTOCOL = 'aster.controller-migration/1'
 RESTORE_ERRORS = set('TARGET_RESTORE_SERVER_INVENTORY_REJECTED TARGET_RESTORE_MAINTENANCE_IDENTITY_REJECTED TARGET_RESTORE_MAINTENANCE_PROVENANCE_REJECTED TARGET_RESTORE_MAINTENANCE_DRIFT_REJECTED TARGET_RESTORE_MAINTENANCE_OUTCOME_UNCONFIRMED'.split())
 VERIFICATION_ERRORS = set('TARGET_VERIFICATION_IDENTITY_REJECTED TARGET_VERIFICATION_GRANTS_REJECTED TARGET_VERIFICATION_BINDING_REJECTED TARGET_VERIFICATION_CREDENTIAL_REJECTED TARGET_VERIFICATION_CREATE_UNCONFIRMED TARGET_VERIFICATION_ACCOUNT_UNCONFIRMED TARGET_VERIFICATION_REVOCATION_STARTED TARGET_VERIFICATION_REVOCATION_BINDING_REJECTED TARGET_VERIFICATION_REVOCATION_UNCONFIRMED TARGET_VERIFICATION_REVOCATION_NOT_STARTED TARGET_VERIFICATION_CONNECTION_INVENTORY_UNCONFIRMED TARGET_VERIFICATION_SESSIONS_ACTIVE'.split())
+VERIFICATION_SYSTEM_ACTIONS = ('target-verification-system-prepare','target-verification-system-status')
 SYSTEMD = Path('/etc/systemd/system')
 CONFIG = Path('/etc/aster-controller/config.json')
 INSTALL_STATE = Path('/var/lib/aster-cloud-installer/controller/state.json')
@@ -46,6 +47,125 @@ def require(ok, code):
 
 def digest(raw):
     return hashlib.sha256(raw).hexdigest()
+
+
+def system_identity_from_records(operation, nonce, records):
+    """Validate public NSS and private shadow wire formats, without host effects.
+
+    Only the selected account's fingerprints leave this function. Enumeration
+    proves unique numeric ownership and absence of other primary/supplementary
+    members; a locked password alone is not proof of an isolated OS identity.
+    """
+    code = 'TARGET_VERIFICATION_SYSTEM_IDENTITY_REJECTED'
+    require(isinstance(operation,str) and OP.fullmatch(operation) and
+            isinstance(nonce,str) and SHA.fullmatch(nonce), code)
+    require(isinstance(records,dict) and set(records)=={'passwd','group','shadow','gshadow','groups'}, code)
+    require(all(isinstance(value,str) and 0 < len(value) <= 1024*1024 and
+            value.endswith('\n') and '\r' not in value and '\x00' not in value for value in records.values()), code)
+    name = 'asterv-'+operation[:24]
+    def rows(key, count):
+        parsed = [line.split(':') for line in records[key][:-1].split('\n')]
+        require(all(len(row)==count and row[0] for row in parsed), code)
+        return parsed
+    def number(value):
+        require(re.fullmatch(r'0|[1-9][0-9]{0,9}',value) and int(value)<4294967295,code)
+        return int(value)
+    passwd, groups = rows('passwd',7), rows('group',4)
+    for row in passwd:
+        number(row[2]); number(row[3])
+    for row in groups:
+        number(row[2])
+    selected = [row for row in passwd if row[0]==name]
+    selected_group = [row for row in groups if row[0]==name]
+    require(len(selected)==1 and len(selected_group)==1, code)
+    user, group = selected[0], selected_group[0]
+    uid, gid = number(user[2]), number(user[3])
+    require(100 <= uid < 65534 and 100 <= gid < 65534 and
+            user[1]=='x' and user[4]=='Aster verification '+operation+' '+nonce and
+            user[5:]==['/nonexistent','/usr/sbin/nologin'] and
+            group==[name,'x',str(gid),''], code)
+    require(sum(row[2]==str(uid) for row in passwd)==1 and
+            sum(row[3]==str(gid) for row in passwd)==1 and
+            sum(row[2]==str(gid) for row in groups)==1 and
+            all(name not in row[3].split(',') for row in groups) and
+            records['groups']==str(gid)+'\n', code)
+    shadow, gshadow = rows('shadow',9), rows('gshadow',4)
+    require(len(shadow)==1 and shadow[0][0:2]==[name,'!'] and
+            shadow[0][6:]==['','1',''] and
+            all(value=='' or re.fullmatch(r'0|[1-9][0-9]{0,9}',value) for value in shadow[0][2:6]) and
+            gshadow==[[name,'!','','']], code)
+    result = {'name':name,'uid':uid,'gid':gid}
+    for key, row in (('passwd',user),('group',group),('shadow',shadow[0]),('gshadow',gshadow[0])):
+        result[key+'_sha256'] = digest((':'.join(row)+'\n').encode())
+    return result
+
+
+def local_system_identity_sources(raw):
+    """Fail closed on remote/non-enumerable identity backends, not empty LDAP."""
+    code = 'TARGET_VERIFICATION_SYSTEM_NSS_REJECTED'
+    require(isinstance(raw,str) and 0 < len(raw) <= 1024*1024 and '\x00' not in raw,code)
+    seen = {}
+    for line in raw.splitlines():
+        line = line.split('#',1)[0].strip()
+        if ':' not in line:
+            continue
+        name, values = line.split(':',1)
+        name = name.strip()
+        if name in ('passwd','group','shadow','gshadow'):
+            require(name not in seen,code)
+            seen[name] = values.split()
+    require(set(seen)=={'passwd','group','shadow','gshadow'} and
+            all(values in (['files'],['files','systemd']) for values in seen.values()),code)
+
+
+def system_account_lookup(database, key=None, *, missing=False):
+    require(database in ('passwd','group','shadow','gshadow') and
+            (key is None or re.fullmatch(r'asterv-[0-9a-f]{24}|[0-9]{1,10}',key)),
+            'TARGET_VERIFICATION_SYSTEM_LOOKUP_REJECTED')
+    argv = ['/usr/bin/getent',database]+([] if key is None else [key])
+    try:
+        result = subprocess.run(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                                env=ENV,timeout=15)
+    except (OSError,subprocess.SubprocessError):
+        raise Refused('TARGET_VERIFICATION_SYSTEM_LOOKUP_UNCONFIRMED') from None
+    require(len(result.stdout)<=1024*1024 and not result.stderr,'TARGET_VERIFICATION_SYSTEM_LOOKUP_UNCONFIRMED')
+    if missing and key is not None and result.returncode==2 and not result.stdout:
+        return None  # getent's documented key-not-found exit, never arbitrary failure
+    require(result.returncode==0 and result.stdout,'TARGET_VERIFICATION_SYSTEM_LOOKUP_UNCONFIRMED')
+    try:
+        return result.stdout.decode('utf-8')
+    except UnicodeError:
+        raise Refused('TARGET_VERIFICATION_SYSTEM_LOOKUP_UNCONFIRMED') from None
+
+
+def system_identity_idle(uid, gid):
+    for process in Path('/proc').iterdir():
+        if not process.name.isdigit():
+            continue
+        try:
+            with (process/'status').open('rb') as stream:
+                raw = stream.read(65537)
+        except (FileNotFoundError,ProcessLookupError):
+            continue
+        except OSError:
+            raise Refused('TARGET_VERIFICATION_SYSTEM_PROCESS_UNCONFIRMED') from None
+        require(len(raw)<=65536,'TARGET_VERIFICATION_SYSTEM_PROCESS_UNCONFIRMED')
+        if not raw:
+            try:
+                process.stat()
+            except FileNotFoundError:
+                continue
+        fields = {}
+        for line in raw.splitlines():
+            key,sep,value = line.partition(b':')
+            if sep and key in (b'Uid',b'Gid',b'Groups'):
+                require(key not in fields,'TARGET_VERIFICATION_SYSTEM_PROCESS_UNCONFIRMED')
+                fields[key] = value.split()
+        require(set(fields)=={b'Uid',b'Gid',b'Groups'} and len(fields[b'Uid'])==len(fields[b'Gid'])==4 and
+                all(value.isdigit() for values in fields.values() for value in values),
+                'TARGET_VERIFICATION_SYSTEM_PROCESS_UNCONFIRMED')
+        require(str(uid).encode() not in fields[b'Uid'] and str(gid).encode() not in fields[b'Gid']+fields[b'Groups'],
+                'TARGET_VERIFICATION_SYSTEM_IDENTITY_BUSY')
 
 
 def install_module():
@@ -686,7 +806,8 @@ class Target(Host):
 
     def unused_host(self, configuration=False, verification=False):
         extra = {'verification-approval.json','verification-revoke-approval.json',
-                 'verification-data-approval.json','verification-data-started.json'} if verification else set()
+                 'verification-data-approval.json','verification-data-started.json',
+                 'verification-system-started.json','verification-system-account.json'} if verification else set()
         require(set(p.name for p in self.root.iterdir()) <=
                 {'request.json', 'backup.age', 'recovery.key', 'plan.json', 'target.lock', 'database-plan.json', 'database',
                  'materials-started.json', 'runtime', 'sessions-started.json', 'configuration-request.json',
@@ -733,6 +854,80 @@ class Target(Host):
     def target_command(self, action):
         return self.i.strict_json(run([str(self.binary), 'migration-target-' + action,
                                        '-operation', self.operation], 1860, confirmed_errors=True))
+
+    def system_identity(self, proof, *, readonly):
+        # Called with installation/target locks after the original runtime/data
+        # and root SQL inventory checks. No UID, username or path is an input.
+        self.i.check_target()
+        require(proof.get('operation_id')==self.operation and proof.get('readonly') is True and
+                proof.get('credential_verified') is True and proof.get('sql_identity_verified') is True and
+                proof.get('service_started') is False and proof.get('migration_ready') is False,
+                'TARGET_VERIFICATION_SYSTEM_APPROVAL_REQUIRED')
+        local_system_identity_sources(self.i.protected_read('/etc/nsswitch.conf',1024*1024,False).decode('utf-8'))
+        for executable in ('/usr/bin/getent','/usr/bin/id','/usr/sbin/useradd','/usr/sbin/nologin'):
+            self.i.protected_path(executable)
+        require(not Path('/nonexistent').exists() and not Path('/nonexistent').is_symlink(),
+                'TARGET_VERIFICATION_SYSTEM_HOME_PRESENT')
+        name = 'asterv-'+self.operation[:24]
+        intent_path, receipt_path = self.root/'verification-system-started.json', self.root/'verification-system-account.json'
+        binding = {'schema':1,'operation_id':self.operation,'name':name,
+                   'verification_plan_sha256':proof['phase']['plan_sha256'],
+                   'verification_data_intent_sha256':proof['phase']['data']['phase_intent_sha256'],
+                   'target_plan_sha256':proof['phase']['plan']['target_plan_sha256']}
+        present = intent_path.exists() or intent_path.is_symlink()
+        completed = receipt_path.exists() or receipt_path.is_symlink()
+        if present:
+            intent = self.read(intent_path)
+            require(isinstance(intent,dict) and set(intent)==set(binding)|{'nonce'} and
+                    type(intent.get('schema')) is int and all(intent.get(key)==value for key,value in binding.items()) and
+                    isinstance(intent.get('nonce'),str) and SHA.fullmatch(intent['nonce']),
+                    'TARGET_VERIFICATION_SYSTEM_INTENT_CHANGED')
+        else:
+            require(not readonly and not completed,'TARGET_VERIFICATION_SYSTEM_NOT_PREPARED')
+            for database in ('passwd','group','shadow','gshadow'):
+                require(system_account_lookup(database,name,missing=True) is None,
+                        'TARGET_VERIFICATION_SYSTEM_FOREIGN_IDENTITY')
+            intent = {**binding,'nonce':os.urandom(32).hex()}
+            self.write(intent_path,intent)
+        require(not readonly or completed,'TARGET_VERIFICATION_SYSTEM_NOT_PREPARED')
+        if not completed:
+            observed = [system_account_lookup(database,name,missing=True)
+                        for database in ('passwd','group','shadow','gshadow')]
+            require(all(value is None for value in observed) or all(value is not None for value in observed),
+                    'TARGET_VERIFICATION_SYSTEM_PARTIAL_IDENTITY')
+        if not completed and all(value is None for value in observed):
+            # One invocation per explicit prepare. An interrupted intent may
+            # resume only after all four local records are proven absent. Never
+            # overwrite/repair partial or drifted identities or run a retry loop.
+            try:
+                result = run(['/usr/sbin/useradd','--system','--user-group','--no-create-home','--no-log-init',
+                    '--home-dir','/nonexistent','--shell','/usr/sbin/nologin','--expiredate','1970-01-02',
+                    '--inactive','-1','--comment','Aster verification '+self.operation+' '+intent['nonce'],
+                    '-K','SYS_UID_MIN=100','-K','SYS_UID_MAX=999','-K','SYS_GID_MIN=100','-K','SYS_GID_MAX=999',
+                    name],60)
+            except Refused:
+                raise Refused('TARGET_VERIFICATION_SYSTEM_CREATE_UNCONFIRMED') from None
+            require(result==b'','TARGET_VERIFICATION_SYSTEM_CREATE_UNCONFIRMED')
+        records = {database:system_account_lookup(database,None if database in ('passwd','group') else name)
+                   for database in ('passwd','group','shadow','gshadow')}
+        records['groups'] = run(['/usr/bin/id','--groups',name],15).decode('ascii')
+        identity = system_identity_from_records(self.operation,intent['nonce'],records)
+        require(identity['uid']<=999 and identity['gid']<=999,'TARGET_VERIFICATION_SYSTEM_IDENTITY_REJECTED')
+        for database, number in (('passwd',identity['uid']),('group',identity['gid'])):
+            for key in (name,str(number)):
+                require(digest(system_account_lookup(database,key).encode())==identity[database+'_sha256'],
+                        'TARGET_VERIFICATION_SYSTEM_IDENTITY_REJECTED')
+        system_identity_idle(identity['uid'],identity['gid'])
+        receipt = {'schema':1,'operation_id':self.operation,
+                   'intent_sha256':digest(self.i.protected_read(str(intent_path),8192)), 'identity':identity}
+        if completed:
+            require(self.i.protected_read(str(receipt_path),8192)==
+                    json.dumps(receipt,sort_keys=True,separators=(',',':')).encode()+b'\n',
+                    'TARGET_VERIFICATION_SYSTEM_IDENTITY_CHANGED')
+        else:
+            self.write(receipt_path,receipt)
+        return {'name':name,'uid':identity['uid'],'gid':identity['gid'],
+                'receipt_sha256':digest(self.i.protected_read(str(receipt_path),8192))}
 
     def prepare_database(self, action):
         # Full records and embedded migration checks precede directory creation,
@@ -944,7 +1139,7 @@ class Target(Host):
         # bytes are not accepted here as proof; Go must authenticate and derive
         # every file under the original target seal before claiming success.
         with self.lock('target.lock'):
-            verification = action in ('target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status','target-verification-runtime-check')
+            verification = action in ('target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status','target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS)
             self.unused_host(configuration=True, verification=verification)
             plan = self.read(self.root / 'plan.json')
             plan_path, directory = self.root / 'database-plan.json', self.root / 'database'
@@ -1008,11 +1203,11 @@ class Target(Host):
         if action == 'target-verification-data-begin':
             approval_path = self.root/'verification-data-approval.json'
             require(approval_path.exists() or approval_path.is_symlink(),'TARGET_VERIFICATION_DATA_APPROVAL_REQUIRED')
-        phase_status = has_data_phase and action in ('target-verification-data-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-runtime-check')
+        phase_status = has_data_phase and action in ('target-verification-data-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS)
         if phase_status:
             result = self.target_command('verification-data-status')
             self.verify_verification_data(result,plan,database_plan,readonly=True)
-        elif action in ('target-verification-data-status','target-verification-runtime-check'):
+        elif action in ('target-verification-data-status','target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS):
             raise Refused('TARGET_VERIFICATION_DATA_NOT_STARTED')
         else:
             result = self.target_command('verification-plan')
@@ -1024,7 +1219,7 @@ class Target(Host):
                     'schema': 1, 'operation_id': self.operation, 'plan_sha256': result['plan_sha256']},
                 'TARGET_VERIFICATION_APPROVAL_CHANGED')
         args = (self.operation, result['plan_sha256'], database_plan['data']['charset'], database_plan['data']['collation'])
-        if action == 'target-verification-runtime-check':
+        if action in ('target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS):
             # Stopped-host preflight only. Reuse the original phase after valid
             # authentication changes; never silently start, extend or rebase.
             before = module.complete_verification_mysql(*args,readonly=True)
@@ -1040,6 +1235,16 @@ class Target(Host):
             require(module.complete_verification_mysql(*args,readonly=True)==before,
                     'TARGET_VERIFICATION_ACCOUNT_CHANGED')
             self.unused_host(configuration=True,verification=True)
+            if action in VERIFICATION_SYSTEM_ACTIONS:
+                readonly = action=='target-verification-system-status'
+                identity = self.system_identity(proof,readonly=readonly)
+                require(module.complete_verification_mysql(*args,readonly=True)==before and
+                        self.target_command('verification-runtime-check')==proof,
+                        'TARGET_VERIFICATION_SYSTEM_PHASE_CHANGED')
+                self.unused_host(configuration=True,verification=True)
+                return {'schema':1,'operation_id':self.operation,'verification_plan_sha256':result['plan_sha256'],
+                        'system_identity':identity,'system_identity_verified':True,'readonly':readonly,
+                        'root_inventory_verified':True,'service_started':False,'migration_ready':False}
             return {**proof,'root_inventory_verified':True}
         if action == 'target-verification-data-status':
             # This read-only account check works before and after locking; no
@@ -1104,7 +1309,7 @@ class Target(Host):
     def prepare(self, action):
         with self.installation_lock():
             verify_installation(self, self.i, target=True)
-            if action in ('target-configuration-publish','target-configuration-status','target-configuration-resume','target-verification-plan','target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status','target-verification-runtime-check'):
+            if action in ('target-configuration-publish','target-configuration-status','target-configuration-resume','target-verification-plan','target-verification-prepare','target-verification-status','target-verification-revoke-plan','target-verification-revoke','target-verification-revoke-status','target-verification-data-begin','target-verification-data-status','target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS):
                 return self.publish_configuration(action)
             self.unused_host()
             plan = self.target_command('plan')
@@ -1173,14 +1378,14 @@ class Arguments(argparse.ArgumentParser):
 
 def main():
     parser = Arguments(description=__doc__)
-    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check'))
+    parser.add_argument('action', choices=('capabilities', 'plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS))
     parser.add_argument('--operation')
     args = parser.parse_args()
     require((args.action in ('capabilities', 'plan') and args.operation is None) or
             (args.action not in ('capabilities', 'plan') and isinstance(args.operation, str) and OP.fullmatch(args.operation)),
             'EXACT_OPERATION_ID_REQUIRED')
     if args.action == 'capabilities':
-        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check'],
+        return {'schema': 1, 'protocol': PROTOCOL, 'actions': ['plan', 'isolate', 'status', 'resume-source', 'export', 'target-plan', 'target-seal', 'target-status', 'target-database-plan', 'target-provision', 'target-restore', 'target-data-status', 'target-materials', 'target-material-status', 'target-revoke-sessions', 'target-session-status', 'target-session-resume', 'target-configuration-plan', 'target-configuration-publish', 'target-configuration-status', 'target-configuration-resume', 'target-verification-plan', 'target-verification-prepare', 'target-verification-status', 'target-verification-revoke-plan', 'target-verification-revoke', 'target-verification-revoke-status', 'target-verification-data-begin', 'target-verification-data-status', 'target-verification-runtime-check', *VERIFICATION_SYSTEM_ACTIONS],
                 'export_restore': False, 'migration_ready': False}
     if args.action.startswith('target-'):
         return Target(install_module(), args.operation).prepare(args.action)
