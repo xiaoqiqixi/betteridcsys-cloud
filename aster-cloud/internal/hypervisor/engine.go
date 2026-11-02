@@ -1038,11 +1038,20 @@ func (m *Manager) domainXML(i Instance) ([]byte, error) {
 		d.Devices.Disks = []diskXML{disk, original}
 	}
 	if i.Seed != "" {
-		seed := diskXML{Type: "file", Device: "cdrom", ReadOnly: &struct{}{}}
+		// Minimal cloud kernels have virtio block support available at boot;
+		// a SATA seed can remain undiscovered during early datasource detection.
+		seed := diskXML{Type: "file", Device: "disk", ReadOnly: &struct{}{}}
+		seed.Driver = &struct {
+			Name string `xml:"name,attr"`
+			Type string `xml:"type,attr"`
+		}{"qemu", "raw"}
 		seed.Source.File = i.Seed
 		seed.Source.SecurityLabel = &diskSecurityLabelXML{Model: "dac", Relabel: "no"}
-		seed.Target.Dev = "sda"
-		seed.Target.Bus = "sata"
+		seed.Target.Dev = "vdb"
+		if i.Rescue != nil {
+			seed.Target.Dev = "vdc"
+		}
+		seed.Target.Bus = "virtio"
 		d.Devices.Disks = append(d.Devices.Disks, seed)
 	}
 	if i.IPv4 != "" {
@@ -1165,7 +1174,15 @@ func (m *Manager) assertOwned(ctx context.Context, i Instance) error {
 				return ErrOwnership
 			}
 		case i.Seed:
-			if i.Seed == "" || disk.Device != "cdrom" || disk.ReadOnly == nil {
+			// Keep already-defined SATA seeds manageable until the next normal
+			// guest redefinition. New seeds must remain raw, read-only virtio.
+			legacy := disk.Device == "cdrom" && disk.Target.Dev == "sda" && disk.Target.Bus == "sata"
+			seedDevice := "vdb"
+			if i.Rescue != nil {
+				seedDevice = "vdc"
+			}
+			virtio := disk.Device == "disk" && disk.Target.Dev == seedDevice && disk.Target.Bus == "virtio" && disk.Driver != nil && disk.Driver.Name == "qemu" && disk.Driver.Type == "raw"
+			if i.Seed == "" || disk.ReadOnly == nil || !legacy && !virtio {
 				return ErrOwnership
 			}
 		default:
