@@ -166,24 +166,30 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
         stream.close()
         parent.close()
         stdout, stderr = process.communicate(timeout=20)
-        require(process.returncode == 1 and not stdout and len(stderr) <= 4096, code)
-        error = json.loads(stderr)
+        require(process.returncode == 1 and not stdout and len(stderr) <= 4096, 'TARGET_NATIVE_HANDOFF_REFUSAL_EXIT')
+        try:
+            error = json.loads(stderr)
+        except (ValueError, UnicodeError):
+            require(False, 'TARGET_NATIVE_HANDOFF_REFUSAL_LOG')
         require(set(error) == {'time','level','msg','component','code'} and
             error['code'] == ('CONTROLLER_MIGRATION_BUSY' if busy else 'COMMAND_FAILED') and
-            error['component'] == 'controller' and error['level'] == 'ERROR', code)
-        require(not list(inputs.glob('.restore-verify-*')), code)
+            error['component'] == 'controller' and error['level'] == 'ERROR', 'TARGET_NATIVE_HANDOFF_REFUSAL_LOG')
+        require(not list(inputs.glob('.restore-verify-*')), 'TARGET_NATIVE_HANDOFF_REFUSAL_CLEANUP')
 
     def proof_for(process, stream, nonce):
-        raw = stream.readline((256 << 10) + 2)
-        require(raw.endswith(b'\n') and len(raw) <= (256 << 10) + 1 and process.poll() is None, code)
-        require(target.i.strict_json(raw) == {'schema':1,'nonce':nonce,'proof':expected}, code)
+        try:
+            raw = stream.readline((256 << 10) + 2)
+        except (OSError, ValueError):
+            require(False, 'TARGET_NATIVE_HANDOFF_PROOF_STREAM')
+        require(raw.endswith(b'\n') and len(raw) <= (256 << 10) + 1 and process.poll() is None, 'TARGET_NATIVE_HANDOFF_PROOF_STREAM')
+        require(target.i.strict_json(raw) == {'schema':1,'nonce':nonce,'proof':expected}, 'TARGET_NATIVE_HANDOFF_PROOF_BINDING')
         # These are real root SQL and installed manifest checks, performed again
         # while Go holds the original target lock. No cached JSON permits start.
         require(module.complete_verification_mysql(*arguments, readonly=True) == account, code)
         manager.verify_installation(target, target.i, target=True)
         target.verify_verification_data(expected['phase'], target.read(inputs/'plan.json'), dbplan, readonly=True)
         require(target.system_identity(expected,readonly=True)==system_identity,code)
-        require(len(list(inputs.glob('.restore-verify-*'))) == 1, code)
+        require(len(list(inputs.glob('.restore-verify-*'))) == 1, 'TARGET_NATIVE_HANDOFF_PROOF_SCRATCH')
         return hashlib.sha256(raw).hexdigest()
 
     def ack(parent, nonce, digest, uid=None):

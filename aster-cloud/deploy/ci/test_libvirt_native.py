@@ -125,6 +125,18 @@ class NativeFixtureContract(unittest.TestCase):
             self.assertFalse(public['passed'])
             self.assertNotIn('private', public)
 
+    def test_handoff_failure_codes_are_bounded_without_private_diagnostics(self):
+        metadata = {**self.metadata(), 'scenario': 'controller-restore-configuration'}
+        for suffix in ('REFUSAL_EXIT', 'REFUSAL_LOG', 'REFUSAL_CLEANUP',
+                       'PROOF_STREAM', 'PROOF_BINDING', 'PROOF_SCRATCH'):
+            code = 'TARGET_NATIVE_HANDOFF_' + suffix
+            result = {**self.metadata(), 'schema': 1, 'passed': False, 'kvm_ready': False,
+                      'code': code, 'phase': 'target-verification-managed-handoff-refusal',
+                      'private': 'credentials must never escape'}
+            public = h.public_result(result, metadata)
+            self.assertEqual(public['code'], code)
+            self.assertNotIn('private', public)
+
     def test_verification_failure_reports_preserve_fixed_diagnostics_not_private_text(self):
         metadata = {**self.metadata(), 'scenario': 'controller-restore-configuration'}
         cases = {
