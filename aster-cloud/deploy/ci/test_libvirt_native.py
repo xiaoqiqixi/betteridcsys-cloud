@@ -179,6 +179,32 @@ class NativeFixtureContract(unittest.TestCase):
         with verification.handoff_check('PROOF_JSON', require):
             self.assertEqual(json.loads(b'{"schema":1}'), {'schema': 1})
 
+    def test_handoff_rechecks_preserve_the_received_plan_digest_order(self):
+        # Go hashes its struct field order; the installed Python CLI sorts its
+        # output keys. Equal decoded objects are not interchangeable hash input.
+        plan = {'schema': 1, 'protocol': 'aster.controller-verification-plan/1',
+                'controller_id': 'fixture', 'operation_id': 'a' * 32,
+                'sql': {'database': 'fixture', 'user': 'fixture', 'grants': ['SELECT']}}
+        encoded_plan = json.dumps(plan, separators=(',', ':')).encode()
+        proof = {'schema': 1, 'phase': {'plan': plan,
+                 'plan_sha256': hashlib.sha256(encoded_plan).hexdigest()}}
+        expected = json.loads(json.dumps(proof, sort_keys=True))
+        nonce = 'b' * 64
+        packet = {'schema': 1, 'nonce': nonce, 'proof': proof}
+        raw = json.dumps(packet, separators=(',', ':')).encode() + b'\n'
+        def require(condition, code):
+            if not condition:
+                raise h.Refused(code)
+        received = verification.handoff_bound_proof(raw, json.loads, expected, nonce, require)
+        self.assertEqual(received, expected)
+        phase = received['phase']
+        self.assertEqual(hashlib.sha256(json.dumps(phase['plan'], separators=(',', ':')).encode()).hexdigest(),
+                         phase['plan_sha256'])
+        for changed in ({**packet, 'nonce': 'c' * 64},
+                        {**packet, 'proof': {**proof, 'phase': {**proof['phase'], 'plan_sha256': 'd' * 64}}}):
+            with self.assertRaisesRegex(h.Refused, '^TARGET_NATIVE_HANDOFF_PROOF_BINDING$'):
+                verification.handoff_bound_proof(json.dumps(changed).encode(), json.loads, expected, nonce, require)
+
     def test_reset_handoff_retains_only_the_bounded_child_refusal(self):
         event = {'time': 'PRIVATE_TIME', 'level': 'ERROR', 'component': 'controller',
                  'msg': 'aster_command_failed', 'code': 'VERIFICATION_COORDINATOR_REQUEST'}

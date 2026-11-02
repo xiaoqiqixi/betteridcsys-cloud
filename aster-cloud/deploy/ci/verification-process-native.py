@@ -85,6 +85,16 @@ def handoff_proof_record(process, stream, require):
     return raw
 
 
+def handoff_bound_proof(raw, parse, expected, nonce, require):
+    with handoff_check('PROOF_JSON', require):
+        packet = parse(raw)
+    require(packet == {'schema':1,'nonce':nonce,'proof':expected}, 'TARGET_NATIVE_HANDOFF_PROOF_BINDING')
+    # The CLI expectation has sorted keys. Recheck the fresh Go proof itself:
+    # its plan digest binds Go's field order, even when decoded values compare
+    # equal. The installed root manager follows this same received-proof path.
+    return packet['proof']
+
+
 def fixture_failure(raw):
     code = raw.decode('ascii', errors='replace').removesuffix('\n')
     return code if len(raw) <= 128 and code in FAILURE_CODES else 'TARGET_NATIVE_ASSERTION_FAILED'
@@ -233,9 +243,7 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
 
     def proof_for(process, stream, nonce):
         raw = handoff_proof_record(process, stream, require)
-        with handoff_check('PROOF_JSON', require):
-            proof = target.i.strict_json(raw)
-        require(proof == {'schema':1,'nonce':nonce,'proof':expected}, 'TARGET_NATIVE_HANDOFF_PROOF_BINDING')
+        proof = handoff_bound_proof(raw, target.i.strict_json, expected, nonce, require)
         # These are real root SQL and installed manifest checks, performed again
         # while Go holds the original target lock. No cached JSON permits start.
         with handoff_check('SQL_RECHECK', require):
@@ -244,9 +252,9 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
         with handoff_check('INSTALLATION_RECHECK', require):
             manager.verify_installation(target, target.i, target=True)
         with handoff_check('DATA_RECHECK', require):
-            target.verify_verification_data(expected['phase'], target.read(inputs/'plan.json'), dbplan, readonly=True)
+            target.verify_verification_data(proof['phase'], target.read(inputs/'plan.json'), dbplan, readonly=True)
         with handoff_check('IDENTITY_RECHECK', require):
-            checked_identity = target.system_identity(expected,readonly=True)
+            checked_identity = target.system_identity(proof,readonly=True)
         require(checked_identity == system_identity,code)
         require(len(list(inputs.glob('.restore-verify-*'))) == 1, 'TARGET_NATIVE_HANDOFF_PROOF_SCRATCH')
         return hashlib.sha256(raw).hexdigest()
