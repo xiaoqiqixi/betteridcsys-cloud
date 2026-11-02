@@ -421,7 +421,9 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # Ubuntu 24.04 completed real SQL, race and static builds at 25 minutes.
+    # Leave a bounded budget for cold tooling, vulnerability scanning and cleanup.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
