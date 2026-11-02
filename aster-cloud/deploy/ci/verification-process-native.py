@@ -6,6 +6,7 @@ installed root launcher and systemd management; source-host export, successful
 staff login and browser/UI are NOT certified by these process checks.
 """
 import base64
+from contextlib import contextmanager
 import ctypes
 from datetime import datetime, timedelta, timezone
 import errno
@@ -39,6 +40,17 @@ LAUNCH_FAILURES |= {'VERIFICATION_COORDINATOR_' + stage for stage in
 LAUNCH_FAILURES |= {'CONTROLLER_MIGRATION_BUSY', 'CONTROLLER_MIGRATION_FENCED'}
 
 
+@contextmanager
+def handoff_check(stage, require):
+    """Identify an unexpected native exception without exporting its message."""
+    try:
+        yield
+    except Exception as error:
+        kind = ('TIMEOUT' if isinstance(error, (TimeoutError, subprocess.TimeoutExpired)) else
+                'IO' if isinstance(error, OSError) else 'REJECTED')
+        require(False, 'TARGET_NATIVE_HANDOFF_' + stage + '_' + kind)
+
+
 def launch_failure(raw):
     try:
         value = json.loads(raw) if len(raw) <= 4096 else None
@@ -65,7 +77,8 @@ def handoff_proof_record(process, stream, require):
             require(False, 'TARGET_NATIVE_HANDOFF_CHANNEL_RESET')
         require(False, launch_failure(stderr))
     if not raw:
-        _, stderr = process.communicate(timeout=20)
+        with handoff_check('PROOF_EXIT', require):
+            _, stderr = process.communicate(timeout=20)
         require(False, launch_failure(stderr))
     require(raw.endswith(b'\n') and len(raw) <= (256 << 10) + 1 and process.poll() is None,
             'TARGET_NATIVE_HANDOFF_PROOF_STREAM')
@@ -206,33 +219,43 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
     def finish_refused(process, parent, stream, busy=False):
         stream.close()
         parent.close()
-        stdout, stderr = process.communicate(timeout=20)
+        with handoff_check('REFUSAL_WAIT', require):
+            stdout, stderr = process.communicate(timeout=20)
         require(process.returncode == 1 and not stdout and len(stderr) <= 4096, 'TARGET_NATIVE_HANDOFF_REFUSAL_EXIT')
         try:
             error = json.loads(stderr)
         except (ValueError, UnicodeError):
             require(False, 'TARGET_NATIVE_HANDOFF_REFUSAL_LOG')
-        require(set(error) == {'time','level','msg','component','code'} and
+        require(isinstance(error, dict) and set(error) == {'time','level','msg','component','code'} and
             error['code'] == ('CONTROLLER_MIGRATION_BUSY' if busy else 'COMMAND_FAILED') and
             error['component'] == 'controller' and error['level'] == 'ERROR', 'TARGET_NATIVE_HANDOFF_REFUSAL_LOG')
         require(not list(inputs.glob('.restore-verify-*')), 'TARGET_NATIVE_HANDOFF_REFUSAL_CLEANUP')
 
     def proof_for(process, stream, nonce):
         raw = handoff_proof_record(process, stream, require)
-        require(target.i.strict_json(raw) == {'schema':1,'nonce':nonce,'proof':expected}, 'TARGET_NATIVE_HANDOFF_PROOF_BINDING')
+        with handoff_check('PROOF_JSON', require):
+            proof = target.i.strict_json(raw)
+        require(proof == {'schema':1,'nonce':nonce,'proof':expected}, 'TARGET_NATIVE_HANDOFF_PROOF_BINDING')
         # These are real root SQL and installed manifest checks, performed again
         # while Go holds the original target lock. No cached JSON permits start.
-        require(module.complete_verification_mysql(*arguments, readonly=True) == account, code)
-        manager.verify_installation(target, target.i, target=True)
-        target.verify_verification_data(expected['phase'], target.read(inputs/'plan.json'), dbplan, readonly=True)
-        require(target.system_identity(expected,readonly=True)==system_identity,code)
+        with handoff_check('SQL_RECHECK', require):
+            checked_account = module.complete_verification_mysql(*arguments, readonly=True)
+        require(checked_account == account, code)
+        with handoff_check('INSTALLATION_RECHECK', require):
+            manager.verify_installation(target, target.i, target=True)
+        with handoff_check('DATA_RECHECK', require):
+            target.verify_verification_data(expected['phase'], target.read(inputs/'plan.json'), dbplan, readonly=True)
+        with handoff_check('IDENTITY_RECHECK', require):
+            checked_identity = target.system_identity(expected,readonly=True)
+        require(checked_identity == system_identity,code)
         require(len(list(inputs.glob('.restore-verify-*'))) == 1, 'TARGET_NATIVE_HANDOFF_PROOF_SCRATCH')
         return hashlib.sha256(raw).hexdigest()
 
     def ack(parent, nonce, digest, uid=None):
-        parent.sendall((json.dumps({'schema':1,'nonce':nonce,'proof_sha256':digest,
-            'uid':system_identity['uid'] if uid is None else uid,'gid':system_identity['gid']},
-            separators=(',',':'))+'\n').encode())
+        with handoff_check('ACK', require):
+            parent.sendall((json.dumps({'schema':1,'nonce':nonce,'proof_sha256':digest,
+                'uid':system_identity['uid'] if uid is None else uid,'gid':system_identity['gid']},
+                separators=(',',':'))+'\n').encode())
 
     def request(path):
         with socket.create_connection(('127.0.0.1',9555), timeout=2) as raw:
@@ -271,10 +294,15 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
                 if refusal == 'stale-proof':
                     digest = '0'*64 if digest != '0'*64 else '1'*64
                 ack(parent, nonce, digest, uid=0 if refusal == 'root-child' else None)
-                require(stream.read(1) == b'', code)
+                with handoff_check('REFUSAL_EOF', require):
+                    tail = stream.read(1)
+                require(tail == b'', code)
                 finish_refused(process, parent, stream)
-                stopped()
-                require(target.target_command('verification-runtime-check') == expected, code)
+                with handoff_check('REFUSAL_DRAIN', require):
+                    stopped()
+                with handoff_check('REFUSAL_RUNTIME', require):
+                    checked_runtime = target.target_command('verification-runtime-check')
+                require(checked_runtime == expected, code)
 
             progress('target-verification-managed-handoff-serving')
             process, parent, stream, nonce = start()

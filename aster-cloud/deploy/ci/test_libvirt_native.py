@@ -152,6 +152,33 @@ class NativeFixtureContract(unittest.TestCase):
                     json.dumps({**event, 'component': 'foreign'}).encode()):
             self.assertEqual(guest.launch_failure(raw), 'TARGET_NATIVE_HANDOFF_PROOF_STREAM')
 
+    def test_unexpected_handoff_exceptions_keep_stage_and_kind_without_private_text(self):
+        def require(condition, code):
+            if not condition:
+                raise h.Refused(code)
+        metadata = {**self.metadata(), 'scenario': 'controller-restore-configuration'}
+        cases = ((TimeoutError('PRIVATE_SOCKET'), 'TIMEOUT'),
+                 (subprocess.TimeoutExpired('PRIVATE_COMMAND', 20, output='PRIVATE_OUTPUT'), 'TIMEOUT'),
+                 (BrokenPipeError('PRIVATE_PATH'), 'IO'),
+                 (ValueError('PRIVATE_CREDENTIAL'), 'REJECTED'))
+        for stage in ('PROOF_EXIT', 'PROOF_JSON', 'SQL_RECHECK', 'INSTALLATION_RECHECK',
+                      'DATA_RECHECK', 'IDENTITY_RECHECK', 'ACK', 'REFUSAL_EOF',
+                      'REFUSAL_WAIT', 'REFUSAL_DRAIN', 'REFUSAL_RUNTIME'):
+            for error, kind in cases:
+                code = 'TARGET_NATIVE_HANDOFF_' + stage + '_' + kind
+                with self.subTest(stage=stage, kind=kind), self.assertRaises(h.Refused) as caught:
+                    with verification.handoff_check(stage, require):
+                        raise error
+                self.assertEqual(str(caught.exception), code)
+                result = {**self.metadata(), 'schema': 1, 'passed': False, 'kvm_ready': False,
+                          'code': code, 'phase': 'target-verification-managed-handoff-refusal',
+                          'private': str(error)}
+                public = h.public_result(result, metadata)
+                self.assertEqual(public['code'], code)
+                self.assertNotIn('PRIVATE', json.dumps(public))
+        with verification.handoff_check('PROOF_JSON', require):
+            self.assertEqual(json.loads(b'{"schema":1}'), {'schema': 1})
+
     def test_reset_handoff_retains_only_the_bounded_child_refusal(self):
         event = {'time': 'PRIVATE_TIME', 'level': 'ERROR', 'component': 'controller',
                  'msg': 'aster_command_failed', 'code': 'VERIFICATION_COORDINATOR_REQUEST'}
