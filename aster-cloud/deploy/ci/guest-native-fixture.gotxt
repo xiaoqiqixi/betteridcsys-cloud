@@ -155,9 +155,19 @@ func TestNativeGuestLifecycleAndConsole(t *testing.T) {
 		t.Fatal("native rescue exit failed")
 	}
 	nativeConsoleHandshake(t, ctx, m, i)
-	task = next(task, "9", "delete")
+	// Deletion requires a confirmed stopped guest, including after rescue exit.
+	task = next(task, "8", "force_off")
 	task.Guest = nodeproto.GuestParams{}
 	submitNative(task)
+	task = next(task, "9", "delete")
+	submitNative(task)
+	deleted, found := l.Instance(id)
+	if !found || deleted.State != "deleted" {
+		t.Fatal("native deletion not persisted")
+	}
+	if _, err := os.Lstat(i.Directory); !os.IsNotExist(err) {
+		t.Fatal("native deletion retained guest files")
+	}
 }
 
 func nativeConsoleHandshake(t *testing.T, ctx context.Context, m *Manager, i Instance) {
