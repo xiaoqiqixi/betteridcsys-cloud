@@ -406,6 +406,10 @@ func TestRescueOwnershipRecoveryRefusesLinksAndPublicPermissions(t *testing.T) {
 				e = os.Link(original, i.Disk)
 			case "public":
 				e = os.WriteFile(i.Disk, []byte("not private"), 0644)
+				if e == nil {
+					// The native runner's umask 077 must not privatize this unsafe fixture.
+					e = os.Chmod(i.Disk, 0644)
+				}
 			}
 			if e != nil {
 				t.Fatal(e)
