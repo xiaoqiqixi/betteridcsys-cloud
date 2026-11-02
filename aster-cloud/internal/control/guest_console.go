@@ -85,6 +85,9 @@ func (c *GuestConsole) Issue(ctx context.Context, v Instance) (serviceapi.Consol
 	if len(c.tickets) >= 4096 {
 		return serviceapi.Console{}, ErrCapacity
 	}
+	if e := c.Store.RecordConsoleGrant(ctx, v, now); e != nil {
+		return serviceapi.Console{}, e
+	}
 	c.tickets[sha256.Sum256([]byte(token))] = consoleTicket{v.ID, v.OwnerRef, v.NodeID, expires}
 	return serviceapi.Console{URL: c.Origin + "/console/#" + token, ExpiresAt: expires}, nil
 }

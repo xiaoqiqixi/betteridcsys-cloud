@@ -32,6 +32,45 @@ func readyService(t *testing.T) (*SQLStore, Config, NodeProfile, Instance, time.
 	}
 	return s, c, p, v, now
 }
+
+func TestMySQLConsoleGrantAuditRechecksOwnerAndSuspension(t *testing.T) {
+	s, _, _, v, now := readyService(t)
+	ctx := context.Background()
+	if err := s.RecordConsoleGrant(ctx, v, now); err != nil {
+		t.Fatal(err)
+	}
+	wrong := v
+	wrong.OwnerRef = id()
+	if err := s.RecordConsoleGrant(ctx, wrong, now); !errors.Is(err, ErrNotFound) {
+		t.Fatal("wrong owner grant", err)
+	}
+	wrong = v
+	wrong.NodeID = "different-node"
+	if err := s.RecordConsoleGrant(ctx, wrong, now); !errors.Is(err, ErrNotFound) {
+		t.Fatal("wrong node grant", err)
+	}
+	if _, err := s.DB.ExecContext(ctx, "INSERT INTO controller_service_state(instance_id,suspended) VALUES(?,TRUE) ON DUPLICATE KEY UPDATE suspended=TRUE", v.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordConsoleGrant(ctx, v, now); !errors.Is(err, ErrState) {
+		t.Fatal("suspended grant", err)
+	}
+	if _, err := s.DB.ExecContext(ctx, "UPDATE controller_service_state SET suspended=FALSE WHERE instance_id=?", v.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"uncertain", "deleted"} {
+		if _, err := s.DB.ExecContext(ctx, "UPDATE controller_instances SET state=? WHERE id=?", state, v.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RecordConsoleGrant(ctx, v, now); !errors.Is(err, ErrState) {
+			t.Fatal("unavailable instance grant", state, err)
+		}
+	}
+	var count int
+	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM controller_audit WHERE actor='billing' AND action='console.issued' AND target=?", v.ID).Scan(&count); err != nil || count != 1 {
+		t.Fatal("console audit must contain exactly the authorized grant", count, err)
+	}
+}
 func TestMySQLServiceDurableReceiptsRedactedTasksAndLostSecrets(t *testing.T) {
 	s, c, _, v, now := readyService(t)
 	ctx := context.Background()

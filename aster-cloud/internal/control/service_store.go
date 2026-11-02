@@ -37,6 +37,34 @@ type ServiceStore interface {
 	ServiceReceipt(context.Context, string) (ServiceReceipt, error)
 	Operation(context.Context, string) (Operation, error)
 	ServiceSnapshots(context.Context, string, int) (serviceapi.Snapshots, error)
+	RecordConsoleGrant(context.Context, Instance, time.Time) error
+}
+
+// RecordConsoleGrant stores only the authorized instance identity, never the
+// single-use bearer ticket. Recheck ownership and suspension under the mutation
+// gate before allowing the caller to publish the credential.
+func (s *SQLStore) RecordConsoleGrant(ctx context.Context, v Instance, now time.Time) error {
+	tx, err := s.locked(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var owner, node, state string
+	var suspended bool
+	err = tx.QueryRowContext(ctx, "SELECT i.owner_ref,i.node_id,i.state,COALESCE(s.suspended,0) FROM controller_instances i LEFT JOIN controller_service_state s ON s.instance_id=i.id WHERE i.id=?", v.ID).Scan(&owner, &node, &state, &suspended)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && (owner != v.OwnerRef || node != v.NodeID) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if suspended || state == "deleted" || state == "uncertain" {
+		return ErrState
+	}
+	if err := audit(ctx, tx, "billing", "console.issued", v.ID, now); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 const serviceReceiptColumns = "operation_id,instance_id,owner_ref,action,request_sha256,receipt_status,receipt_code,requires_secret,snapshot_name,created_at"

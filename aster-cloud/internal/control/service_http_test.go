@@ -12,10 +12,20 @@ import (
 
 type serviceFixture struct {
 	*resourceViewFixture
-	receipts map[string]ServiceReceipt
-	ops      map[string]Operation
-	writes   int
-	caps     Capability
+	receipts        map[string]ServiceReceipt
+	ops             map[string]Operation
+	writes          int
+	caps            Capability
+	consoleAudits   []Instance
+	consoleAuditErr error
+}
+
+func (f *serviceFixture) RecordConsoleGrant(_ context.Context, v Instance, _ time.Time) error {
+	if f.consoleAuditErr != nil {
+		return f.consoleAuditErr
+	}
+	f.consoleAudits = append(f.consoleAudits, v)
+	return nil
 }
 
 func (f *serviceFixture) ServiceFlags(context.Context, string) (ServiceFlags, error) {

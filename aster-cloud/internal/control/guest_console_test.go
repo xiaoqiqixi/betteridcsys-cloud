@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -87,6 +88,21 @@ func TestGuestConsoleTicketsExpireAndConsumeExactlyOnce(t *testing.T) {
 	now = now.Add(time.Minute)
 	if _, ok := c.consume(secret); ok {
 		t.Fatal("expired ticket accepted")
+	}
+}
+
+func TestGuestConsoleRequiresAuditBeforeReturningTicket(t *testing.T) {
+	c, s, _ := guestConsoleFixture(t)
+	s.consoleAuditErr = errors.New("audit unavailable")
+	if ticket, err := c.Issue(context.Background(), s.value); err == nil || ticket.URL != "" || len(c.tickets) != 0 {
+		t.Fatal("unaudited ticket escaped", err)
+	}
+	s.consoleAuditErr = nil
+	if _, err := c.Issue(context.Background(), s.value); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.consoleAudits) != 1 || s.consoleAudits[0].ID != s.value.ID || s.consoleAudits[0].OwnerRef != s.value.OwnerRef {
+		t.Fatal("console grant audit lost its instance or owner")
 	}
 }
 func TestGuestConsoleStreamsBinaryAndRejectsReplayAndOrigin(t *testing.T) {
