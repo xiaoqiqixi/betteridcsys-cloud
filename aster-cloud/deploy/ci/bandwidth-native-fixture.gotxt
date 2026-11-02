@@ -15,6 +15,12 @@ import (
 )
 
 func TestNativeBandwidthLiveXML(t *testing.T) {
+	stage := "setup"
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Log("native bandwidth_failure_stage=" + stage)
+		}
+	})
 	if runtime.GOOS != "linux" || os.Geteuid() != 0 {
 		t.Fatal("native Linux root fixture required")
 	}
@@ -41,11 +47,28 @@ func TestNativeBandwidthLiveXML(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
+	if err := os.Chmod(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	stage = "bridge-create"
 	command("/usr/sbin/ip", "link", "add", "asterqos0", "type", "bridge")
 	t.Cleanup(func() { exec.Command("/usr/sbin/ip", "link", "delete", "asterqos0").Run() })
+	stage = "bridge-up"
 	command("/usr/sbin/ip", "link", "set", "asterqos0", "up")
-	m := Manager{Config: Config{NodeID: "native-tcg-node", Network: Network{Bridge: "asterqos0", Filter: "aster-native-qos"}}}
-	i := Instance{ID: id, OwnerRef: strings.Repeat("f", 32), Domain: domain, Disk: filepath.Join(dir, "system.qcow2"), IPv4: "192.0.2.2", MAC: "52:54:00:12:34:56", Resources: controllerapi.Resources{CPUCores: 1, MemoryMiB: 128, InboundBandwidthMbps: 100, BandwidthMbps: 8}}
+	approved, err := LoadConfig("/etc/aster-node/node.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Manager{Config: Config{NodeID: approved.NodeID, Images: approved.Images, Network: Network{Bridge: "asterqos0", Filter: "aster-native-qos"}}}
+	i := Instance{ID: id, OwnerRef: strings.Repeat("f", 32), Domain: domain, Disk: filepath.Join(dir, "system.qcow2"), IPv4: "192.0.2.2", MAC: "52:54:00:12:34:56", Resources: controllerapi.Resources{ImageID: "signed-ubuntu", CPUCores: 1, MemoryMiB: 128, InboundBandwidthMbps: 100, BandwidthMbps: 8}}
+	// Production validates the disk header and approved image binding while
+	// generating XML. A flat bandwidth fixture must exist before that check.
+	stage = "disk-create"
+	command(QemuImg, "create", "-f", "qcow2", i.Disk, "16M")
+	if err := os.Chmod(i.Disk, 0600); err != nil {
+		t.Fatal(err)
+	}
+	stage = "domain-xml"
 	raw, err := m.domainXML(i)
 	if err != nil {
 		t.Fatal(err)
@@ -57,28 +80,33 @@ func TestNativeBandwidthLiveXML(t *testing.T) {
 	if err = os.WriteFile(filter, ApprovedFilterXML("aster-native-qos"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	stage = "filter-define"
 	virsh("nwfilter-define", filter)
 	t.Cleanup(func() {
 		exec.Command(Virsh, "--connect", "qemu:///system", "nwfilter-undefine", "aster-native-qos").Run()
 	})
-	command(QemuImg, "create", "-f", "qcow2", i.Disk, "16M")
 	path := filepath.Join(dir, "domain.xml")
 	if err = os.WriteFile(path, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
+	stage = "domain-define"
 	virsh("define", path)
 	t.Cleanup(func() {
 		exec.Command(Virsh, "--connect", "qemu:///system", "destroy", domain).Run()
 		exec.Command(Virsh, "--connect", "qemu:///system", "undefine", domain).Run()
 	})
+	stage = "domain-start"
 	virsh("start", domain)
+	stage = "domain-read"
 	var live domainXML
 	if err = xml.Unmarshal(virsh("dumpxml", domain), &live); err != nil {
 		t.Fatal(err)
 	}
+	stage = "bandwidth"
 	if len(live.Devices.Interfaces) != 1 || !bandwidthMatches(live.Devices.Interfaces[0].Bandwidth, bandwidthFor(i.Resources)) {
 		t.Fatal("live domain lost production inbound/outbound bandwidth")
 	}
+	stage = "power-state"
 	if strings.TrimSpace(string(virsh("domstate", domain))) != "running" {
 		t.Fatal("native domain not running")
 	}

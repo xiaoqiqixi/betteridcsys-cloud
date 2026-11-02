@@ -692,6 +692,12 @@ class NativeFixtureContract(unittest.TestCase):
 
     def test_lifecycle_failure_stage_is_exact_and_bounded(self):
         g = load('native_guest_lifecycle_stage', 'libvirt-native-guest.py')
+        for stage in ('setup', 'bridge-create', 'bridge-up', 'domain-xml', 'filter-define',
+                      'disk-create', 'domain-define', 'domain-start', 'domain-read', 'bandwidth', 'power-state'):
+            raw = ('    native_bandwidth_fixture_test.go:22: native bandwidth_failure_stage=' + stage + '\n').encode()
+            code = g.lifecycle_failure(raw)
+            self.assertEqual(code, 'GUEST_BANDWIDTH_' + stage.upper().replace('-', '_') + '_FAILED')
+            self.assertIn(code, h.GUEST_ERROR_CODES)
         for stage in ('setup', 'create', 'reinstall', 'rescue_enter', 'rescue_exit',
                       'console', 'force_off', 'delete', 'delete-ledger', 'delete-files'):
             raw = ('    native_guest_ci_test.go:77: native failure_stage=' + stage + '\n').encode()

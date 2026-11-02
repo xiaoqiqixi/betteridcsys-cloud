@@ -323,6 +323,10 @@ def lifecycle_diagnostic(raw):
 
 
 def lifecycle_failure(raw):
+    for stage in ('setup', 'bridge-create', 'bridge-up', 'domain-xml', 'filter-define',
+                  'disk-create', 'domain-define', 'domain-start', 'domain-read', 'bandwidth', 'power-state'):
+        if re.search(rb'(?m)^\s+[^\r\n:]+:\d+: native bandwidth_failure_stage=' + stage.encode() + rb'\r?$', raw):
+            return 'GUEST_BANDWIDTH_' + stage.upper().replace('-', '_') + '_FAILED'
     stages = ('setup', 'create', 'reinstall', 'rescue_enter', 'rescue_exit',
               'console', 'force_off', 'delete', 'delete-ledger', 'delete-files')
     for stage in stages:
@@ -386,10 +390,11 @@ def execute(metadata):
     PHASE = "guest-lifecycle"
     progress(PHASE)
     lifecycle = run([str(ROOT / "bandwidth-fixture.test"), "-test.run=^TestNative(BandwidthLiveXML|GuestLifecycleAndConsole)$", "-test.timeout=7m", "-test.v"], timeout=430, check=False)
+    output = lifecycle.stdout + b'\n' + lifecycle.stderr
     if lifecycle.returncode != 0:
-        LIFECYCLE_DIAGNOSTICS = lifecycle_diagnostic(lifecycle.stdout)
-        raise Refused(lifecycle_failure(lifecycle.stdout))
-    require(all(("--- PASS: " + name + " ").encode() in lifecycle.stdout for name in ("TestNativeBandwidthLiveXML", "TestNativeGuestLifecycleAndConsole")), "GUEST_LIFECYCLE_FAILED")
+        LIFECYCLE_DIAGNOSTICS = lifecycle_diagnostic(output)
+        raise Refused(lifecycle_failure(output))
+    require(all(("--- PASS: " + name + " ").encode() in output for name in ("TestNativeBandwidthLiveXML", "TestNativeGuestLifecycleAndConsole")), "GUEST_LIFECYCLE_PASS_MARKERS_MISSING")
     require(inspect_libvirt() == proof, "PREPARE_RESUME_CHANGED_PROOF")
     return {"schema": 1, "passed": True, "real_apt": True, "real_systemd": True, "libvirt_prepared": True,
             "kvm_ready": False, "explicit_kvm_denial": True, "non_kvm_doctor_checks_passed": True,
