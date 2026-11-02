@@ -510,6 +510,11 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 			return Operation{}, false, e
 		}
 	}
+	if in.Action == "resize" {
+		if e = reserveResizeTx(ctx, tx, c, v, op, in, now); e != nil {
+			return Operation{}, false, e
+		}
+	}
 	p, ok := c.Node(o.NodeID)
 	if !ok {
 		return Operation{}, false, ErrState
@@ -757,12 +762,17 @@ func (s *SQLStore) CompleteOperation(ctx context.Context, c Config, op, status s
 			}
 		}
 		if o.Action == "delete" {
-			if _, e = tx.ExecContext(ctx, "UPDATE controller_reservations SET released=TRUE WHERE node_id=? AND (operation_id IN (SELECT operation_id FROM controller_jobs WHERE instance_id=?) OR operation_id IN (SELECT id FROM controller_operations WHERE instance_id=? AND node_id=? AND action='create' AND state='succeeded') OR operation_id IN (SELECT source_operation_id FROM controller_migrations WHERE instance_id=? AND target_node_id=?))", o.NodeID, o.InstanceID, o.InstanceID, o.NodeID, o.InstanceID, o.NodeID); e != nil {
+			if e = releaseInstanceReservationsTx(ctx, tx, o.InstanceID, o.NodeID); e != nil {
 				return Operation{}, e
 			}
 		}
 	}
 	if status == "rejected" {
+		if o.Action == "resize" {
+			if _, e = tx.ExecContext(ctx, "UPDATE controller_reservations SET released=TRUE WHERE operation_id=?", o.ID); e != nil {
+				return Operation{}, e
+			}
+		}
 		if o.Action == "create" {
 			if _, e = tx.ExecContext(ctx, "UPDATE controller_instances SET state='rejected',updated_at=? WHERE id=?", now, o.InstanceID); e != nil {
 				return Operation{}, e

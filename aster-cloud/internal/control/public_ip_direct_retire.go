@@ -108,6 +108,6 @@ func completeRetireSourceTx(ctx context.Context, tx *sql.Tx, o Operation, now ti
 		return ErrState
 	}
 	// The source is permanently retired, not a new permission to start its old generation.
-	_, e = tx.ExecContext(ctx, "UPDATE controller_reservations SET released=TRUE WHERE node_id=? AND (operation_id IN (SELECT operation_id FROM controller_jobs WHERE instance_id=?) OR operation_id IN (SELECT id FROM controller_operations WHERE instance_id=? AND node_id=? AND action='create' AND state='succeeded') OR operation_id IN (SELECT source_operation_id FROM controller_migrations WHERE instance_id=? AND target_node_id=?))", t.NodeID, t.InstanceID, t.InstanceID, t.NodeID, t.InstanceID, t.NodeID)
+	e = releaseInstanceReservationsTx(ctx, tx, t.InstanceID, t.NodeID)
 	return e
 }

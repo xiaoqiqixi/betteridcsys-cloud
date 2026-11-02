@@ -322,6 +322,9 @@ func completeServiceTx(ctx context.Context, tx *sql.Tx, o Operation, now time.Ti
 		if o.Action == "reinstall" {
 			resources.ImageID = t.Guest.Params.ImageID
 		} else {
+			if e = completeResizeReservationTx(ctx, tx, o, t, now); e != nil {
+				return e
+			}
 			resources.CPUCores = t.Guest.Params.CPUCores
 			resources.MemoryMiB = t.Guest.Params.MemoryMB
 			resources.SystemDiskGiB = t.Guest.Params.DiskGB
