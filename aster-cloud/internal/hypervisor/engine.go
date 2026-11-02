@@ -952,6 +952,10 @@ type domainXML struct {
 			Value string `xml:",chardata"`
 		} `xml:"type"`
 	} `xml:"os"`
+	Features struct {
+		ACPI *struct{} `xml:"acpi,omitempty"`
+		APIC *struct{} `xml:"apic,omitempty"`
+	} `xml:"features"`
 	OnPoweroff string `xml:"on_poweroff"`
 	OnReboot   string `xml:"on_reboot"`
 	OnCrash    string `xml:"on_crash"`
@@ -979,6 +983,13 @@ func (m *Manager) domainXML(i Instance) ([]byte, error) {
 	}
 	d.OS.Type.Arch = "x86_64"
 	d.OS.Type.Value = "hvm"
+	// Omitting these tags disables them in libvirt. ACPI is required for
+	// graceful power actions, and APIC supplies the guest interrupt controller.
+	d.Features.ACPI = &struct{}{}
+	d.Features.APIC = &struct{}{}
+	d.Devices.Serial = &struct {
+		Type string `xml:"type,attr"`
+	}{Type: "pty"}
 	d.OnPoweroff = "destroy"
 	d.OnReboot = "restart"
 	d.OnCrash = "preserve"
