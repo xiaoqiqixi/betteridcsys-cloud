@@ -46,6 +46,13 @@ Plaintext credentials never reach argv, environment,
 controller/node records, audit, diagnostics or host seed files. The guest's
 password hash is intentionally present in its cloud-init seed and shadow file.
 
+Delayed checkout provisioning can supply `password_hash` on reinstall instead
+of a live password or SSH key. Only bcrypt Linux crypt hashes with cost 12–16
+are accepted. This one-way value survives payment and process restarts and is
+written directly to cloud-init's `hashed_passwd`; plaintext remains confined to
+the original HTTPS request. Direct password reset continues to use the ephemeral
+credential path.
+
 Sources: [libguestfs options](https://libguestfs.org/virt-customize.1.html),
 [cloud-init users and growpart](https://docs.cloud-init.io/en/latest/reference/modules.html),
 [OpenSSL password hashing](https://docs.openssl.org/4.1/man1/openssl-passwd/).

@@ -1,6 +1,7 @@
 package hypervisor
 
 import (
+	"aster/billing/serviceapi"
 	"aster/cloud/internal/nodeproto"
 	"bytes"
 	"context"
@@ -274,7 +275,12 @@ func (m *Manager) seedGuest(ctx context.Context, t nodeproto.NodeTask, i Instanc
 	}
 	quote := func(s string) string { b, _ := json.Marshal(s); return string(b) }
 	body := "#cloud-config\ndisable_root: false\ngrowpart:\n  mode: auto\n  devices: ['/']\nresize_rootfs: true\nusers:\n  - name: root\n    lock_passwd: false\n"
-	if t.Guest.Params.Password != "" {
+	if t.Guest.Params.PasswordHash != "" {
+		if !serviceapi.ValidPasswordHash(t.Guest.Params.PasswordHash) {
+			return ErrUnsupported
+		}
+		body += "    hashed_passwd: " + quote(t.Guest.Params.PasswordHash) + "\nssh_pwauth: true\n"
+	} else if t.Guest.Params.Password != "" {
 		runner, ok := m.Runner.(InputRunner)
 		if !ok {
 			return ErrUnsupported
