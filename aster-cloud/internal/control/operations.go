@@ -661,6 +661,9 @@ func (s *SQLStore) CompleteOperation(ctx context.Context, c Config, op, status s
 	if o.State != "sending" && o.State != "dispatched" && o.State != "uncertain" {
 		return Operation{}, ErrState
 	}
+	if o.State == "uncertain" && status == "accepted" {
+		return o, tx.Commit()
+	}
 	if status == "succeeded" && (o.Protocol == nodeproto.StorageProtocol || o.Protocol == nodeproto.StorageDirectProtocol) {
 		task, e := nodeproto.DecodeStorageTask(o.Request)
 		if e != nil || storage == nil || !storage.Matches(task, o.RequestSHA) {

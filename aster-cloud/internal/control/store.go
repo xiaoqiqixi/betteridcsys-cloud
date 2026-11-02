@@ -524,6 +524,12 @@ func (s *SQLStore) Complete(ctx context.Context, op, status string, now time.Tim
 	if j.State != "sending" && j.State != "uncertain" && j.State != "dispatched" {
 		return Job{}, ErrState
 	}
+	// A delayed acceptance response cannot erase a lost/unknown outcome.
+	// Only a terminal receipt can resolve uncertainty; keep its reservation and
+	// leave it out of the dispatcher's automatic reconciliation queue.
+	if j.State == "uncertain" && status == "accepted" {
+		return j, tx.Commit()
+	}
 	if _, e = tx.ExecContext(ctx, "UPDATE controller_jobs SET state=?,updated_at=? WHERE operation_id=?", next, now, op); e != nil {
 		return Job{}, e
 	}
