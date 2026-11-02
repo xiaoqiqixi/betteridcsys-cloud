@@ -1099,7 +1099,7 @@ class NativeFixtureContract(unittest.TestCase):
     def test_guest_budget_is_fixed_per_reviewed_scenario(self):
         # Restore includes source-data readback and material drift cases; the
         # simpler libvirt/provision scenarios retain their existing bounds.
-        self.assertEqual(h.guest_deadline_seconds('libvirt'), 2400)
+        self.assertEqual(h.guest_deadline_seconds('libvirt'), 3600)
         self.assertEqual(h.guest_deadline_seconds('controller-provision'), 1800)
         for phase in ('data', 'sessions'):
             self.assertEqual(h.guest_deadline_seconds('controller-restore-' + phase), 3600)

@@ -180,7 +180,9 @@ jobs:
           - os: ubuntu-24.04
             ubuntu: '24.04'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 50
+    # The guest has a fixed 60m budget; allow another 15m for verified image
+    # downloads, emulator setup and owned-process/artifact cleanup.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

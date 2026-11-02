@@ -790,11 +790,12 @@ def guest_deadline_seconds(scenario):
     # prerequisites and reports only the negative cases it executed.
     require(scenario in SCENARIOS,
             'FIXED_GUEST_SCENARIO_REQUIRED')
-    # Run 41304380192 exhausted 30m during libvirt preparation on Ubuntu 24,
-    # before the added libguestfs/lifecycle/VNC checks could execute. Keep the
-    # lifecycle test's own seven-minute bound within a fixed 40m guest budget.
+    # Run 41409285283 spent almost 34m bootstrapping Ubuntu 22 and hit the
+    # former 40m ceiling during apt installation. Give the signed guest 60m
+    # for bootstrap, packages and lifecycle/VNC checks; the lifecycle test's
+    # own seven-minute limit and all product operation deadlines stay intact.
     if scenario == 'libvirt':
-        return 2400
+        return 3600
     # Run 41394491221 reached configuration's first managed handoff at 55–58m,
     # leaving at most five minutes for both managers, systemd and revocation.
     # Budget those real checks separately from bootstrap; the original 45m
