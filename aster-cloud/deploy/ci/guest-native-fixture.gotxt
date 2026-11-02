@@ -27,7 +27,10 @@ import (
 	"github.com/coder/websocket"
 )
 
-type nativeGuestStore struct{ value control.Instance }
+type nativeGuestStore struct {
+	value         control.Instance
+	consoleGrants int
+}
 
 func (s *nativeGuestStore) Instance(context.Context, string) (control.Instance, error) {
 	return s.value, nil
@@ -49,6 +52,16 @@ func (*nativeGuestStore) Operation(context.Context, string) (control.Operation, 
 }
 func (*nativeGuestStore) ServiceSnapshots(context.Context, string, int) (serviceapi.Snapshots, error) {
 	return serviceapi.Snapshots{}, control.ErrState
+}
+func (s *nativeGuestStore) RecordConsoleGrant(_ context.Context, value control.Instance, now time.Time) error {
+	if value.ID != s.value.ID || value.OwnerRef != s.value.OwnerRef || value.NodeID != s.value.NodeID {
+		return control.ErrNotFound
+	}
+	if now.IsZero() || value.State != "running" {
+		return control.ErrState
+	}
+	s.consoleGrants++
+	return nil
 }
 
 func TestNativeGuestLifecycleAndConsole(t *testing.T) {
@@ -208,6 +221,9 @@ func nativeConsoleHandshake(t *testing.T, ctx context.Context, m *Manager, i Ins
 	ticket, e := console.Issue(ctx, s.value)
 	if e != nil {
 		t.Fatal(e)
+	}
+	if s.consoleGrants != 1 {
+		t.Fatal("native console grant was not audited exactly once")
 	}
 	u, _ := url.Parse(ticket.URL)
 	opts := &websocket.DialOptions{HTTPClient: controller.Client(), HTTPHeader: http.Header{"Origin": []string{controller.URL}}, Subprotocols: []string{"binary"}}
