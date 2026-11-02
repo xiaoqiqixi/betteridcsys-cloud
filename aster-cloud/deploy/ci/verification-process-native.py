@@ -31,6 +31,22 @@ UNIT_FAILURES = set('TARGET_VERIFICATION_SERVICE_CONNECTIONS_NOT_DRAINED TARGET_
 
 UNIT_FAILURES |= set('TARGET_VERIFICATION_UNIT_VERIFY_UNCONFIRMED TARGET_VERIFICATION_UNIT_RELOAD_UNCONFIRMED TARGET_VERIFICATION_UNIT_START_UNCONFIRMED TARGET_VERIFICATION_UNIT_STOP_UNCONFIRMED'.split())
 
+LAUNCH_FAILURES = {'VERIFICATION_LAUNCH_' + stage for stage in
+    ('INPUT', 'ARCHIVE', 'PLAN', 'HOST', 'SOURCE', 'RUNTIME', 'IMPORT', 'CONFIGURATION',
+     'BINDING', 'CONTROLLER', 'TLS', 'EXECUTABLE', 'UI')}
+
+
+def launch_failure(raw):
+    try:
+        value = json.loads(raw) if len(raw) <= 4096 else None
+        if (isinstance(value, dict) and set(value) == {'time','level','msg','component','code'} and
+                value['component'] == 'controller' and value['level'] == 'ERROR' and
+                value['msg'] == 'aster_command_failed' and value['code'] in LAUNCH_FAILURES):
+            return value['code']
+    except (ValueError, TypeError, UnicodeError):
+        pass
+    return 'TARGET_NATIVE_HANDOFF_PROOF_STREAM'
+
 def fixture_failure(raw):
     code = raw.decode('ascii', errors='replace').removesuffix('\n')
     return code if len(raw) <= 128 and code in FAILURE_CODES else 'TARGET_NATIVE_ASSERTION_FAILED'
@@ -181,6 +197,9 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
             raw = stream.readline((256 << 10) + 2)
         except (OSError, ValueError):
             require(False, 'TARGET_NATIVE_HANDOFF_PROOF_STREAM')
+        if not raw:
+            _, stderr = process.communicate(timeout=20)
+            require(False, launch_failure(stderr))
         require(raw.endswith(b'\n') and len(raw) <= (256 << 10) + 1 and process.poll() is None, 'TARGET_NATIVE_HANDOFF_PROOF_STREAM')
         require(target.i.strict_json(raw) == {'schema':1,'nonce':nonce,'proof':expected}, 'TARGET_NATIVE_HANDOFF_PROOF_BINDING')
         # These are real root SQL and installed manifest checks, performed again

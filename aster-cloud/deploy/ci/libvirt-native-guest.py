@@ -21,7 +21,7 @@ PROGRESS_NONCE = None
 APT_PLAN_DIAGNOSTICS = None
 LIFECYCLE_DIAGNOSTICS = None
 LIFECYCLE_FIELDS = {
-    'action': set('create reinstall rescue_enter rescue_exit delete'.split()),
+    'action': set('create reinstall rescue_enter rescue_exit force_off delete'.split()),
     'status': set('accepted rejected uncertain succeeded'.split()),
     'code': set('UNCLASSIFIED GUEST_OUTCOME_UNCERTAIN GUEST_INTENT_UNCONFIRMED REINSTALL_ROLLED_BACK IMAGE_VERIFICATION_FAILED OWNERSHIP_UNCONFIRMED OWNERSHIP_OR_STATE_REJECTED EXECUTION_UNCERTAIN'.split()),
     'phase': set('NONE INTENT REPLACE_DISK DEFINE_NEW NEW_RUNNING ROLLBACK RESCUE_DISK RESTORE_ORIGINAL ORIGINAL_RUNNING'.split()),
@@ -322,6 +322,18 @@ def lifecycle_diagnostic(raw):
     return values if all(values[k] in LIFECYCLE_FIELDS[k] for k in values) else None
 
 
+def lifecycle_failure(raw):
+    stages = ('setup', 'create', 'reinstall', 'rescue_enter', 'rescue_exit',
+              'console', 'force_off', 'delete', 'delete-ledger', 'delete-files')
+    for stage in stages:
+        if re.search(rb'(?m)^\s+[^\r\n:]+:\d+: native failure_stage=' + stage.encode() + rb'\r?$', raw):
+            return 'GUEST_LIFECYCLE_' + stage.upper().replace('-', '_') + '_FAILED'
+    for action in LIFECYCLE_FIELDS['action']:
+        if ('native ' + action + ':').encode() in raw:
+            return 'GUEST_LIFECYCLE_' + action.upper() + '_FAILED'
+    return 'GUEST_LIFECYCLE_FAILED'
+
+
 def execute(metadata):
     global PHASE, LIFECYCLE_DIAGNOSTICS
     PHASE = "preflight"
@@ -376,10 +388,7 @@ def execute(metadata):
     lifecycle = run([str(ROOT / "bandwidth-fixture.test"), "-test.run=^TestNative(BandwidthLiveXML|GuestLifecycleAndConsole)$", "-test.timeout=7m", "-test.v"], timeout=430, check=False)
     if lifecycle.returncode != 0:
         LIFECYCLE_DIAGNOSTICS = lifecycle_diagnostic(lifecycle.stdout)
-        for action in ("create", "reinstall", "rescue_enter", "rescue_exit", "delete"):
-            if ("native " + action + ":").encode() in lifecycle.stdout:
-                raise Refused("GUEST_LIFECYCLE_" + action.upper() + "_FAILED")
-        raise Refused("GUEST_LIFECYCLE_FAILED")
+        raise Refused(lifecycle_failure(lifecycle.stdout))
     require(all(("--- PASS: " + name + " ").encode() in lifecycle.stdout for name in ("TestNativeBandwidthLiveXML", "TestNativeGuestLifecycleAndConsole")), "GUEST_LIFECYCLE_FAILED")
     require(inspect_libvirt() == proof, "PREPARE_RESUME_CHANGED_PROOF")
     return {"schema": 1, "passed": True, "real_apt": True, "real_systemd": True, "libvirt_prepared": True,

@@ -6,6 +6,7 @@ import (
 	"aster/cloud/internal/verificationprocess"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,6 +18,27 @@ import (
 type VerificationSystemIdentity struct {
 	UID uint32
 	GID uint32
+}
+
+type verificationLaunchFailure struct {
+	stage string
+	cause error
+}
+
+func (e *verificationLaunchFailure) Error() string { return "verification launch refused" }
+func (e *verificationLaunchFailure) Unwrap() error { return e.cause }
+
+// VerificationLaunchFailureCode exposes only fixed admission stages. Original
+// filesystem, SQL and archive error text must never reach command diagnostics.
+func VerificationLaunchFailureCode(err error) string {
+	var failure *verificationLaunchFailure
+	if errors.As(err, &failure) {
+		switch failure.stage {
+		case "INPUT", "ARCHIVE", "PLAN", "HOST", "SOURCE", "RUNTIME", "IMPORT", "CONFIGURATION", "BINDING", "CONTROLLER", "TLS", "EXECUTABLE", "UI":
+			return "VERIFICATION_LAUNCH_" + failure.stage
+		}
+	}
+	return "COMMAND_FAILED"
 }
 
 // RunTargetVerification joins the ORIGINAL installed-target approval to the
@@ -31,7 +53,13 @@ type VerificationSystemIdentity struct {
 // including cleanup or handshake failure. Return must cause that process to
 // exit. The root manager separately checks process/SQL drain and the original
 // data phase before account revocation. Return is NOT migration readiness.
-func RunTargetVerification(ctx context.Context, operation string, approve func(TargetVerificationRuntimeReport) (VerificationSystemIdentity, error)) error {
+func RunTargetVerification(ctx context.Context, operation string, approve func(TargetVerificationRuntimeReport) (VerificationSystemIdentity, error)) (result error) {
+	stage := "INPUT"
+	defer func() {
+		if result != nil && stage != "" {
+			result = &verificationLaunchFailure{stage, result}
+		}
+	}()
 	if ctx == nil || ctx.Err() != nil || approve == nil || !operationID.MatchString(operation) || runtime.GOOS != "linux" || os.Geteuid() != 0 {
 		return ErrInvalid
 	}
@@ -42,7 +70,9 @@ func RunTargetVerification(ctx context.Context, operation string, approve func(T
 		}
 	}()
 	var cfg verificationprocess.Config
+	stage = "ARCHIVE"
 	_, err := planTargetArchiveMode(operation, true, func(plan TargetPlan, archive *Archive) error {
+		stage = "PLAN"
 		// Do not call withTargetArchiveMode here: nesting its WithSealedTarget
 		// around PrepareVerificationRuntime would reacquire the same lock.
 		directory := filepath.Join(targetRoot, operation)
@@ -59,18 +89,21 @@ func RunTargetVerification(ctx context.Context, operation string, approve func(T
 		if _, err := targetRead(filepath.Join("/var/lib/aster-controller", plan.ControllerID, "target-restore.json"), 4096); err != nil {
 			return err
 		}
+		stage = "HOST"
 		host, err := controllerhost.Open(plan.ControllerID, plan.CanonicalConfigurationSHA256)
 		if err != nil {
 			return err
 		}
 		defer host.Close()
 		child, err = host.PrepareVerificationRuntime(operation, planSHA, func() error {
+			stage = "SOURCE"
 			if _, err := archive.ValidateSource(plan.SourceCommit); err != nil {
 				return err
 			}
 			if hash, err := targetHash(filepath.Join(directory, "backup.age")); err != nil || hash != plan.ArchiveSHA256 {
 				return ErrInvalid
 			}
+			stage = "RUNTIME"
 			proof, dsn, err := targetVerificationRuntime(ctx, plan, planSHA, archive)
 			if err != nil {
 				return err
@@ -78,6 +111,7 @@ func RunTargetVerification(ctx context.Context, operation string, approve func(T
 			// The public phase proof has already checked exact published bytes.
 			// Derive only configuration and TLS again from the same authenticated
 			// archive; never call LoadConfig (it opens all production credentials).
+			stage = "IMPORT"
 			db, _, err := importedTargetInputs(ctx, archive, plan, planSHA)
 			if err != nil {
 				return err
@@ -87,29 +121,36 @@ func RunTargetVerification(ctx context.Context, operation string, approve func(T
 			if err != nil {
 				return err
 			}
+			stage = "CONFIGURATION"
 			configuration, files, err := archive.configurationCandidate(target, request, proof.Phase.Plan.SessionIntentSHA256)
 			if err != nil {
 				return err
 			}
+			stage = "BINDING"
 			configurationRaw, err := json.Marshal(configuration)
 			if err != nil || digestBytes(configurationRaw) != proof.Phase.Plan.ConfigurationPlanSHA256 {
 				return ErrInvalid
 			}
+			stage = "CONTROLLER"
 			controller, err := control.ParseConfig(files["config.json"])
 			if err != nil || controller.ControllerID != plan.ControllerID || controller.Listen != proof.Phase.Plan.Listen {
 				return ErrInvalid
 			}
+			stage = "TLS"
 			if len(files["server.crt"]) == 0 || len(files["server.crt"]) > 64<<10 || len(files["server.key"]) == 0 || len(files["server.key"]) > 64<<10 {
 				return ErrInvalid
 			}
+			stage = "EXECUTABLE"
 			executable, err := os.Executable() // exact installed path was checked above
 			if err != nil {
 				return ErrInvalid
 			}
 			ui := filepath.Join(filepath.Dir(filepath.Dir(executable)), "ui")
+			stage = "UI"
 			if _, err := control.Web(ui); err != nil {
 				return ErrInvalid
 			}
+			stage = "" // protocol refusals retain their existing command result
 			identity, err := approve(proof)
 			if err != nil {
 				return err

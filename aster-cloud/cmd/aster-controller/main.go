@@ -30,7 +30,7 @@ import (
 func main() {
 	slog.SetDefault(diagnostics.New(os.Stderr, "controller"))
 	if err := run(os.Args[1:]); err != nil {
-		code := "COMMAND_FAILED"
+		code := controllerbackup.VerificationLaunchFailureCode(err)
 		exitCode := 1
 		if errors.Is(err, controllerhost.ErrFenced) {
 			code = "CONTROLLER_MIGRATION_FENCED"

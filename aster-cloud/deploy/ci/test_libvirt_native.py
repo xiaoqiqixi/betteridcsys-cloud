@@ -137,6 +137,21 @@ class NativeFixtureContract(unittest.TestCase):
             self.assertEqual(public['code'], code)
             self.assertNotIn('private', public)
 
+    def test_launch_failure_accepts_only_fixed_controller_error_envelopes(self):
+        guest = load('native_launch_failure', 'verification-process-native.py')
+        event = {'time': 'PRIVATE_TIME', 'level': 'ERROR', 'component': 'controller',
+                 'msg': 'aster_command_failed', 'code': 'VERIFICATION_LAUNCH_CONFIGURATION'}
+        for code in guest.LAUNCH_FAILURES:
+            raw = json.dumps({**event, 'code': code}).encode()
+            self.assertEqual(guest.launch_failure(raw), code)
+            self.assertIn(code, h.GUEST_ERROR_CODES)
+        for raw in (b'PRIVATE_ERROR', b'x' * 4097,
+                    json.dumps({**event, 'code': 'PRIVATE_ERROR'}).encode(),
+                    json.dumps({**event, 'code': {}}).encode(),
+                    json.dumps({**event, 'stderr': 'PRIVATE_ERROR'}).encode(),
+                    json.dumps({**event, 'component': 'foreign'}).encode()):
+            self.assertEqual(guest.launch_failure(raw), 'TARGET_NATIVE_HANDOFF_PROOF_STREAM')
+
     def test_verification_failure_reports_preserve_fixed_diagnostics_not_private_text(self):
         metadata = {**self.metadata(), 'scenario': 'controller-restore-configuration'}
         cases = {
@@ -674,6 +689,20 @@ class NativeFixtureContract(unittest.TestCase):
         self.assertIsNone(g.lifecycle_diagnostic(b'native reinstall: status=uncertain code=PRIVATE phase=PRIVATE error=SECRET'))
         masked = g.lifecycle_diagnostic(b'native reinstall: status=uncertain code=PRIVATE phase=INTENT error=SECRET')
         self.assertEqual(masked['code'], 'UNCLASSIFIED')
+
+    def test_lifecycle_failure_stage_is_exact_and_bounded(self):
+        g = load('native_guest_lifecycle_stage', 'libvirt-native-guest.py')
+        for stage in ('setup', 'create', 'reinstall', 'rescue_enter', 'rescue_exit',
+                      'console', 'force_off', 'delete', 'delete-ledger', 'delete-files'):
+            raw = ('    native_guest_ci_test.go:77: native failure_stage=' + stage + '\n').encode()
+            code = g.lifecycle_failure(raw)
+            self.assertEqual(code, 'GUEST_LIFECYCLE_' + stage.upper().replace('-', '_') + '_FAILED')
+            self.assertIn(code, h.GUEST_ERROR_CODES)
+        for suffix in ('PRIVATE', 'delete PRIVATE', 'delete-files/PRIVATE'):
+            raw = ('    native_guest_ci_test.go:77: native failure_stage=' + suffix + '\n').encode()
+            self.assertEqual(g.lifecycle_failure(raw), 'GUEST_LIFECYCLE_FAILED')
+        self.assertEqual(g.lifecycle_failure(b'native force_off: status=rejected code=PRIVATE phase=NONE error=PRIVATE'),
+                         'GUEST_LIFECYCLE_FORCE_OFF_FAILED')
 
     def test_maintenance_failure_stage_distinguishes_authentication_from_fixture_setup(self):
         report = dict(self.metadata(), schema=1, passed=False, kvm_ready=False,

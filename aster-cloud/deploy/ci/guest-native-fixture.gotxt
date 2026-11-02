@@ -52,6 +52,12 @@ func (*nativeGuestStore) ServiceSnapshots(context.Context, string, int) (service
 }
 
 func TestNativeGuestLifecycleAndConsole(t *testing.T) {
+	stage := "setup"
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Log("native failure_stage=" + stage)
+		}
+	})
 	if runtime.GOOS != "linux" || os.Geteuid() != 0 {
 		t.Fatal("native Linux root fixture required")
 	}
@@ -93,6 +99,7 @@ func TestNativeGuestLifecycleAndConsole(t *testing.T) {
 	domainUUID := ""
 	submitNative := func(task nodeproto.NodeTask) {
 		t.Helper()
+		stage = task.Action
 		raw, _, e := task.BytesAndDigest()
 		if e != nil {
 			t.Fatal(e)
@@ -154,6 +161,7 @@ func TestNativeGuestLifecycleAndConsole(t *testing.T) {
 	if i.Rescue != nil || i.State != "running" {
 		t.Fatal("native rescue exit failed")
 	}
+	stage = "console"
 	nativeConsoleHandshake(t, ctx, m, i)
 	// Deletion requires a confirmed stopped guest, including after rescue exit.
 	task = next(task, "8", "force_off")
@@ -161,10 +169,12 @@ func TestNativeGuestLifecycleAndConsole(t *testing.T) {
 	submitNative(task)
 	task = next(task, "9", "delete")
 	submitNative(task)
+	stage = "delete-ledger"
 	deleted, found := l.Instance(id)
 	if !found || deleted.State != "deleted" {
 		t.Fatal("native deletion not persisted")
 	}
+	stage = "delete-files"
 	if _, err := os.Lstat(i.Directory); !os.IsNotExist(err) {
 		t.Fatal("native deletion retained guest files")
 	}
