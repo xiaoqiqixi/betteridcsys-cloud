@@ -466,7 +466,13 @@ func (m *Manager) execute(ctx context.Context, task nodeproto.NodeTask, result n
 		return finish("uncertain", "POWER_OUTCOME_UNCERTAIN", &instance)
 	}
 	if task.Action == "delete" {
-		// Destructive disk removal only after verified ownership, explicit confirmation and undefine.
+		// Undefine can leave an active transient domain behind. A command
+		// acknowledgement is not proof that no guest still uses the disks.
+		if e = m.requireDomainAbsent(ctx, instance.Domain); e != nil {
+			instance.State = "uncertain"
+			return finish("uncertain", "DELETE_DOMAIN_ABSENCE_UNCONFIRMED", &instance)
+		}
+		// Destructive disk removal only after verified ownership, explicit confirmation and absence.
 		paths := []string{instance.Disk, instance.Seed, filepath.Join(instance.Directory, "user-data"), filepath.Join(instance.Directory, "meta-data"), filepath.Join(instance.Directory, "network-config"), filepath.Join(instance.Directory, "domain.xml")}
 		paths = append(paths, recoveryPaths...)
 		for _, path := range paths {
@@ -488,6 +494,10 @@ func (m *Manager) execute(ctx context.Context, task nodeproto.NodeTask, result n
 		if e = os.Remove(instance.Directory); e != nil {
 			instance.State = "uncertain"
 			return finish("uncertain", "DELETE_DIRECTORY_NOT_EMPTY", &instance)
+		}
+		if e = syncGuestDir(m.Config.StorageDirectory); e != nil {
+			instance.State = "uncertain"
+			return finish("uncertain", "DELETE_DIRECTORY_DURABILITY_UNCONFIRMED", &instance)
 		}
 		instance.State = "deleted"
 		return finish("succeeded", "", &instance)
