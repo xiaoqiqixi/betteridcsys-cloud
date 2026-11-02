@@ -257,9 +257,11 @@ jobs:
         ubuntu: ['22.04', '24.04']
         scenario: ['controller-restore-data', 'controller-restore-sessions', 'controller-restore-configuration']
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 85
+    timeout-minutes: ${{ matrix.scenario == 'controller-restore-configuration' && 115 || 85 }}
     # Each required scenario recreates real import prerequisites at this SHA.
-    # 15m source SQL + unchanged 60m VM + setup/cleanup, no retry/gate waiver.
+    # 15m source SQL + 60m VM (90m for configuration) + 10m setup/cleanup.
+    # Configuration reached its first handoff at 55–58m in run 41394491221;
+    # retain every manager/systemd/revocation check and the original approval.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

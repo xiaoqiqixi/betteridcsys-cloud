@@ -336,7 +336,8 @@ class NativeFixtureContract(unittest.TestCase):
             result = {**metadata, 'schema': 1, **dict.fromkeys(common | evidence, True), **dict.fromkeys(denied, False)}
             with self.subTest(phase=phase):
                 self.assertEqual(h.public_result(result, metadata), result)
-                self.assertEqual(h.guest_deadline_seconds(metadata['scenario']), 3600)
+                self.assertEqual(h.guest_deadline_seconds(metadata['scenario']),
+                                 5400 if phase == 'configuration' else 3600)
             for field in common | evidence:
                 with self.subTest(phase=phase, missing=field), self.assertRaises(h.Refused):
                     h.public_result({k: v for k, v in result.items() if k != field}, metadata)
@@ -378,7 +379,7 @@ class NativeFixtureContract(unittest.TestCase):
                 self.assertNotIn('continue-on-error', section)
                 self.assertNotIn('exclude:', section)
                 self.assertIn('--scenario "$TEST_SCENARIO"', section)
-                self.assertIn('timeout-minutes: 85', section)
+                self.assertIn("timeout-minutes: ${{ matrix.scenario == 'controller-restore-configuration' && 115 || 85 }}", section)
         sandbox = (HERE / "libvirt-native-sandbox.c").read_text()
         self.assertEqual(re.findall(r'"ubuntu-([0-9.]+)-server-cloudimg-amd64.img"', sandbox), ["22.04", "24.04"])
 
@@ -1054,8 +1055,9 @@ class NativeFixtureContract(unittest.TestCase):
         # simpler libvirt/provision scenarios retain their existing bounds.
         self.assertEqual(h.guest_deadline_seconds('libvirt'), 2400)
         self.assertEqual(h.guest_deadline_seconds('controller-provision'), 1800)
-        for phase in ('data', 'sessions', 'configuration'):
+        for phase in ('data', 'sessions'):
             self.assertEqual(h.guest_deadline_seconds('controller-restore-' + phase), 3600)
+        self.assertEqual(h.guest_deadline_seconds('controller-restore-configuration'), 5400)
         for invalid in (None, '', 'restore', 'controller-restore ', 3600):
             with self.subTest(scenario=invalid), self.assertRaises(h.Refused):
                 h.guest_deadline_seconds(invalid)
