@@ -184,16 +184,23 @@ func OpenLedger(directory, nodeID string) (*Ledger, error) {
 	}
 	return l, nil
 }
-func (l *Ledger) save() error {
+func (l *Ledger) save() (err error) {
 	if l.closed || l.poisoned {
 		return errors.New("journal unavailable")
 	}
+	// Callers have already changed the in-memory journal. Every failed save,
+	// including temporary-file creation, must fence further mutations until a
+	// restart reloads the last durable state.
+	defer func() {
+		if err != nil {
+			l.poisoned = true
+		}
+	}()
 	raw, err := json.Marshal(l.state)
 	if err != nil {
 		return err
 	}
 	if len(raw) > maxJournalBytes {
-		l.poisoned = true
 		return errors.New("journal capacity reached; operator action required")
 	}
 	tmp, err := os.CreateTemp(l.directory, ".journal-")
@@ -223,9 +230,6 @@ func (l *Ledger) save() error {
 			err = d.Sync()
 			d.Close()
 		}
-	}
-	if err != nil {
-		l.poisoned = true
 	}
 	return err
 }
