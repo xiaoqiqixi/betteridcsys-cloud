@@ -53,7 +53,7 @@ func (a App) Handler() http.Handler {
 			failure(w, 403, "BROWSER_ACCESS_UNAVAILABLE")
 			return
 		}
-		if r.URL.RawQuery != "" && !(strings.HasPrefix(r.URL.Path, "/v1/services/") && strings.HasSuffix(r.URL.Path, "/metrics")) {
+		if (r.URL.RawQuery != "" || r.URL.ForceQuery) && !(strings.HasPrefix(r.URL.Path, "/v1/services/") && strings.HasSuffix(r.URL.Path, "/metrics")) {
 			failure(w, 400, "INVALID_QUERY")
 			return
 		}
@@ -168,7 +168,7 @@ func (a App) provisioning(w http.ResponseWriter, r *http.Request) {
 			failure(w, 404, "NOT_FOUND")
 			return
 		}
-		if r.Header.Get("X-Aster-Request-SHA256") != job.RequestSHA || r.Header.Get("Idempotency-Key") != op {
+		if len(r.Header.Values("X-Aster-Request-SHA256")) != 1 || len(r.Header.Values("Idempotency-Key")) != 1 || r.Header.Get("X-Aster-Request-SHA256") != job.RequestSHA || r.Header.Get("Idempotency-Key") != op {
 			failure(w, 409, "IDEMPOTENCY_CONFLICT")
 			return
 		}
@@ -191,7 +191,7 @@ func (a App) provisioning(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, digest, e := request.BytesAndDigest()
-	if e != nil || r.Header.Get("X-Aster-Request-SHA256") != digest || r.Header.Get("Idempotency-Key") != request.OperationID {
+	if e != nil || len(r.Header.Values("X-Aster-Request-SHA256")) != 1 || len(r.Header.Values("Idempotency-Key")) != 1 || r.Header.Get("X-Aster-Request-SHA256") != digest || r.Header.Get("Idempotency-Key") != request.OperationID {
 		failure(w, 400, "REQUEST_BINDING_REQUIRED")
 		return
 	}
