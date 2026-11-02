@@ -44,6 +44,7 @@ type Config struct {
 	NodeMaterials        []NodeMaterialBinding `json:"node_materials,omitempty"`
 }
 type NodeProfile struct {
+	AllowSoftwareEmulation  bool                 `json:"allow_software_emulation,omitempty"`
 	ID                      string               `json:"id"`
 	DatacenterID            string               `json:"datacenter_id"`
 	GroupID                 string               `json:"group_id"`

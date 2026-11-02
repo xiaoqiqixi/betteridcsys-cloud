@@ -22,6 +22,10 @@ var (
 
 type Capability nodeproto.Capabilities
 
+func approvedHypervisor(kind string, node NodeProfile) bool {
+	return kind == "libvirt-kvm" || kind == "libvirt-qemu" && node.AllowSoftwareEmulation
+}
+
 // Legacy support remains unchanged. VPC support requires an independently
 // approved profile and explicit positive ingress/egress limits.
 func (c Capability) Supports(r controllerapi.Resources, node NodeProfile) bool {
@@ -33,7 +37,7 @@ func vpcResources(r controllerapi.Resources) bool {
 
 func (c Capability) SupportsNetwork(r controllerapi.Resources, node NodeProfile, profileID string) bool {
 	spec := controllerapi.ProductSpec{Mode: "custom", ControllerID: "check", Resources: &r}
-	base := spec.Valid() && c.Protocol == nodeproto.Protocol && c.NodeID == node.ID && !c.Maintenance && c.Hypervisor == "libvirt-kvm" &&
+	base := spec.Valid() && c.Protocol == nodeproto.Protocol && c.NodeID == node.ID && !c.Maintenance && approvedHypervisor(c.Hypervisor, node) &&
 		r.ComputeNodeID == node.ID && r.DatacenterID == node.DatacenterID && r.NodeGroupID == node.GroupID &&
 		contains(c.ImageIDs, r.ImageID) && contains(c.StorageIDs, r.SystemStorageID) && r.DataDiskGiB == 0 && r.DataStorageID == "" && contains(c.Actions, "create")
 	if !base || !c.validNetworkCapabilities() || !supportsTraffic(c, r) {

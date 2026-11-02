@@ -79,13 +79,18 @@ func (m *Manager) Doctor(ctx context.Context) DoctorReport {
 	major, _ := strconv.Atoi(strings.Split(fields["VERSION_ID"], ".")[0])
 	report.OS = fields["ID"] + " " + fields["VERSION_ID"]
 	add("ubuntu_at_least_22", e == nil && runtime.GOOS == "linux" && fields["ID"] == "ubuntu" && major >= 22)
-	cpu, e := os.ReadFile("/proc/cpuinfo")
 	add("x86_64_host", runtime.GOARCH == "amd64")
-	add("hardware_virtualization_flags", e == nil && (strings.Contains(string(cpu), " vmx ") || strings.Contains(string(cpu), " svm ")))
-	kvm, e := os.OpenFile("/dev/kvm", os.O_RDWR, 0)
-	add("dev_kvm_read_write", e == nil)
-	if e == nil {
-		kvm.Close()
+	if m.Config.AllowSoftwareEmulation {
+		add("software_emulation_explicitly_approved", true)
+		report.Limitations = append(report.Limitations, "QEMU software emulation is explicitly approved; this node does not claim KVM acceleration.")
+	} else {
+		cpu, err := os.ReadFile("/proc/cpuinfo")
+		add("hardware_virtualization_flags", err == nil && (strings.Contains(string(cpu), " vmx ") || strings.Contains(string(cpu), " svm ")))
+		kvm, err := os.OpenFile("/dev/kvm", os.O_RDWR, 0)
+		add("dev_kvm_read_write", err == nil)
+		if err == nil {
+			kvm.Close()
+		}
 	}
 	for _, path := range []string{Virsh, QemuImg, Emulator} {
 		s, e := os.Stat(path)
@@ -217,6 +222,9 @@ func (m *Manager) Capabilities(ctx context.Context) nodeproto.Capabilities {
 			c.DirectPublicNetwork = &nodeproto.DirectPublicApproval{ProfileID: nodeproto.DirectPublicProfile, ProfileSHA256: sha, CIDR: m.Config.Network.CIDR, Gateway: m.Config.Network.Gateway, Addresses: approved}
 			c.NetworkProfiles = append(c.NetworkProfiles, nodeproto.DirectPublicCapability)
 		}
+	}
+	if m.Config.AllowSoftwareEmulation {
+		c.Hypervisor = "libvirt-qemu"
 	}
 	doctor := m.Doctor(ctx)
 	advertisePublicIngressCapability(&c, doctor)

@@ -564,7 +564,7 @@ func (s *SQLStore) RegisterNode(ctx context.Context, p NodeProfile) error {
 }
 func (s *SQLStore) Heartbeat(ctx context.Context, p NodeProfile, c Capability, now time.Time, ttl time.Duration) error {
 	at, e := time.Parse(time.RFC3339Nano, c.ObservedAt)
-	if e != nil || !heartbeatFresh(&at, now, ttl) || c.Protocol != nodeproto.Protocol || c.NodeID != p.ID || c.Hypervisor != "libvirt-kvm" || !c.validNetworkCapabilities() {
+	if e != nil || !heartbeatFresh(&at, now, ttl) || c.Protocol != nodeproto.Protocol || c.NodeID != p.ID || !approvedHypervisor(c.Hypervisor, p) || !c.validNetworkCapabilities() {
 		return ErrInput
 	}
 	v := c.Capacity

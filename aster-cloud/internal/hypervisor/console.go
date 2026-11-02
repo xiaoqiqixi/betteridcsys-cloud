@@ -15,7 +15,7 @@ import (
 )
 
 func (m *Manager) domainType() string {
-	if m.domainKind == "qemu" {
+	if m.Config.AllowSoftwareEmulation || m.domainKind == "qemu" {
 		return "qemu"
 	}
 	return "kvm"

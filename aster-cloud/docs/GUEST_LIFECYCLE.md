@@ -1,5 +1,13 @@
 # Guest lifecycle
 
+KVM remains the default. A host without usable `/dev/kvm` can explicitly set
+`allow_software_emulation: true` in the root-owned node configuration to use
+real libvirt QEMU domains with TCG. Its heartbeat identifies `libvirt-qemu`;
+the controller must separately approve `allow_software_emulation: true` on
+that node profile. There is no automatic downgrade from KVM. Changing this
+setting with existing domains fails their ownership checks; drain the node
+before changing its virtualization mode.
+
 Enable `guest.enabled` in the root-owned node configuration after installing
 `libguestfs-tools`, `openssl` and `cloud-image-utils`; `--doctor` verifies them.
 Map approved image IDs to `linux`/`windows` in `guest.families`, and explicitly

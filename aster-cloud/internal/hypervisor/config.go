@@ -57,6 +57,8 @@ type StorageConfig struct {
 }
 
 type Config struct {
+	// Software emulation is an explicit operator choice, never a KVM fallback.
+	AllowSoftwareEmulation              bool                  `json:"allow_software_emulation,omitempty"`
 	AllowTrafficAccounting              bool                  `json:"allow_traffic_accounting,omitempty"`
 	Guest                               GuestConfig           `json:"guest,omitzero"`
 	ShutdownTimeoutSeconds              int                   `json:"shutdown_timeout_seconds"`
