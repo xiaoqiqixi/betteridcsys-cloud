@@ -147,14 +147,10 @@ func (m *Manager) Doctor(ctx context.Context) DoctorReport {
 }
 func (m *Manager) Capabilities(ctx context.Context) nodeproto.Capabilities {
 	capacity, _ := HostCapacity(m.Config.StorageDirectory)
-	for _, instance := range m.Ledger.Instances() {
-		if instance.State == "deleted" || instance.PublicRetired {
-			continue
-		}
-		capacity.CPUCoresAllocated += instance.Resources.CPUCores
-		capacity.MemoryAllocatedMiB += int64(instance.Resources.MemoryMiB)
-		capacity.StorageAllocatedGiB += int64(instance.Resources.SystemDiskGiB)
-	}
+	cpu, memory, disk := m.Ledger.allocation("")
+	capacity.CPUCoresAllocated = cpu
+	capacity.MemoryAllocatedMiB = int64(memory)
+	capacity.StorageAllocatedGiB = int64(disk)
 	// Advertise root allocation ceilings, not all physical host resources.
 	if int64(m.Config.CPUAllocationLimit) < int64(capacity.CPUCoresTotal) {
 		capacity.CPUCoresTotal = m.Config.CPUAllocationLimit

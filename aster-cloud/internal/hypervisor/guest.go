@@ -146,14 +146,10 @@ func (m *Manager) guestAdmission(t nodeproto.NodeTask, i Instance) string {
 		if p.DiskGB < i.Resources.SystemDiskGiB {
 			return "DISK_SHRINK_FORBIDDEN"
 		}
-		cpu, mem, disk := p.CPUCores, p.MemoryMB, p.DiskGB
-		for _, other := range m.Ledger.Instances() {
-			if other.ID != i.ID && other.State != "deleted" && !other.PublicRetired {
-				cpu += other.Resources.CPUCores
-				mem += other.Resources.MemoryMiB
-				disk += other.Resources.SystemDiskGiB
-			}
-		}
+		cpu, mem, disk := m.Ledger.allocation(i.ID)
+		cpu += p.CPUCores
+		mem += p.MemoryMB
+		disk += p.DiskGB
 		if cpu > m.Config.CPUAllocationLimit || mem > m.Config.MemoryAllocationLimitMiB || disk > m.Config.DiskAllocationLimitGiB {
 			return "ALLOCATION_LIMIT"
 		}

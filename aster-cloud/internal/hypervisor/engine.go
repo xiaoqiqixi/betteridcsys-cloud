@@ -560,15 +560,12 @@ func (m *Manager) prepareWithRetired(t nodeproto.NodeTask, allowRetired bool) (I
 			return Instance{}, ErrUnsupported
 		}
 	}
-	cpu, memory, disk := 0, 0, 0
+	cpu, memory, disk := m.Ledger.allocation("")
 	used := map[string]bool{}
 	for _, i := range m.Ledger.Instances() {
 		if i.State == "deleted" || i.PublicRetired {
 			continue
 		}
-		cpu += i.Resources.CPUCores
-		memory += i.Resources.MemoryMiB
-		disk += i.Resources.SystemDiskGiB
 		if !i.DirectPublicDetached {
 			used[i.IPv4] = true
 		}
