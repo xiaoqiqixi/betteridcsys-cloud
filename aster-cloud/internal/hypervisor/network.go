@@ -29,8 +29,8 @@ func ApprovedFilterXML(name string) []byte {
 `)
 }
 
-// XML structural comparison permits only formatting/attribute-order differences
-// and libvirt's generated root UUID. Extra accepts, references or namespace
+// XML structural comparison permits formatting/attribute-order differences,
+// libvirt's equivalent VLAN spelling and generated root UUID. Extra accepts, references or namespace
 // substitutions fail closed, even if an operator accidentally pins their hash.
 func canonicalFilter(raw []byte) (string, error) {
 	d := xml.NewDecoder(bytes.NewReader(raw))
@@ -66,6 +66,12 @@ func canonicalFilter(raw []byte) (string, error) {
 			for _, a := range attrs {
 				if a.Name.Space != "" {
 					return "", errors.New("filter attribute namespace rejected")
+				}
+				// libvirt serializes the numeric VLAN EtherType using its name.
+				// Keep the original approved bytes stable for existing hash pins;
+				// normalize only this equivalent value during semantic comparison.
+				if v.Name.Local == "mac" && a.Name.Local == "protocolid" && a.Value == "0x8100" {
+					a.Value = "vlan"
 				}
 				b.WriteString(" " + a.Name.Local + "=" + a.Value)
 			}
