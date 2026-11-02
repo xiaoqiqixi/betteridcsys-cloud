@@ -227,7 +227,7 @@ func serviceGateTx(ctx context.Context, tx *sql.Tx, c Config, v Instance, in Ope
 	if flags.Suspended && (in.Action == "start" || in.Action == "reboot" || in.Action == "reinstall" || in.Action == "reset_password" || in.Action == "rescue_enter" || in.Action == "rescue_exit") {
 		return serviceReject("INSTANCE_SUSPENDED")
 	}
-	if flags.RescueActive && (strings.HasPrefix(in.Action, "snapshot_") || in.Action == "reinstall" || in.Action == "reset_password" || in.Action == "resize") {
+	if flags.RescueActive && !(v.State == "deleted" && artifactDelete(in.Action)) && (strings.HasPrefix(in.Action, "snapshot_") || in.Action == "reinstall" || in.Action == "reset_password" || in.Action == "resize") {
 		return serviceReject("RESCUE_ACTIVE")
 	}
 	if v.Resources.NetworkType != "normal" && nodeproto.GuestAction(in.Action) && in.Action != "suspend" && in.Action != "unsuspend" {

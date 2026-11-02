@@ -38,6 +38,13 @@ func validateDirectStorageTx(ctx context.Context, tx *sql.Tx, c Config, o Operat
 	if e != nil || v.OwnerRef != t.OwnerRef {
 		return ErrState
 	}
+	if v.State == "deleted" && artifactDelete(o.Action) {
+		binding, err := deletedArtifactBindingTx(ctx, tx, v)
+		if err != nil || binding != t.DirectPublic || t.NodeID != v.NodeID {
+			return ErrState
+		}
+		return nil
+	}
 	b, e := instanceDirectPublicTx(ctx, tx, v)
 	if e != nil {
 		return e

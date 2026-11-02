@@ -33,6 +33,11 @@ func (m *Manager) LookupStorage(id string) (nodeproto.StorageResult, bool) {
 	}
 	return r, true
 }
+
+func artifactDelete(action string) bool {
+	return action == "snapshot_delete" || action == "backup_delete"
+}
+
 func (m *Manager) AcceptStorage(task nodeproto.TypedStorageTask, raw []byte) (nodeproto.StorageResult, error) {
 	decoded, e := nodeproto.DecodeStorageTask(raw)
 	if e != nil || decoded != task || task.NodeID != m.Config.NodeID {
@@ -107,10 +112,11 @@ func (m *Manager) AcceptStorage(task nodeproto.TypedStorageTask, raw []byte) (no
 		if !ok || instance.OwnerRef != task.OwnerRef {
 			return reject("INSTANCE_OWNERSHIP_REJECTED")
 		}
-		if task.DirectPublic != instance.DirectPublic || instance.DirectPublicDetached || (!instance.DirectPublic.IsZero() && m.approvedDirect(instance.DirectPublic) != nil) {
+		deletedCleanup := instance.State == "deleted" && artifactDelete(task.Action)
+		if task.DirectPublic != instance.DirectPublic || !deletedCleanup && (instance.DirectPublicDetached || (!instance.DirectPublic.IsZero() && m.approvedDirect(instance.DirectPublic) != nil)) {
 			return reject("DIRECT_PUBLIC_STORAGE_BINDING_REJECTED")
 		}
-		if instance.Rescue != nil || instance.GuestChange != nil || (instance.Suspended || instance.TrafficControl != (nodeproto.TrafficControl{})) && strings.HasPrefix(task.Action, "migrate_") {
+		if !deletedCleanup && (instance.Rescue != nil || instance.GuestChange != nil || (instance.Suspended || instance.TrafficControl != (nodeproto.TrafficControl{})) && strings.HasPrefix(task.Action, "migrate_")) {
 			return reject("GUEST_LIFECYCLE_STORAGE_CONFLICT")
 		}
 		if !instance.Network.IsZero() {
@@ -129,7 +135,7 @@ func (m *Manager) AcceptStorage(task nodeproto.TypedStorageTask, raw []byte) (no
 			sort.Slice(result.Items, func(i, j int) bool { return result.Items[i].ArtifactID < result.Items[j].ArtifactID })
 			return m.Ledger.FinishStorage(task.OperationID, "succeeded", "", result, nil, nil, nil)
 		}
-		if instance.State == "reserved" || instance.State == "uncertain" || instance.State == "deleted" || instance.SourceFence != nil {
+		if instance.State == "reserved" || instance.State == "uncertain" || instance.State == "deleted" && !deletedCleanup || instance.SourceFence != nil {
 			return reject("INSTANCE_FENCED_OR_UNCERTAIN")
 		}
 		if task.Action == "migrate_activate" {
@@ -182,7 +188,11 @@ func (m *Manager) AcceptStorage(task nodeproto.TypedStorageTask, raw []byte) (no
 	}
 	quarantine := cloneInstance(instance)
 	quarantine.State = "uncertain"
-	if r, err := m.Ledger.FinishStorage(task.OperationID, "accepted", "DURABLE_STORAGE_CLAIM", result, &quarantine, artifact, nil); err != nil {
+	mutation := &quarantine
+	if instance.State == "deleted" && artifactDelete(task.Action) {
+		mutation = nil // artifact uncertainty must not resurrect a VM allocation
+	}
+	if r, err := m.Ledger.FinishStorage(task.OperationID, "accepted", "DURABLE_STORAGE_CLAIM", result, mutation, artifact, nil); err != nil {
 		return r, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -206,6 +216,7 @@ func (m *Manager) AcceptStorage(task nodeproto.TypedStorageTask, raw []byte) (no
 	return result, nil
 }
 func (m *Manager) executeStorage(ctx context.Context, task nodeproto.TypedStorageTask, result nodeproto.StorageResult, instance Instance, artifact *ArtifactRecord) {
+	deletedCleanup := instance.State == "deleted" && artifactDelete(task.Action)
 	finish := func(status, code string) {
 		if status == "uncertain" {
 			instance.State = "uncertain"
@@ -213,7 +224,11 @@ func (m *Manager) executeStorage(ctx context.Context, task nodeproto.TypedStorag
 				artifact.Artifact.State = "uncertain"
 			}
 		}
-		_, e := m.Ledger.FinishStorage(task.OperationID, status, code, result, &instance, artifact, nil)
+		mutation := &instance
+		if deletedCleanup {
+			mutation = nil
+		}
+		_, e := m.Ledger.FinishStorage(task.OperationID, status, code, result, mutation, artifact, nil)
 		m.logStorageOutcome(ctx, task, status, code, e == nil)
 	}
 	if ctx.Err() != nil {
@@ -245,25 +260,34 @@ func (m *Manager) executeStorage(ctx context.Context, task nodeproto.TypedStorag
 		finish("succeeded", "")
 		return
 	}
-	if e := m.assertOwned(ctx, instance); e != nil {
-		finish("uncertain", "LIVE_OWNERSHIP_UNCONFIRMED")
-		return
-	}
-	state, e := m.state(ctx, instance.Domain)
-	if e != nil {
-		finish("uncertain", "DOMAIN_STATE_UNAVAILABLE")
-		return
-	}
-	if state != "shut off" {
-		instance.State = state
-		if artifact != nil && artifact.Artifact.State == "reserved" {
-			artifact.Artifact.State = "rejected"
-			artifact.ReservedBytes = 0
+	var state string
+	var e error
+	if deletedCleanup {
+		if e = m.requireDomainAbsent(ctx, instance.Domain); e != nil {
+			finish("uncertain", "DELETED_DOMAIN_ABSENCE_UNCONFIRMED")
+			return
 		}
-		finish("rejected", "OFFLINE_OPERATION_REQUIRES_SHUT_OFF")
-		return
+	} else {
+		if e = m.assertOwned(ctx, instance); e != nil {
+			finish("uncertain", "LIVE_OWNERSHIP_UNCONFIRMED")
+			return
+		}
+		state, e = m.state(ctx, instance.Domain)
+		if e != nil {
+			finish("uncertain", "DOMAIN_STATE_UNAVAILABLE")
+			return
+		}
+		if state != "shut off" {
+			instance.State = state
+			if artifact != nil && artifact.Artifact.State == "reserved" {
+				artifact.Artifact.State = "rejected"
+				artifact.ReservedBytes = 0
+			}
+			finish("rejected", "OFFLINE_OPERATION_REQUIRES_SHUT_OFF")
+			return
+		}
+		instance.State = "shut off"
 	}
-	instance.State = "shut off"
 	if task.Action == "migrate_activate" {
 		manifest, dir, e := m.readImport(task, true)
 		_ = dir
@@ -344,7 +368,7 @@ func (m *Manager) executeStorage(ctx context.Context, task nodeproto.TypedStorag
 		finish("succeeded", "")
 		return
 	}
-	signed, hash, e := m.readArtifact(ctx, *artifact, instance)
+	signed, hash, e := m.readArtifact(ctx, *artifact, instance, artifactDelete(task.Action))
 	if e != nil {
 		finish("uncertain", "ARTIFACT_VERIFICATION_FAILED")
 		return
@@ -399,7 +423,7 @@ func (m *Manager) logStorageOutcome(ctx context.Context, task nodeproto.TypedSto
 	}
 	slog.Log(ctx, level, "aster_node_storage_operation", "node_id", m.Config.NodeID, "operation_id", task.OperationID, "instance_id", task.InstanceID, "action", task.Action, "status", status, "code", code, "journal_write_confirmed", durable)
 }
-func (m *Manager) readArtifact(ctx context.Context, a ArtifactRecord, i Instance) (nodeproto.SignedStorageManifest, string, error) {
+func (m *Manager) readArtifact(ctx context.Context, a ArtifactRecord, i Instance, deleting bool) (nodeproto.SignedStorageManifest, string, error) {
 	dir := filepath.Join(m.Config.Storage.Directory, a.Artifact.ArtifactID)
 	if e := ownedPath(dir, true, true); e != nil {
 		return nodeproto.SignedStorageManifest{}, "", e
@@ -409,7 +433,10 @@ func (m *Manager) readArtifact(ctx context.Context, a ArtifactRecord, i Instance
 		return s, "", e
 	}
 	manifest := s.Manifest
-	if hash != a.Artifact.ManifestSHA256 || manifest.ArtifactID != a.Artifact.ArtifactID || manifest.Kind != a.Artifact.Kind || manifest.NodeID != m.Config.NodeID || manifest.InstanceID != i.ID || manifest.OwnerRef != i.OwnerRef || manifest.Hostname != i.Hostname || manifest.Resources != i.Resources || manifest.DirectPublic != i.DirectPublic || manifest.DiskSHA256 != a.Artifact.DiskSHA256 || manifest.DiskBytes != a.Artifact.DiskBytes || manifest.VirtualBytes != a.Artifact.VirtualBytes {
+	// Deletion still pins the saved manifest and disk hashes, owner and guest
+	// identity. A later resize/reinstall need not match the old resource sizes;
+	// restoring that old artifact continues to require the exact current spec.
+	if hash != a.Artifact.ManifestSHA256 || manifest.ArtifactID != a.Artifact.ArtifactID || manifest.Kind != a.Artifact.Kind || manifest.NodeID != m.Config.NodeID || manifest.InstanceID != i.ID || manifest.OwnerRef != i.OwnerRef || manifest.Hostname != i.Hostname || !deleting && manifest.Resources != i.Resources || manifest.DirectPublic != i.DirectPublic || manifest.DiskSHA256 != a.Artifact.DiskSHA256 || manifest.DiskBytes != a.Artifact.DiskBytes || manifest.VirtualBytes != a.Artifact.VirtualBytes {
 		return s, "", errors.New("artifact metadata binding rejected")
 	}
 	return s, hash, m.verifyFlat(ctx, filepath.Join(dir, "disk.qcow2"), manifest)

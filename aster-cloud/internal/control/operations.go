@@ -233,7 +233,8 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 	if e = trafficEnforcementGateTx(ctx, tx, v, in.trafficEnforcement, now); e != nil {
 		return Operation{}, false, e
 	}
-	if v.State != "created" && v.State != "shutoff" && !nodeproto.ValidObservedState(v.State) {
+	deletedCleanup := v.State == "deleted" && artifactDelete(in.Action)
+	if v.State != "created" && v.State != "shutoff" && !nodeproto.ValidObservedState(v.State) && !deletedCleanup {
 		return Operation{}, false, ErrState
 	}
 	if e = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM controller_operations WHERE instance_id=? AND CAST(state AS BINARY) NOT IN ('succeeded','rejected','resolved')", instance).Scan(&used); e != nil {
@@ -255,12 +256,17 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 		}
 	}
 	o := Operation{ID: op, ActorID: actor, InstanceID: instance, NodeID: v.NodeID, Action: in.Action, ArtifactID: in.ArtifactID, TargetNodeID: in.TargetNodeID, IntentSHA: fingerprint, State: "accepted", CreatedAt: now, UpdatedAt: now}
-	if !strings.HasPrefix(in.Action, "migrate_") || in.Action == "migrate_prepare" {
+	if !deletedCleanup && (!strings.HasPrefix(in.Action, "migrate_") || in.Action == "migrate_prepare") {
 		if e = directPublicInstanceGateTx(ctx, tx, c, v); e != nil {
 			return Operation{}, false, e
 		}
 	}
-	direct, e := instanceDirectPublicTx(ctx, tx, v)
+	var direct nodeproto.DirectPublicBinding
+	if deletedCleanup {
+		direct, e = deletedArtifactBindingTx(ctx, tx, v)
+	} else {
+		direct, e = instanceDirectPublicTx(ctx, tx, v)
+	}
 	if e != nil {
 		return Operation{}, false, e
 	}
@@ -353,7 +359,7 @@ func (s *SQLStore) createOperation(ctx context.Context, c Config, actor, instanc
 		if a.InstanceID != v.ID || a.NodeID != v.NodeID || a.State != "ready" || !strings.HasPrefix(in.Action, a.Kind+"_") {
 			return Operation{}, false, ErrState
 		}
-		if in.Action != "backup_verify" && v.State != "shutoff" {
+		if in.Action != "backup_verify" && v.State != "shutoff" && !deletedCleanup {
 			return Operation{}, false, ErrState
 		}
 		if dangerous(in.Action) {
