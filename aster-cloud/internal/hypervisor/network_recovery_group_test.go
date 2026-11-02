@@ -67,7 +67,7 @@ func TestRecoveryGroupConvergesAllPendingOnceAndPreservesOriginalEvidence(t *tes
 	for _, prior := range old {
 		current, _ := m.Ledger.Query(prior.Task.OperationID)
 		i, _ := m.Ledger.Instance(prior.Task.InstanceID)
-		if prior.Result.Status != "uncertain" || current.Task != prior.Task || current.Result.RequestSHA256 != prior.Result.RequestSHA256 || current.Result.Status != "succeeded" || i.State != "running" || i.Network != prior.Task.Network || m.Ledger.HasPendingInstance(i.ID, "") {
+		if prior.Result.Status != "uncertain" || !current.Task.Equal(prior.Task) || current.Result.RequestSHA256 != prior.Result.RequestSHA256 || current.Result.Status != "succeeded" || i.State != "running" || i.Network != prior.Task.Network || m.Ledger.HasPendingInstance(i.ID, "") {
 			t.Fatal("group result rewrote inputs or left pending", current)
 		}
 	}

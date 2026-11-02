@@ -36,7 +36,7 @@ func (c *networkWorkerRPC) Send(_ context.Context, raw []byte, sha string) (node
 	defer c.mu.Unlock()
 	c.sends++
 	task, e := nodeproto.DecodeTask(raw)
-	if e != nil || nodeproto.Digest(raw) != sha || task != c.task {
+	if e != nil || nodeproto.Digest(raw) != sha || !task.Equal(c.task) {
 		return nodeproto.NodeResult{}, ErrInput
 	}
 	return nodeproto.NodeResult{}, ErrUnavailable

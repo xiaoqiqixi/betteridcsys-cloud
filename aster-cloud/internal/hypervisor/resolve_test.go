@@ -71,7 +71,7 @@ func TestResolvePreservesUnknownHistoryAndSurvivesRestart(t *testing.T) {
 				}
 			}
 			op, _ := m.Ledger.Query(task.OperationID)
-			if op.Result.Status != "uncertain" || op.ErrorCode != old.ErrorCode || op.Task != old.Task || op.Result.RequestSHA256 != old.Result.RequestSHA256 || op.Result.Resolved == nil || op.Result.Resolved.ObservedState != state || !op.Result.Resolved.Valid() {
+			if op.Result.Status != "uncertain" || op.ErrorCode != old.ErrorCode || !op.Task.Equal(old.Task) || op.Result.RequestSHA256 != old.Result.RequestSHA256 || op.Result.Resolved == nil || op.Result.Resolved.ObservedState != state || !op.Result.Resolved.Valid() {
 				t.Fatal(op)
 			}
 			// Returned pointers must not mutate persisted history.

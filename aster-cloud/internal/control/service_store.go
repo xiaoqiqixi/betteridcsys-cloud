@@ -125,9 +125,11 @@ func (s *SQLStore) AdmitService(ctx context.Context, c Config, instance string, 
 		return ServiceReceipt{}, false, ErrInput
 	}
 	receipt := ServiceReceipt{OperationID: r.OperationID, InstanceID: instance, OwnerRef: r.OwnerRef, Action: r.Action, Digest: digest, Status: "accepted", Code: "ACCEPTED", RequiresSecret: r.Params.Password != "", SnapshotName: r.Params.Name, CreatedAt: now}
-	if r.Params.SSHPublicKey != "" && !nodeproto.ValidGuestSSHKey(r.Params.SSHPublicKey) {
-		receipt.Status, receipt.Code = "rejected", "INVALID_SSH_PUBLIC_KEY"
-		return s.rejectService(ctx, receipt)
+	for _, key := range r.Params.Keys() {
+		if !nodeproto.ValidGuestSSHKey(key) {
+			receipt.Status, receipt.Code = "rejected", "INVALID_SSH_PUBLIC_KEY"
+			return s.rejectService(ctx, receipt)
+		}
 	}
 	if r.Action == "terminate" && r.Params.Confirmation != instance {
 		receipt.Status, receipt.Code = "rejected", "CONFIRMATION_REQUIRED"

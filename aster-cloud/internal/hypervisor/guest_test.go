@@ -76,7 +76,7 @@ func TestGuestMalformedSSHKeyCannotClaimAReinstallIntent(t *testing.T) {
 	m, f, task := guestFixture(t)
 	before, _ := m.Ledger.Instance(task.InstanceID)
 	commands := len(f.commands)
-	task = guestTask(m, task, "4", "reinstall", serviceapi.Params{ImageID: "ubuntu22", SSHPublicKey: "ssh-ed25519 AAAA"})
+	task = guestTask(m, task, "4", "reinstall", serviceapi.Params{ImageID: "ubuntu22", SSHPublicKeys: []string{"ssh-ed25519 AAAA"}})
 	raw, _ := json.Marshal(task)
 	if _, err := m.Accept(task, raw); err == nil {
 		t.Fatal("malformed key accepted")
@@ -261,7 +261,7 @@ func TestGuestReinstallFailureRollsBackWithoutDeletingOriginal(t *testing.T) {
 	i, _ := m.Ledger.Instance(task.InstanceID)
 	before, _ := os.Stat(i.Disk)
 	f.fail = "create"
-	r := submit(t, m, guestTask(m, task, "4", "reinstall", serviceapi.Params{ImageID: "ubuntu22", SSHPublicKey: m.Config.Network.SSHAuthorizedKeys[0]}))
+	r := submit(t, m, guestTask(m, task, "4", "reinstall", serviceapi.Params{ImageID: "ubuntu22", SSHPublicKeys: []string{m.Config.Network.SSHAuthorizedKeys[0]}}))
 	after, _ := os.Stat(i.Disk)
 	restored, _ := m.Ledger.Instance(i.ID)
 	if r.Status != "rejected" || r.Code != "REINSTALL_ROLLED_BACK" || !os.SameFile(before, after) || restored.State != "running" || restored.GuestChange != nil {
@@ -438,7 +438,7 @@ func TestGuestFailuresAreUncertainAndReplayNeverExecutes(t *testing.T) {
 				_ = submit(t, m, guestTask(m, task, "3", "rescue_enter", serviceapi.Params{ImageID: "ubuntu22"}))
 				f.fail = "destroy"
 			case "reinstall":
-				p = serviceapi.Params{ImageID: "ubuntu22", SSHPublicKey: m.Config.Network.SSHAuthorizedKeys[0]}
+				p = serviceapi.Params{ImageID: "ubuntu22", SSHPublicKeys: []string{m.Config.Network.SSHAuthorizedKeys[0]}}
 				f.fail = "start"
 			case "rescue_enter":
 				p.ImageID = "ubuntu22"

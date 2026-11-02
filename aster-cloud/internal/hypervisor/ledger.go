@@ -60,6 +60,13 @@ type Operation struct {
 	ErrorCode string               `json:"error_code,omitempty"`
 }
 
+// Operation embeds NodeTask (which carries a slice) so it is not == comparable.
+// Equal preserves the exact equality the old comparisons used.
+func (o Operation) Equal(x Operation) bool {
+	return o.Task.Equal(x.Task) && o.Result == x.Result &&
+		o.CreatedAt == x.CreatedAt && o.UpdatedAt == x.UpdatedAt && o.ErrorCode == x.ErrorCode
+}
+
 const maxJournalBytes = 64 << 20
 
 type journal struct {

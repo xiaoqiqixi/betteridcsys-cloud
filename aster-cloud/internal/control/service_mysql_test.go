@@ -248,7 +248,7 @@ func TestMySQLServiceRejectsMismatchedImageApprovalBeforeDispatch(t *testing.T) 
 func TestMySQLServiceMalformedSSHKeyIsDurablyRejectedBeforeDispatch(t *testing.T) {
 	s, c, _, v, now := readyService(t)
 	ctx := context.Background()
-	r := serviceapi.ActionRequest{Protocol: serviceapi.Protocol, OperationID: id(), OwnerRef: v.OwnerRef, Action: "reinstall", Params: serviceapi.Params{ImageID: v.Resources.ImageID, SSHPublicKey: "ssh-ed25519 AAAA"}}
+	r := serviceapi.ActionRequest{Protocol: serviceapi.Protocol, OperationID: id(), OwnerRef: v.OwnerRef, Action: "reinstall", Params: serviceapi.Params{ImageID: v.Resources.ImageID, SSHPublicKeys: []string{"ssh-ed25519 AAAA"}}}
 	receipt, replay, err := s.AdmitService(ctx, c, v.ID, r, now)
 	if err != nil || replay || receipt.Status != "rejected" || receipt.Code != "INVALID_SSH_PUBLIC_KEY" {
 		t.Fatal(receipt, replay, err)

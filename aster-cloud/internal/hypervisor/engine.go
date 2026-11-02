@@ -98,7 +98,7 @@ func (m *Manager) acceptGuest(task nodeproto.NodeTask, raw []byte, password stri
 		return nodeproto.NodeResult{}, nodeproto.ErrInvalid
 	}
 	decoded, err := nodeproto.DecodeTask(raw)
-	if err != nil || decoded != task {
+	if err != nil || !decoded.Equal(task) {
 		return nodeproto.NodeResult{}, nodeproto.ErrInvalid
 	}
 	if password != "" {

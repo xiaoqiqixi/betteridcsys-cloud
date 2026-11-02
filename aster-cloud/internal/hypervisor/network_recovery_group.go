@@ -38,7 +38,7 @@ func (m *Manager) prepareRecoveryGroup(profile string, original Operation, enabl
 		return nil, nil, errors.New("journal unavailable")
 	}
 	current, ok := l.state.Operations[original.Task.OperationID]
-	if !ok || current != original || original.Task.Network.ProfileID != profile || original.Task.Network.IsZero() {
+	if !ok || !current.Equal(original) || original.Task.Network.ProfileID != profile || original.Task.Network.IsZero() {
 		return nil, nil, ErrOwnership
 	}
 	members := map[string]Instance{}
@@ -207,7 +207,7 @@ func (l *Ledger) FinishNetworkRecovery(recoveryID string, ops []Operation, insta
 			return nil, ErrOwnership
 		}
 		now, ok := l.state.Operations[id]
-		if !ok || now != op {
+		if !ok || !now.Equal(op) {
 			return nil, ErrConflict
 		}
 		i, ok := members[op.Task.InstanceID]

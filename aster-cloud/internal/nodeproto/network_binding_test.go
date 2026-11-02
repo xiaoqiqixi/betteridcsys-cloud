@@ -20,7 +20,7 @@ func TestNetworkTaskExplicitVersionAndFrozenBinding(t *testing.T) {
 		t.Fatal(e)
 	}
 	got, e := DecodeTask(raw)
-	if e != nil || got != task {
+	if e != nil || !got.Equal(task) {
 		t.Fatal(got, e)
 	}
 	result := NodeResult{Protocol: NetworkProtocol, OperationID: task.OperationID, InstanceID: task.InstanceID, RequestSHA256: sha, Status: "accepted"}

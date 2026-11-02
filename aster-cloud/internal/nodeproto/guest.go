@@ -66,8 +66,13 @@ func (g GuestParams) Valid(action string) bool {
 	} else if p.Password != "" {
 		return false
 	}
-	if !p.Valid(action) || p.SSHPublicKey != "" && !ValidGuestSSHKey(p.SSHPublicKey) {
+	if !p.Valid(action) {
 		return false
+	}
+	for _, key := range p.Keys() {
+		if !ValidGuestSSHKey(key) {
+			return false
+		}
 	}
 	if action == "reinstall" || action == "rescue_enter" {
 		return digest.MatchString(g.ImageSHA256)
@@ -75,3 +80,11 @@ func (g GuestParams) Valid(action string) bool {
 	return g.ImageSHA256 == ""
 }
 func (t NodeTask) Redacted() NodeTask { t.Guest.Params = t.Guest.Params.Redacted(); return t }
+
+// GuestParams holds a slice (Params.SSHPublicKeys) so it is not == comparable.
+// IsZero and Equal preserve the exact checks the old == comparisons made.
+func (g GuestParams) IsZero() bool { return g.Equal(GuestParams{}) }
+
+func (g GuestParams) Equal(o GuestParams) bool {
+	return g.SecretSHA256 == o.SecretSHA256 && g.ImageSHA256 == o.ImageSHA256 && g.PasswordRequired == o.PasswordRequired && g.Params.Equal(o.Params)
+}

@@ -108,7 +108,7 @@ func (in OperationInput) valid(instance string) bool {
 		if !in.Guest.Valid(in.Action) || in.Guest.Params.Password != "" {
 			return false
 		}
-	} else if in.Guest != (nodeproto.GuestParams{}) {
+	} else if !in.Guest.IsZero() {
 		return false
 	}
 	if publicIPBindingAction(in.Action) || OperationPermission(in.Action) == "" || (in.Confirmation != "" && in.Confirmation != instance) || dangerous(in.Action) && in.Confirmation != instance {

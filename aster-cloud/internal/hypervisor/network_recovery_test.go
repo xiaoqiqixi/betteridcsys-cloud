@@ -75,7 +75,7 @@ func TestNetworkRecoveryAfterUncertainDoesNotRepeatCreate(t *testing.T) {
 	}
 	evidence, e := os.ReadFile(filepath.Join(m.Ledger.directory, "network-recovery-"+req.OperationID+".intent.json"))
 	var old networkRecoveryEvidence
-	if e != nil || json.Unmarshal(evidence, &old) != nil || old.Original.Result.Status != "uncertain" || old.Original.Task != task {
+	if e != nil || json.Unmarshal(evidence, &old) != nil || old.Original.Result.Status != "uncertain" || !old.Original.Task.Equal(task) {
 		t.Fatal("original uncertainty evidence discarded", e)
 	}
 }

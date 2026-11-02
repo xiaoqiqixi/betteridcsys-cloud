@@ -76,7 +76,7 @@ func TestOverlayRecoveryCompletesObservedPendingWithoutRepeatingLifecycle(t *tes
 			starts, defines := r.count(" start "), r.count(" define ")
 			stops := r.count(" shutdown ") + r.count(" destroy ")
 			prepareAndProgramRecovery(t, m, task)
-			if current, _ := m.Ledger.Query(old.Task.OperationID); current != old {
+			if current, _ := m.Ledger.Query(old.Task.OperationID); !current.Equal(old) {
 				t.Fatal("prepare/program completed node result before release")
 			}
 			release := phaseTask(task, "release")
@@ -90,17 +90,17 @@ func TestOverlayRecoveryCompletesObservedPendingWithoutRepeatingLifecycle(t *tes
 			if action == "shutdown" || action == "force_off" {
 				want = "shut off"
 			}
-			if current.Result.Status != "succeeded" || current.Task != old.Task || current.Result.RequestSHA256 != old.Result.RequestSHA256 || i.State != want || r.states[i.Domain] != want || i.Network != old.Task.Network || m.Ledger.HasPendingNetworkProfile(i.Network.ProfileID, "") {
+			if current.Result.Status != "succeeded" || !current.Task.Equal(old.Task) || current.Result.RequestSHA256 != old.Result.RequestSHA256 || i.State != want || r.states[i.Domain] != want || i.Network != old.Task.Network || m.Ledger.HasPendingNetworkProfile(i.Network.ProfileID, "") {
 				t.Fatal("original binding/result not converged exactly", current, i.State)
 			}
-			if action == "" && current != old {
+			if action == "" && !current.Equal(old) {
 				t.Fatal("drift recovery rewrote old completed operation")
 			}
 			if starts != r.count(" start ") || defines != r.count(" define ") || stops != r.count(" shutdown ")+r.count(" destroy ") {
 				t.Fatal("recovery repeated original VM lifecycle")
 			}
 			ev, raw, e := m.readOverlayRecovery(release)
-			if e != nil || len(raw) == 0 || len(ev.Instances) != 1 || action != "" && (len(ev.Operations) != 1 || ev.Operations[0] != old) {
+			if e != nil || len(raw) == 0 || len(ev.Instances) != 1 || action != "" && (len(ev.Operations) != 1 || !ev.Operations[0].Equal(old)) {
 				t.Fatal("old uncertainty evidence lost", e)
 			}
 			info, e := os.Stat(m.overlayRecoveryPath(task.SnapshotSHA256, "intent"))
@@ -150,7 +150,7 @@ func TestOverlayRecoveryRejectsUnobservedOrUnsupportedOriginalOutcome(t *testing
 				t.Fatal("unobserved lifecycle adopted", got, e)
 			}
 			current, _ := m.Ledger.Query(old.Task.OperationID)
-			if current != old || r.count(" start ") != starts || r.count(" destroy ")+r.count(" shutdown ") != stops {
+			if !current.Equal(old) || r.count(" start ") != starts || r.count(" destroy ")+r.count(" shutdown ") != stops {
 				t.Fatal("verification mutated original operation")
 			}
 		})
@@ -163,7 +163,7 @@ func TestOverlayRecoveryOrdinaryEpochCannotAdoptPending(t *testing.T) {
 	if got, e := m.ApplyOverlay(context.Background(), task); e == nil || got.Status == "succeeded" {
 		t.Fatal("ordinary epoch adopted uncertainty", got, e)
 	}
-	if current, _ := m.Ledger.Query(old.Task.OperationID); current != old {
+	if current, _ := m.Ledger.Query(old.Task.OperationID); !current.Equal(old) {
 		t.Fatal("ordinary epoch completed pending")
 	}
 }
@@ -263,7 +263,7 @@ func TestOverlayRecoveryFabricReceiptCannotBypassNodeDurableCompletion(t *testin
 					if e == nil || got.Status != "uncertain" {
 						t.Fatal("node failure advertised success", got, e)
 					}
-					if current, _ := m.Ledger.Query(old.Task.OperationID); current != old {
+					if current, _ := m.Ledger.Query(old.Task.OperationID); !current.Equal(old) {
 						t.Fatal("failed commit changed original result")
 					}
 					i, _ := m.Ledger.Instance(old.Task.InstanceID)

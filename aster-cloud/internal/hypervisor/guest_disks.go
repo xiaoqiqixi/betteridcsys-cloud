@@ -275,6 +275,15 @@ func (m *Manager) seedGuest(ctx context.Context, t nodeproto.NodeTask, i Instanc
 	}
 	quote := func(s string) string { b, _ := json.Marshal(s); return string(b) }
 	body := "#cloud-config\ndisable_root: false\ngrowpart:\n  mode: auto\n  devices: ['/']\nresize_rootfs: true\nusers:\n  - name: root\n    lock_passwd: false\n"
+	// SSH keys and a password may both be set. Authorize every provided key;
+	// password auth is enabled only when a password (or its hash) is set.
+	keys := t.Guest.Params.Keys()
+	if len(keys) > 0 {
+		body += "    ssh_authorized_keys:\n"
+		for _, key := range keys {
+			body += "      - " + quote(key) + "\n"
+		}
+	}
 	if t.Guest.Params.PasswordHash != "" {
 		if !serviceapi.ValidPasswordHash(t.Guest.Params.PasswordHash) {
 			return ErrUnsupported
@@ -295,7 +304,7 @@ func (m *Manager) seedGuest(ctx context.Context, t nodeproto.NodeTask, i Instanc
 		}
 		body += "    hashed_passwd: " + quote(value) + "\nssh_pwauth: true\n"
 	} else {
-		body += "    ssh_authorized_keys:\n      - " + quote(t.Guest.Params.SSHPublicKey) + "\nssh_pwauth: false\n"
+		body += "ssh_pwauth: false\n"
 	}
 	for name, value := range map[string]string{"user-data": body, "meta-data": "instance-id: " + quote(i.ID+"-"+t.OperationID) + "\nlocal-hostname: " + quote(i.Hostname) + "\n"} {
 		path := filepath.Join(i.Directory, name)

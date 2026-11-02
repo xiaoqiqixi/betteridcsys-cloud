@@ -42,6 +42,19 @@ type NodeTask struct {
 	Force bool `json:"force,omitempty"`
 }
 
+// NodeTask holds GuestParams (which carries a slice) so it is not == comparable.
+// Equal and IsZero preserve the exact equality the old comparisons used; every
+// field other than Guest is a comparable (scalar) struct.
+func (t NodeTask) IsZero() bool { return t.Equal(NodeTask{}) }
+
+func (t NodeTask) Equal(o NodeTask) bool {
+	return t.Guest.Equal(o.Guest) &&
+		t.TrafficControl == o.TrafficControl && t.DirectPublic == o.DirectPublic && t.Network == o.Network &&
+		t.Protocol == o.Protocol && t.OperationID == o.OperationID && t.NodeID == o.NodeID && t.Action == o.Action &&
+		t.InstanceID == o.InstanceID && t.OwnerRef == o.OwnerRef && t.Hostname == o.Hostname && t.Resources == o.Resources &&
+		t.ConfirmInstanceID == o.ConfirmInstanceID && t.Force == o.Force
+}
+
 type NodeResult struct {
 	Code          string              `json:"code,omitempty"`
 	Protocol      string              `json:"protocol"`
@@ -96,7 +109,7 @@ func (t NodeTask) Valid() bool {
 	if GuestAction(t.Action) {
 		return !t.Force && t.ConfirmInstanceID == "" && t.Guest.Valid(t.Action)
 	}
-	if t.Guest != (GuestParams{}) {
+	if !t.Guest.IsZero() {
 		return false
 	}
 	switch t.Action {
@@ -169,7 +182,7 @@ func DecodeTask(raw []byte) (NodeTask, error) {
 	if GuestAction(task.Action) {
 		allowed["guest"] = true
 		var guest GuestParams
-		if len(fields["guest"]) > 0 && (serviceapi.Decode(fields["guest"], &guest) != nil || guest != task.Guest) {
+		if len(fields["guest"]) > 0 && (serviceapi.Decode(fields["guest"], &guest) != nil || !guest.Equal(task.Guest)) {
 			return NodeTask{}, ErrInvalid
 		}
 	}

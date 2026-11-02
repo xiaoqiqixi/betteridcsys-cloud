@@ -19,7 +19,7 @@ func TestDirectPublicExplicitProtocolAndOldBytes(t *testing.T) {
 		t.Fatal(e)
 	}
 	out, e := DecodeTask(raw)
-	if e != nil || out != tsk {
+	if e != nil || !out.Equal(tsk) {
 		t.Fatal(e, string(raw))
 	}
 	for _, version := range []string{Protocol, NetworkProtocol} {

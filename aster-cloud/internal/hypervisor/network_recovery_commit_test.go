@@ -28,7 +28,7 @@ func TestNetworkRecoveryOldSuccessCannotAcknowledgeFailedNewCommit(t *testing.T)
 				t.Fatal("failed new commit returned success", out, err)
 			}
 			current, _ := m.Ledger.Query(task.OperationID)
-			if current != prior || len(m.Ledger.state.NetworkRecoveries) != 0 || m.Ledger.state.Schema != 3 || !m.Ledger.poisoned {
+			if !current.Equal(prior) || len(m.Ledger.state.NetworkRecoveries) != 0 || m.Ledger.state.Schema != 3 || !m.Ledger.poisoned {
 				t.Fatal("partial recovery state escaped failed atomic save")
 			}
 			resultPath := filepath.Join(m.Ledger.directory, "network-recovery-"+req.OperationID+".result.json")

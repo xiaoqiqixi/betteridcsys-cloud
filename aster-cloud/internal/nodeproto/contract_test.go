@@ -18,7 +18,7 @@ func TestExactContractAndDigest(t *testing.T) {
 		t.Fatal(e)
 	}
 	decoded, e := DecodeTask(raw)
-	if e != nil || decoded != task {
+	if e != nil || !decoded.Equal(task) {
 		t.Fatal(e, string(raw))
 	}
 	r := NodeResult{Protocol: Protocol, OperationID: task.OperationID, InstanceID: task.InstanceID, RequestSHA256: sha, Status: "accepted"}
