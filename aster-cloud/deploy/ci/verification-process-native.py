@@ -117,6 +117,36 @@ def phase_expiry(version, value):
     return manager.parse_rfc3339(value)
 
 
+def wait_owned_descendants(identities, require):
+    """Wait only for the process identities observed before our manager died."""
+    remaining = dict(identities)
+    deadline = time.monotonic()+30
+    while remaining:
+        for pid, started in list(remaining.items()):
+            try:
+                current = (Path('/proc')/pid/'stat').read_text().rsplit(')',1)[1].split()[19]
+            except FileNotFoundError:
+                current = None
+            if current != started:
+                del remaining[pid]
+                continue
+            # accept() made this fixture a subreaper. Orphans adopted after
+            # killing the manager remain visible as zombies until we reap
+            # them; polling /proc alone cannot prove they have disappeared.
+            # Never signal a descendant or wait for an unobserved/reused PID.
+            try:
+                reaped, status = os.waitpid(int(pid), os.WNOHANG)
+            except ChildProcessError:
+                continue  # still owned by its live parent, or already reaped
+            if reaped == int(pid):
+                require(os.WIFEXITED(status) or os.WIFSIGNALED(status),
+                        'VERIFICATION_PROCESS_MANAGED_HANDOFF')
+                del remaining[pid]
+        require(not remaining or time.monotonic()<deadline, 'VERIFICATION_PROCESS_MANAGED_HANDOFF')
+        if remaining:
+            time.sleep(.1)
+
+
 def accept_installed_handoff(inputs, operation, module, directory, version, expected_phase, require, progress):
     """Actual installed ELF + original approval + cleanup + private root channel.
 
@@ -454,18 +484,7 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
         process.kill()
         stdout,stderr = process.communicate(timeout=10)
         require(process.returncode==-signal.SIGKILL and not stdout and not stderr,code)
-        deadline = time.monotonic()+30
-        while identities:
-            for pid,started in list(identities.items()):
-                try:
-                    current = (Path('/proc')/pid/'stat').read_text().rsplit(')',1)[1].split()[19]
-                except FileNotFoundError:
-                    current = None
-                if current!=started:
-                    del identities[pid]
-            require(not identities or time.monotonic()<deadline,code)
-            if identities:
-                time.sleep(.1)
+        wait_owned_descendants(identities, require)
         stopped()
         require(target.prepare('target-verification-runtime-check')=={**expected,'root_inventory_verified':True} and
             system_command('target-verification-system-status')=={**prepared,'readonly':True},code)

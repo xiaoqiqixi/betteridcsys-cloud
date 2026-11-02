@@ -65,6 +65,52 @@ class VerificationRouteFormatContract(unittest.TestCase):
 
 
 class NativeFixtureContract(unittest.TestCase):
+    def test_manager_orphans_are_reaped_by_the_native_subreaper(self):
+        # accept() enables PR_SET_CHILD_SUBREAPER in this same guest process.
+        # An exited adopted child keeps its /proc entry until waitpid reaps it.
+        record = '123 (owned child) Z ' + '0 '*18 + '17'
+        reaped = False
+        def read_stat(path):
+            self.assertEqual(str(path), '/proc/123/stat')
+            if reaped:
+                raise FileNotFoundError
+            return record
+        def wait(pid, flags):
+            nonlocal reaped
+            self.assertEqual((pid, flags), (123, os.WNOHANG))
+            reaped = True
+            return pid, 0
+        def require(condition, code):
+            if not condition:
+                raise h.Refused(code)
+        with mock.patch.object(Path, 'read_text', read_stat), \
+                mock.patch.object(verification.os, 'waitpid', side_effect=wait) as reaper, \
+                mock.patch.object(verification.time, 'monotonic', side_effect=[0, 1, 31]), \
+                mock.patch.object(verification.time, 'sleep'):
+            verification.wait_owned_descendants({'123': '17'}, require)
+        reaper.assert_called_once_with(123, os.WNOHANG)
+
+    def test_manager_descendant_wait_does_not_reap_a_reused_pid(self):
+        record = '123 (other child) S ' + '0 '*18 + '18'
+        with mock.patch.object(Path, 'read_text', return_value=record), \
+                mock.patch.object(verification.os, 'waitpid') as reaper:
+            verification.wait_owned_descendants({'123': '17'}, self.assertTrue)
+        reaper.assert_not_called()
+
+    def test_live_manager_descendant_still_fails_the_original_deadline(self):
+        record = '123 (owned child) S ' + '0 '*18 + '17'
+        def require(condition, code):
+            if not condition:
+                raise h.Refused(code)
+        for result in ((0, 0), ChildProcessError()):
+            with self.subTest(result=result), \
+                    mock.patch.object(Path, 'read_text', return_value=record), \
+                    mock.patch.object(verification.os, 'waitpid', side_effect=result if isinstance(result, Exception) else None,
+                                      return_value=result), \
+                    mock.patch.object(verification.time, 'monotonic', side_effect=[0, 31]), \
+                    self.assertRaisesRegex(h.Refused, '^VERIFICATION_PROCESS_MANAGED_HANDOFF$'):
+                verification.wait_owned_descendants({'123': '17'}, require)
+
     def checks(self):
         names = ("ubuntu_at_least_22", "x86_64_host", "hardware_virtualization_flags", "dev_kvm_read_write",
                  "binary:/usr/bin/virsh", "binary:/usr/bin/qemu-img", "binary:/usr/bin/qemu-system-x86_64",
