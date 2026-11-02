@@ -23,6 +23,50 @@ def require(ok, code):
         raise RuntimeError(code)
 
 
+def check_verification_channel(binary):
+    # Real root socket/exec admission, without an archive or installed target.
+    # A valid private channel must reach archive refusal; malformed requests
+    # must stop at protocol admission. Neither case authorizes a service.
+    for malformed in (False, True):
+        with open(os.devnull, 'rb') as held:
+            before = os.fstat(3)
+            parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+            with parent, child:
+                child_fd = child.fileno()
+                def inherited_channel():
+                    if child_fd != 3:
+                        os.dup2(child_fd, 3)
+                        os.close(child_fd)
+                    os.set_inheritable(3, True)
+                process = subprocess.Popen([str(binary), 'migration-verification-coordinator'],
+                    pass_fds=tuple(sorted({3, child_fd})), preexec_fn=inherited_channel,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    cwd='/', env={'PATH': '/usr/bin:/bin', 'LANG': 'C'})
+                child.close()
+                try:
+                    request = {'schema': 1, 'operation_id': secrets.token_hex(16),
+                               'nonce': secrets.token_hex(32)}
+                    if malformed:
+                        request['unapproved'] = True
+                    parent.sendall((json.dumps(request, separators=(',', ':'))+'\n').encode())
+                    stdout, stderr = process.communicate(timeout=20)
+                    require(process.returncode == 1 and not stdout and len(stderr) <= 4096,
+                            'COORDINATOR_CHANNEL_OUTCOME')
+                    event = json.loads(stderr)
+                    expected = 'VERIFICATION_COORDINATOR_REQUEST' if malformed else 'VERIFICATION_LAUNCH_ARCHIVE'
+                    require(set(event) == {'time', 'level', 'msg', 'component', 'code'} and
+                            event['level'] == 'ERROR' and event['component'] == 'controller' and
+                            event['msg'] == 'aster_command_failed' and event['code'] == expected,
+                            'COORDINATOR_CHANNEL_ADMISSION')
+                    after = os.fstat(3)
+                    require((before.st_dev, before.st_ino) == (after.st_dev, after.st_ino),
+                            'COORDINATOR_PARENT_DESCRIPTOR_CHANGED')
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate(timeout=5)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
@@ -42,6 +86,8 @@ def main():
         exe = case / 'aster-controller'
         shutil.copyfile(binary, exe)
         exe.chmod(0o700)
+        check_verification_channel(exe)
+        checks.append('private_root_channel_reaches_archive_admission_and_rejects_unknown_fields')
         config_file = case / 'config.json'
         def private(path, data):
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)

@@ -34,6 +34,9 @@ UNIT_FAILURES |= set('TARGET_VERIFICATION_UNIT_VERIFY_UNCONFIRMED TARGET_VERIFIC
 LAUNCH_FAILURES = {'VERIFICATION_LAUNCH_' + stage for stage in
     ('INPUT', 'ARCHIVE', 'PLAN', 'HOST', 'SOURCE', 'RUNTIME', 'IMPORT', 'CONFIGURATION',
      'BINDING', 'CONTROLLER', 'TLS', 'EXECUTABLE', 'UI')}
+LAUNCH_FAILURES |= {'VERIFICATION_COORDINATOR_' + stage for stage in
+                    ('PEER', 'SOCKET', 'CONNECTION', 'REQUEST', 'PROOF')}
+LAUNCH_FAILURES |= {'CONTROLLER_MIGRATION_BUSY', 'CONTROLLER_MIGRATION_FENCED'}
 
 
 def launch_failure(raw):
@@ -46,6 +49,28 @@ def launch_failure(raw):
     except (ValueError, TypeError, UnicodeError):
         pass
     return 'TARGET_NATIVE_HANDOFF_PROOF_STREAM'
+
+
+def handoff_proof_record(process, stream, require):
+    try:
+        raw = stream.readline((256 << 10) + 2)
+    except TimeoutError:
+        require(False, 'TARGET_NATIVE_HANDOFF_PROOF_TIMEOUT')
+    except (OSError, ValueError):
+        # Linux may reset a socket when a refusing child closes it with the
+        # request unread. Its bounded error envelope still explains admission.
+        try:
+            _, stderr = process.communicate(timeout=20)
+        except subprocess.TimeoutExpired:
+            require(False, 'TARGET_NATIVE_HANDOFF_CHANNEL_RESET')
+        require(False, launch_failure(stderr))
+    if not raw:
+        _, stderr = process.communicate(timeout=20)
+        require(False, launch_failure(stderr))
+    require(raw.endswith(b'\n') and len(raw) <= (256 << 10) + 1 and process.poll() is None,
+            'TARGET_NATIVE_HANDOFF_PROOF_STREAM')
+    return raw
+
 
 def fixture_failure(raw):
     code = raw.decode('ascii', errors='replace').removesuffix('\n')
@@ -193,14 +218,7 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
         require(not list(inputs.glob('.restore-verify-*')), 'TARGET_NATIVE_HANDOFF_REFUSAL_CLEANUP')
 
     def proof_for(process, stream, nonce):
-        try:
-            raw = stream.readline((256 << 10) + 2)
-        except (OSError, ValueError):
-            require(False, 'TARGET_NATIVE_HANDOFF_PROOF_STREAM')
-        if not raw:
-            _, stderr = process.communicate(timeout=20)
-            require(False, launch_failure(stderr))
-        require(raw.endswith(b'\n') and len(raw) <= (256 << 10) + 1 and process.poll() is None, 'TARGET_NATIVE_HANDOFF_PROOF_STREAM')
+        raw = handoff_proof_record(process, stream, require)
         require(target.i.strict_json(raw) == {'schema':1,'nonce':nonce,'proof':expected}, 'TARGET_NATIVE_HANDOFF_PROOF_BINDING')
         # These are real root SQL and installed manifest checks, performed again
         # while Go holds the original target lock. No cached JSON permits start.

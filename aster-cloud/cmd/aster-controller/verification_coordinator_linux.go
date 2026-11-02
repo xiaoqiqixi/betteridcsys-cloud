@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -24,18 +25,22 @@ import (
 // FD 3 is an anonymous root-parent socket. Only the operation/nonce, freshly
 // rederived public proof and approved dedicated UID/GID cross it. Credentials,
 // paths and executable selectors are deliberately absent from this protocol.
-func verificationCoordinator() error {
+func verificationCoordinator() (result error) {
+	stage := "PEER"
+	defer func() {
+		if result != nil && stage != "" {
+			result = &verificationCoordinatorFailure{stage, result}
+		}
+	}()
 	peer, err := unix.GetsockoptUcred(3, unix.SOL_SOCKET, unix.SO_PEERCRED)
 	if os.Getuid() != 0 || os.Geteuid() != 0 || err != nil || peer.Uid != 0 || peer.Pid <= 1 || int(peer.Pid) != os.Getppid() {
 		return controllerbackup.ErrInvalid
 	}
-	for _, address := range []func(int) (unix.Sockaddr, error){unix.Getsockname, unix.Getpeername} {
-		value, err := address(3)
-		endpoint, ok := value.(*unix.SockaddrUnix)
-		if err != nil || !ok || endpoint.Name != "" {
-			return controllerbackup.ErrInvalid
-		}
+	stage = "SOCKET"
+	if !unnamedVerificationSocket(3) {
+		return controllerbackup.ErrInvalid
 	}
+	stage = "CONNECTION"
 	file := os.NewFile(3, "verification-manager")
 	connection, err := net.FileConn(file)
 	file.Close()
@@ -65,6 +70,7 @@ func verificationCoordinator() error {
 		encoded, err := json.Marshal(value)
 		return err == nil && bytes.Equal(raw, append(encoded, '\n'))
 	}
+	stage = "REQUEST"
 	var request struct {
 		Schema      int    `json:"schema"`
 		OperationID string `json:"operation_id"`
@@ -95,7 +101,9 @@ func verificationCoordinator() error {
 		_, _ = reader.Read(extra[:])
 	}()
 	var approvedDeadline time.Time
+	stage = "" // archive admission has its own bounded failure codes
 	err = controllerbackup.RunTargetVerification(ctx, request.OperationID, func(proof controllerbackup.TargetVerificationRuntimeReport) (controllerbackup.VerificationSystemIdentity, error) {
+		stage = "PROOF"
 		fail := func() (controllerbackup.VerificationSystemIdentity, error) {
 			return controllerbackup.VerificationSystemIdentity{}, controllerbackup.ErrInvalid
 		}
@@ -118,6 +126,7 @@ func verificationCoordinator() error {
 		if n, err := connection.Write(packet); err != nil || n != len(packet) {
 			return fail()
 		}
+		stage = "" // intentional acknowledgement refusals retain COMMAND_FAILED
 		var raw []byte
 		select {
 		case <-ctx.Done():
@@ -147,4 +156,23 @@ func verificationCoordinator() error {
 		return nil
 	}
 	return err
+}
+
+func unnamedVerificationSocket(fd int) bool {
+	kind, err := unix.GetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_TYPE)
+	if err != nil || kind != unix.SOCK_STREAM {
+		return false
+	}
+	for _, call := range []uintptr{unix.SYS_GETSOCKNAME, unix.SYS_GETPEERNAME} {
+		var address unix.RawSockaddrUnix
+		size := uint32(unix.SizeofSockaddrUnix)
+		_, _, errno := unix.Syscall(call, uintptr(fd), uintptr(unsafe.Pointer(&address)), uintptr(unsafe.Pointer(&size)))
+		// x/sys renders an unnamed socket pair as "@", which also describes
+		// some abstract addresses. Only the kernel's family-only length proves
+		// that neither endpoint has a pathname or an abstract address.
+		if errno != 0 || address.Family != unix.AF_UNIX || size != uint32(unsafe.Offsetof(address.Path)) {
+			return false
+		}
+	}
+	return true
 }

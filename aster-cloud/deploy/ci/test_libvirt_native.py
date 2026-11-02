@@ -128,7 +128,7 @@ class NativeFixtureContract(unittest.TestCase):
     def test_handoff_failure_codes_are_bounded_without_private_diagnostics(self):
         metadata = {**self.metadata(), 'scenario': 'controller-restore-configuration'}
         for suffix in ('REFUSAL_EXIT', 'REFUSAL_LOG', 'REFUSAL_CLEANUP',
-                       'PROOF_STREAM', 'PROOF_BINDING', 'PROOF_SCRATCH'):
+                       'PROOF_STREAM', 'PROOF_BINDING', 'PROOF_SCRATCH', 'PROOF_TIMEOUT', 'CHANNEL_RESET'):
             code = 'TARGET_NATIVE_HANDOFF_' + suffix
             result = {**self.metadata(), 'schema': 1, 'passed': False, 'kvm_ready': False,
                       'code': code, 'phase': 'target-verification-managed-handoff-refusal',
@@ -151,6 +151,25 @@ class NativeFixtureContract(unittest.TestCase):
                     json.dumps({**event, 'stderr': 'PRIVATE_ERROR'}).encode(),
                     json.dumps({**event, 'component': 'foreign'}).encode()):
             self.assertEqual(guest.launch_failure(raw), 'TARGET_NATIVE_HANDOFF_PROOF_STREAM')
+
+    def test_reset_handoff_retains_only_the_bounded_child_refusal(self):
+        event = {'time': 'PRIVATE_TIME', 'level': 'ERROR', 'component': 'controller',
+                 'msg': 'aster_command_failed', 'code': 'VERIFICATION_COORDINATOR_REQUEST'}
+        def require(condition, code):
+            if not condition:
+                raise h.Refused(code)
+        for stream in (io.BytesIO(), mock.Mock(readline=mock.Mock(side_effect=ConnectionResetError))):
+            process = mock.Mock(communicate=mock.Mock(return_value=(b'', json.dumps(event).encode())))
+            with self.assertRaisesRegex(h.Refused, '^VERIFICATION_COORDINATOR_REQUEST$'):
+                verification.handoff_proof_record(process, stream, require)
+            process.communicate.assert_called_once_with(timeout=20)
+        stream = mock.Mock(readline=mock.Mock(side_effect=TimeoutError))
+        with self.assertRaisesRegex(h.Refused, '^TARGET_NATIVE_HANDOFF_PROOF_TIMEOUT$'):
+            verification.handoff_proof_record(mock.Mock(), stream, require)
+        process = mock.Mock(communicate=mock.Mock(side_effect=subprocess.TimeoutExpired('private', 20)))
+        stream = mock.Mock(readline=mock.Mock(side_effect=ConnectionResetError))
+        with self.assertRaisesRegex(h.Refused, '^TARGET_NATIVE_HANDOFF_CHANNEL_RESET$'):
+            verification.handoff_proof_record(process, stream, require)
 
     def test_verification_failure_reports_preserve_fixed_diagnostics_not_private_text(self):
         metadata = {**self.metadata(), 'scenario': 'controller-restore-configuration'}
