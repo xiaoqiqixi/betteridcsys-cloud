@@ -517,6 +517,7 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
     require(not unit.exists() and not unit_state.exists(),code)
     foreign_unit = b'[Unit]\nDescription=Fixture owned foreign verification unit\n[Service]\nExecStart=/bin/false\n'
     target.i.write_new(unit,foreign_unit,0o644)
+    progress('target-verification-systemd-foreign-refusal')
     try:
         result = subprocess.run(['/usr/bin/python3','-I',str(entry),'target-verification-start','--operation',operation],
             stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
@@ -541,23 +542,28 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
             except (ConnectionRefusedError,TimeoutError):
                 time.sleep(.2)
     try:
+        progress('target-verification-systemd-start')
         start = unit_command('target-verification-start')
         require(start=={'schema':1,'operation_id':operation,'unit':name,'start_requested':True,
             'unit_state':start['unit_state'],'http_readiness_verified':False,'migration_ready':False},code)
+        progress('target-verification-systemd-http-ready')
         state = wait_unit_http()
         require(state['main_pid']>0 and state['readonly'] is True and
             state['http_readiness_verified'] is False and state['migration_ready'] is False,code)
         original_unit,original_receipt = unit.read_bytes(),(unit_state/'unit.json').read_bytes()
+        progress('target-verification-systemd-stop-drain')
         stopped_report = unit_command('target-verification-stop')
         expected_stopped = {'schema':1,'operation_id':operation,'unit_stopped':True,'processes_drained':True,
             'sql_connections_drained':True,'original_data_phase_verified':True,'root_inventory_verified':True,
             'target_remains_sealed':True,'migration_ready':False}
         require(stopped_report==expected_stopped,code)
         stopped()
+        progress('target-verification-systemd-inactive')
         require(unit_command('target-verification-service-status')['unit_state']=='inactive' and
             unit.read_bytes()==original_unit and (unit_state/'unit.json').read_bytes()==original_receipt,code)
         # Owned stopped fixture only: status must reject drift without repairing
         # or running the changed unit. Restore exact bytes before any new start.
+        progress('target-verification-systemd-drift-refused')
         changed = original_unit.replace(b'Restart=no\n',b'Restart=always\n')
         unit.write_bytes(changed)
         try:
@@ -572,8 +578,10 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
             manager.run(['/usr/bin/systemctl','daemon-reload'])
         # An explicit same-operation start reauthenticates all inputs, retaining
         # the original deadline and runtime receipt. No restart policy is used.
+        progress('target-verification-systemd-restart')
         require(unit_command('target-verification-start')['start_requested'] is True,code)
         wait_unit_http()
+        progress('target-verification-systemd-kill-failed')
         manager.run(['/usr/bin/systemctl','kill','--kill-who=main','--signal=KILL','--',name])
         deadline = time.monotonic()+30
         while True:
@@ -583,8 +591,10 @@ def accept_installed_handoff(inputs, operation, module, directory, version, expe
             require(time.monotonic()<deadline,code)
             time.sleep(.2)
         stopped()
+        progress('target-verification-systemd-final-stop')
         require((unit_state/'unit.json').read_bytes()==original_receipt and
             unit_command('target-verification-stop')==expected_stopped,code)
+        progress('target-verification-systemd-runtime-check')
         require(target.prepare('target-verification-runtime-check')=={**expected,'root_inventory_verified':True},code)
     finally:
         # Clean up only through the product ownership/identity checks. Unknown

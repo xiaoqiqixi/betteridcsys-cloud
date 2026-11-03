@@ -128,6 +128,9 @@ GUEST_ERROR_CODES |= set('TARGET_VERIFICATION_DATA_ALREADY_STARTED TARGET_VERIFI
 
 GUEST_ERROR_CODES |= set('TARGET_VERIFICATION_SERVICE_CONNECTIONS_NOT_DRAINED TARGET_VERIFICATION_SERVICE_UNCONFIRMED TARGET_VERIFICATION_UNIT_ALREADY_ACTIVE TARGET_VERIFICATION_UNIT_BINDING_CHANGED TARGET_VERIFICATION_UNIT_BYTES_CHANGED TARGET_VERIFICATION_UNIT_CGROUP_UNCONFIRMED TARGET_VERIFICATION_UNIT_FOREIGN TARGET_VERIFICATION_UNIT_INPUT_REJECTED TARGET_VERIFICATION_UNIT_MISSING TARGET_VERIFICATION_UNIT_NOT_OWNED TARGET_VERIFICATION_UNIT_PROCESS_UNCONFIRMED TARGET_VERIFICATION_UNIT_SETTINGS_CHANGED TARGET_VERIFICATION_UNIT_STATE_UNCONFIRMED TARGET_VERIFICATION_UNIT_STATE_UNSAFE'.split())
 GUEST_PHASES |= {'target-verification-systemd-lifecycle'}
+# Fine-grained sub-steps of the systemd lifecycle so a failure is localized to
+# one step from public progress alone; labels are fixed and carry no secrets.
+GUEST_PHASES |= set('target-verification-systemd-foreign-refusal target-verification-systemd-start target-verification-systemd-http-ready target-verification-systemd-stop-drain target-verification-systemd-inactive target-verification-systemd-drift-refused target-verification-systemd-restart target-verification-systemd-kill-failed target-verification-systemd-final-stop target-verification-systemd-runtime-check'.split())
 
 GUEST_ERROR_CODES |= set('TARGET_VERIFICATION_UNIT_VERIFY_UNCONFIRMED TARGET_VERIFICATION_UNIT_RELOAD_UNCONFIRMED TARGET_VERIFICATION_UNIT_START_UNCONFIRMED TARGET_VERIFICATION_UNIT_STOP_UNCONFIRMED'.split())
 
