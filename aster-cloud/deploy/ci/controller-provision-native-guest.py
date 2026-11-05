@@ -811,8 +811,9 @@ def execute(metadata):
         module.mysql_sql(directory,"UPDATE `"+database+"`.controller_nodes SET datacenter_id=CONVERT(0xE9A699E6B8AF USING utf8mb4) WHERE id='node-a';\n")
         require(json.loads(entry('target-verification-data-status').stdout)==phase_readonly)
         (inputs/'verification-data-approval.json').write_bytes(json.dumps({**phase_approval,'account_receipt_sha256':'0'*64},separators=(',',':')).encode())
-        entry('target-verification-data-status','TARGET_COMMAND_REJECTED')
-        entry('target-verification-runtime-check','TARGET_COMMAND_REJECTED')
+        # Root rejects a tampered approval itself, by name, before any Go call.
+        entry('target-verification-data-status','TARGET_VERIFICATION_DATA_APPROVAL_CHANGED')
+        entry('target-verification-runtime-check','TARGET_VERIFICATION_DATA_APPROVAL_CHANGED')
         require(sha(phase_intent)==phase_hash)
         (inputs/'verification-data-approval.json').write_bytes(phase_approval_raw)
         module.mysql_sql(directory,'SET GLOBAL super_read_only=ON;\n')

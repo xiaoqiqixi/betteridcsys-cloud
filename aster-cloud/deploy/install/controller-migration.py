@@ -55,6 +55,23 @@ def digest(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
+# Field order of controllerbackup.TargetVerificationPlan and
+# identity.VerificationSQLPolicy, exactly as Go's json.Marshal emits them.
+VERIFICATION_PLAN_FIELDS = ('schema','protocol','controller_id','operation_id','target_plan_sha256',
+                            'configuration_plan_sha256','configuration_intent_sha256','session_intent_sha256',
+                            'console_origin','listen','sql')
+VERIFICATION_SQL_FIELDS = ('database','user','grants')
+
+
+def verification_plan_digest(value):
+    """Digest of the plan as the controller published it. Rebuild Go's field
+    order first: receipts written with sort_keys reorder keys on disk, and a
+    plan read back from such a receipt must still match its original digest."""
+    ordered = {k: value[k] for k in VERIFICATION_PLAN_FIELDS}
+    ordered['sql'] = {k: value['sql'][k] for k in VERIFICATION_SQL_FIELDS}
+    return digest(json.dumps(ordered,ensure_ascii=False,separators=(',',':')).encode())
+
+
 def parse_rfc3339(value):
     """Parse Go RFC3339Nano on Python 3.10; truncate, never round expiry up."""
     match = re.fullmatch(
@@ -97,7 +114,10 @@ def verification_unit_properties(value, name, fragment):
                 'UnitFileState':'static'}
     require(all(value.get(key)==item for key,item in expected.items()) and
             value.get('Names','').split()==[name] and
-            all(value.get(key)=='' for key in ('DropInPaths','ExecStop','ExecStopPost','ExecStartPre',
+            # systemd 255 (Ubuntu 24.04) omits unset exec/environment properties
+            # from `systemctl show`; older releases print them empty. Both mean
+            # "not configured". A present non-empty value is still refused.
+            all(value.get(key,'')=='' for key in ('DropInPaths','ExecStop','ExecStopPost','ExecStartPre',
                 'ExecStartPost','ExecCondition','ExecReload','EnvironmentFiles','SupplementaryGroups',
                 'RootDirectory','RootImage')) and value.get('ControlPID')=='0',
             'TARGET_VERIFICATION_UNIT_SETTINGS_CHANGED')
@@ -1525,7 +1545,7 @@ class Target(Host):
                   'GRANT INSERT, UPDATE, DELETE ON ' + table + '`controller_console_login_limits` TO ' + account,
                   'GRANT INSERT (`actor`, `action`, `target`, `created_at`) ON ' + table + '`controller_identity_audit` TO ' + account]
         require(value['sql'] == {'database':database,'user':user,'grants':grants} and
-                plan_sha == digest(json.dumps(value,ensure_ascii=False,separators=(',',':')).encode()),
+                plan_sha == verification_plan_digest(value),
                 'TARGET_VERIFICATION_SQL_POLICY_CHANGED')
 
     def verify_verification_data(self, result, plan, database_plan, *, readonly):

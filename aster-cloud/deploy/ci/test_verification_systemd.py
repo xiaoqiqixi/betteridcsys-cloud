@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """systemd unit wire contract; no system services are changed by these tests."""
 import importlib.util
+import json
 from pathlib import Path
 import unittest
 
@@ -39,6 +40,30 @@ class VerificationUnitContract(unittest.TestCase):
                 with self.assertRaises(manager.Refused):
                     manager.verification_unit_bytes(operation,version,nonce)
 
+    def test_plan_digest_survives_sorted_receipt_round_trip(self):
+        # Exactly what Go's json.Marshal(TargetVerificationPlan) emits; its digest
+        # is the plan_sha256 the controller publishes.
+        go_raw = (b'{"schema":1,"protocol":"aster.controller-verification-plan/1","controller_id":"ctrl-1",'
+                  b'"operation_id":"'+self.operation.encode()+b'","target_plan_sha256":"a",'
+                  b'"configuration_plan_sha256":"b","configuration_intent_sha256":"c","session_intent_sha256":"d",'
+                  b'"console_origin":"https://console.example","listen":"127.0.0.1:9555",'
+                  b'"sql":{"database":"db","user":"u","grants":["g1","g2"]}}')
+        published = manager.digest(go_raw)
+        plan = json.loads(go_raw)
+        self.assertEqual(manager.verification_plan_digest(plan), published)
+        # The start receipt is written with sort_keys and read back reordered.
+        reordered = json.loads(json.dumps(plan, sort_keys=True))
+        self.assertNotEqual(list(reordered), list(plan))
+        self.assertEqual(manager.verification_plan_digest(reordered), published)
+        # Any content change still changes the digest.
+        for key, bad in (('listen','0.0.0.0:9555'),('controller_id','other')):
+            with self.subTest(key=key):
+                self.assertNotEqual(manager.verification_plan_digest({**plan, key: bad}), published)
+        self.assertNotEqual(manager.verification_plan_digest({**plan, 'sql': {**plan['sql'], 'grants': ['g1']}}), published)
+        # Missing fields are rejected rather than hashed as a partial plan.
+        with self.assertRaises(KeyError):
+            manager.verification_plan_digest({k: v for k, v in plan.items() if k != 'listen'})
+
     def test_effective_systemd_properties_reject_privilege_restart_and_stop_overrides(self):
         name='aster-target-verification-'+self.operation+'.service'
         fragment='/run/systemd/system/'+name
@@ -63,6 +88,21 @@ class VerificationUnitContract(unittest.TestCase):
             manager.verification_unit_properties({**value,'ActiveState':'active'},name,fragment)
         with self.assertRaises(manager.Refused):
             manager.verification_unit_properties({**value,'MainPID':'01'},name,fragment)
+        # systemd 255 (Ubuntu 24.04) omits unset exec/environment properties
+        # instead of printing them empty; that is still "not configured".
+        unset=('ExecStop','ExecStopPost','ExecStartPre','ExecStartPost','ExecCondition',
+               'ExecReload','EnvironmentFiles')
+        omitted={k:v for k,v in value.items() if k not in unset}
+        self.assertEqual(manager.verification_unit_properties(omitted,name,fragment),0)
+        for key in unset:
+            with self.subTest(present=key):
+                with self.assertRaises(manager.Refused):
+                    manager.verification_unit_properties({**omitted,key:'/bin/sh'},name,fragment)
+        # Required identity/safety properties may never be silently absent.
+        for key in ('User','Restart','KillMode','NoNewPrivileges','ControlPID','Names'):
+            with self.subTest(absent=key):
+                with self.assertRaises(manager.Refused):
+                    manager.verification_unit_properties({k:v for k,v in value.items() if k!=key},name,fragment)
 
 
 if __name__=='__main__':
